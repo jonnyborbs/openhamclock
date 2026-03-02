@@ -101,16 +101,13 @@ export const ContestPanel = ({ data, loading }) => {
     const end = new Date(contest.end);
 
     if (now >= start && now <= end) {
-      // Contest is live - show time remaining
+      // Contest is live - show time remaining (always include hours for readability)
       const hoursLeft = Math.floor((end - now) / (1000 * 60 * 60));
       const minsLeft = Math.floor(((end - now) % (1000 * 60 * 60)) / (1000 * 60));
-      if (hoursLeft > 0) {
-        return t('contest.panel.time.live.hoursMinutes', {
-          hours: hoursLeft,
-          minutes: minsLeft,
-        });
-      }
-      return t('contest.panel.time.live.minutes', { minutes: minsLeft });
+      return t('contest.panel.time.live.hoursMinutes', {
+        hours: hoursLeft,
+        minutes: minsLeft,
+      });
     } else if (now < start) {
       // Contest hasn't started
       const hoursUntil = Math.floor((start - now) / (1000 * 60 * 60));
