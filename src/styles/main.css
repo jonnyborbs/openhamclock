@@ -704,6 +704,10 @@ body::before {
   animation: wspr-marker-pulse 2s ease-in-out infinite;
 }
 
+.wspr-panel-content {
+  padding: 10px;
+}
+
 /* Control panel transitions */
 .wspr-filter-control,
 .wspr-stats,
@@ -716,7 +720,7 @@ body::before {
 .wspr-stats:hover,
 .wspr-legend:hover,
 .wspr-chart:hover {
-  transform: translateY(-2px);
+  /* transform: translateY(-2px); */
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
 }
 

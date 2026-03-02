@@ -32,7 +32,22 @@ function clampToViewport(el, margin = 40) {
   el.style.top = top + 'px';
 }
 
-export function makeDraggable(el, storageKey, skipPositionLoad = false) {
+/**
+ * Helper for snapping to a grid
+ */
+function snapToGrid(value, gridSize) {
+  if (!gridSize) return value;
+  return Math.round(value / gridSize) * gridSize;
+}
+
+export function makeDraggable(
+  el,
+  storageKey,
+  {
+    skipPositionLoad = false,
+    snap = 0, // pixels; 0 disables snapping
+  } = {},
+) {
   if (!el) return;
 
   // Cancel any previous listeners for this storageKey (e.g. after layout change)
@@ -162,11 +177,16 @@ export function makeDraggable(el, storageKey, skipPositionLoad = false) {
     'mousemove',
     (e) => {
       if (!isDragging) return;
-      if (!didDrag && (Math.abs(e.clientX - startX) > 2 || Math.abs(e.clientY - startY) > 2)) {
-        didDrag = true;
-      }
-      el.style.left = startLeft + (e.clientX - startX) + 'px';
-      el.style.top = startTop + (e.clientY - startY) + 'px';
+
+      let nextLeft = startLeft + (e.clientX - startX);
+      let nextTop = startTop + (e.clientY - startY);
+
+      // Snap to grid if enabled
+      nextLeft = snapToGrid(nextLeft, snap);
+      nextTop = snapToGrid(nextTop, snap);
+
+      el.style.left = nextLeft + 'px';
+      el.style.top = nextTop + 'px';
     },
     { signal },
   );
@@ -174,15 +194,18 @@ export function makeDraggable(el, storageKey, skipPositionLoad = false) {
   // --- Mouseup: stop drag, clamp, save ---
   document.addEventListener(
     'mouseup',
-    () => {
+    (e) => {
       if (!isDragging) return;
       isDragging = false;
       el.style.opacity = '1';
-      el.style.transition = previousTransition;
-      updateCursor();
+      updateCursor(e);
       suppressClick = didDrag;
 
-      // Clamp so element can't be lost off-screen
+      if (snap) {
+        el.style.left = snapToGrid(el.offsetLeft, snap) + 'px';
+        el.style.top = snapToGrid(el.offsetTop, snap) + 'px';
+      }
+
       clampToViewport(el);
 
       const topPercent = (el.offsetTop / window.innerHeight) * 100;

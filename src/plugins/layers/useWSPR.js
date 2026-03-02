@@ -402,7 +402,6 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         const container = L.DomUtil.create('div', 'wspr-filter-control');
         container.style.cssText = `
           background: var(--bg-panel);
-          padding: 12px;
           border-radius: 5px;
           font-family: 'JetBrains Mono', monospace;
           font-size: 11px;
@@ -410,11 +409,11 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
           border: 1px solid var(--border-color);
           box-shadow: 0 2px 8px rgba(0,0,0,0.3);
           min-width: 180px;
+          // margin: 0;
         `;
 
         container.innerHTML = `
-          <div style="font-family: 'JetBrains Mono', monospace; font-weight: 700; margin-bottom: 8px; font-size: 13px; color: #00b4ff;">🎛️ Filters</div>
-
+          <div style="font-family: 'JetBrains Mono', monospace; font-weight: 700; margin: 0; padding: 10px; font-size: 13px; color: #00b4ff;">🎛️ Filters</div>
           <div style="margin-bottom: 8px;">
             <label style="display: block; margin-bottom: 3px;">Band:</label>
             <select id="wspr-band-filter" style="width: 100%; padding: 4px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 3px;">
@@ -524,7 +523,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
           } catch (e) {}
         }
 
-        makeDraggable(container, 'wspr-filter-position');
+        makeDraggable(container, 'wspr-filter-position', { snap: 5 });
         addMinimizeToggle(container, 'wspr-filter-position', {
           contentClassName: 'wspr-panel-content',
           buttonClassName: 'wspr-minimize-btn',
@@ -597,7 +596,6 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         const div = L.DomUtil.create('div', 'wspr-stats');
         div.style.cssText = `
           background: var(--bg-panel);
-          padding: 12px;
           border-radius: 5px;
           font-family: 'JetBrains Mono', monospace;
           font-size: 11px;
@@ -605,9 +603,10 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
           border: 1px solid var(--border-color);
           box-shadow: 0 2px 8px rgba(0,0,0,0.3);
           min-width: 160px;
+          // margin: 0;
         `;
         div.innerHTML = `
-          <div style="font-family: 'JetBrains Mono', monospace; font-weight: 700; margin-bottom: 6px; font-size: 13px; color: #00b4ff;">📊 WSPR Activity</div>
+          <div style="font-family: 'JetBrains Mono', monospace; font-weight: 700; margin: 0; padding: 10px; font-size: 13px; color: #00b4ff;">📊 WSPR Activity</div>
           <div style="margin-bottom: 8px; padding: 6px; background: var(--bg-tertiary); border-radius: 3px;">
             <div style="font-size: 10px; opacity: 0.8; margin-bottom: 2px;">Propagation Score</div>
             <div style="font-size: 18px; font-weight: bold; color: var(--text-muted);">--/100</div>
@@ -648,7 +647,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
           } catch (e) {}
         }
 
-        makeDraggable(container, 'wspr-stats-position');
+        makeDraggable(container, 'wspr-stats-position', { snap: 5 });
         addMinimizeToggle(container, 'wspr-stats-position', {
           contentClassName: 'wspr-panel-content',
           buttonClassName: 'wspr-minimize-btn',
@@ -663,16 +662,16 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         const div = L.DomUtil.create('div', 'wspr-legend');
         div.style.cssText = `
           background: var(--bg-panel);
-          padding: 10px;
           border-radius: 5px;
           font-family: 'JetBrains Mono', monospace;
           font-size: 11px;
           color: var(--text-primary);
           border: 1px solid var(--border-color);
           box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+          // margin: 0;
         `;
         div.innerHTML = `
-          <div style="font-family: 'JetBrains Mono', monospace; font-weight: 700; margin-bottom: 5px; font-size: 13px; color: #00b4ff;">📡 Signal Strength</div>
+          <div style="font-family: 'JetBrains Mono', monospace; font-weight: 700; margin: 0; padding: 10px; font-size: 13px; color: #00b4ff;">📡 Signal Strength</div>
           <div><span style="color: var(--accent-green);">●</span> Excellent (&gt; 5 dB)</div>
           <div><span style="color: var(--accent-green-dim);">●</span> Good (0 to 5 dB)</div>
           <div><span style="color: var(--accent-amber);">●</span> Moderate (-10 to 0 dB)</div>
@@ -685,6 +684,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         return div;
       },
     });
+
     const legend = new LegendControl();
     map.addControl(legend);
     legendControlRef.current = legend;
@@ -706,7 +706,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
           } catch (e) {}
         }
 
-        makeDraggable(container, 'wspr-legend-position');
+        makeDraggable(container, 'wspr-legend-position', { snap: 5 });
         addMinimizeToggle(container, 'wspr-legend-position', {
           contentClassName: 'wspr-panel-content',
           buttonClassName: 'wspr-minimize-btn',
@@ -721,7 +721,6 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         const div = L.DomUtil.create('div', 'wspr-chart');
         div.style.cssText = `
           background: var(--bg-panel);
-          padding: 10px;
           border-radius: 5px;
           font-family: 'JetBrains Mono', monospace;
           font-size: 10px;
@@ -729,9 +728,10 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
           border: 1px solid var(--border-color);
           box-shadow: 0 2px 8px rgba(0,0,0,0.3);
           min-width: 160px;
+          // margin: 0;
         `;
         div.innerHTML =
-          '<div style="font-family: \'JetBrains Mono\', monospace; font-weight: 700; margin-bottom: 6px; font-size: 13px; color: #00b4ff;">📊 Band Activity</div><div style="opacity: 0.7;">Loading...</div>';
+          '<div style="font-family: \'JetBrains Mono\', monospace; font-weight: 700; margin: 0; padding: 10px; font-size: 13px; color: #00b4ff;">📊 Band Activity</div><div style="opacity: 0.7;">Loading...</div>';
 
         // Prevent map interaction when clicking/dragging on this control
         L.DomEvent.disableClickPropagation(div);
@@ -762,7 +762,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
           } catch (e) {}
         }
 
-        makeDraggable(container, 'wspr-chart-position');
+        makeDraggable(container, 'wspr-chart-position', { snap: 5 });
         addMinimizeToggle(container, 'wspr-chart-position', {
           contentClassName: 'wspr-panel-content',
           buttonClassName: 'wspr-minimize-btn',
