@@ -2074,10 +2074,10 @@ const fetchFromHelioviewer = async (type, timeoutMs = 20000) => {
   const layers = HELIO_LAYERS[type];
   if (!layers) throw new Error(`No Helioviewer layer config for ${type}`);
   const now = new Date().toISOString().replace(/\.\d+Z/, 'Z');
-  // imageScale 4.84 gives ~256px solar disk; display=true returns PNG directly
+  // imageScale 9.6 arcsec/px: full solar disk ~200px in 256px frame, matching SDO latest_256 framing
   const url =
     `https://api.helioviewer.org/v2/takeScreenshot/?` +
-    `date=${now}&imageScale=4.84088` +
+    `date=${now}&imageScale=9.6` +
     `&layers=${encodeURIComponent(layers)}` +
     `&events=&eventLabels=false&display=true&watermark=false` +
     `&width=256&height=256&x0=0&y0=0`;
