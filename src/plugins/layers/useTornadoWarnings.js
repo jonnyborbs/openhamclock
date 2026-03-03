@@ -111,8 +111,11 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null, lowMemory
       try {
         // Fetch active tornado-related alerts
         // NWS API returns GeoJSON FeatureCollection
-        const eventParam = TORNADO_EVENTS.map((e) => encodeURIComponent(e)).join(',');
-        const response = await fetch(`https://api.weather.gov/alerts/active?event=${eventParam}&limit=${MAX_ALERTS}`, {
+        // NWS expects separate event= params for each event type
+        const params = new URLSearchParams();
+        TORNADO_EVENTS.forEach((e) => params.append('event', e));
+        params.append('limit', MAX_ALERTS);
+        const response = await fetch(`https://api.weather.gov/alerts/active?${params.toString()}`, {
           headers: {
             'User-Agent': 'OpenHamClock (https://github.com/accius/openhamclock)',
             Accept: 'application/geo+json',

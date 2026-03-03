@@ -51,6 +51,9 @@ export const RigProvider = ({ children, rigConfig }) => {
 
     let eventSource = null;
     let retryTimeout = null;
+    let retryDelay = 5000; // Start at 5s, exponential backoff
+    const MAX_RETRY_DELAY = 300000; // Cap at 5 minutes
+    let failCount = 0;
 
     const connectSSE = () => {
       // Construct URL from config or default
@@ -62,6 +65,8 @@ export const RigProvider = ({ children, rigConfig }) => {
       eventSource.onopen = () => {
         // console.log('[RigContext] SSE Connected');
         setError(null);
+        retryDelay = 5000; // Reset backoff on successful connect
+        failCount = 0;
       };
 
       eventSource.onmessage = (event) => {
@@ -91,13 +96,19 @@ export const RigProvider = ({ children, rigConfig }) => {
       };
 
       eventSource.onerror = (err) => {
-        // console.error('[RigContext] SSE Error', err);
         eventSource.close();
         setRigState((prev) => ({ ...prev, connected: false }));
         setError('Connection lost');
+        failCount++;
 
-        // Retry in 5s
-        retryTimeout = setTimeout(connectSSE, 5000);
+        // Only log first failure and periodic reminders
+        if (failCount === 1) {
+          console.warn(`[RigContext] rig-bridge not reachable at ${rigUrl} — will retry with backoff`);
+        }
+
+        // Exponential backoff: 5s → 10s → 20s → 40s → ... → 5min cap
+        retryTimeout = setTimeout(connectSSE, retryDelay);
+        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
       };
     };
 
