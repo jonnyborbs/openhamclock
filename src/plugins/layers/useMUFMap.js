@@ -298,19 +298,10 @@ export function useLayer({ map, enabled, opacity }) {
       onAdd: function () {
         const panelWrapper = L.DomUtil.create('div', 'panel-wrapper');
         const container = L.DomUtil.create('div', 'muf-map-control', panelWrapper);
-        container.style.cssText = `
-          background: var(--bg-panel);
-          border-radius: 5px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--text-primary);
-          border: 1px solid var(--border-color);
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          min-width: 200px;
-          backdrop-filter: blur(8px);
-        `;
 
-        container.innerHTML = `<div style="font-family: 'JetBrains Mono', monospace; font-weight: 700; margin: 0; padding: 10px; font-size: 13px; color: #00b4ff;">📡 MUF Map</div>
+        container.innerHTML = `
+            <div class="floating-panel-header">📡 MUF Map</div>
+
               <div style="
                 display: flex; align-items: center; gap: 2px;
                 background: var(--bg-tertiary); border-radius: 4px; padding: 6px;

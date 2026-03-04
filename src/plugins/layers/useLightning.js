@@ -446,17 +446,9 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemory
         console.log('[Lightning] StatsControl onAdd called');
         const panelWrapper = L.DomUtil.create('div', 'panel-wrapper');
         const div = L.DomUtil.create('div', 'lightning-stats', panelWrapper);
-        div.style.cssText = `
-          background: var(--bg-panel);
-          border-radius: 5px;
-          border: 1px solid var(--border-color);
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--text-primary);
-          min-width: 180px;
-        `;
+
         div.innerHTML = `
-          <div data-drag-handle="true" style="font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 13px; margin: 0; padding: 10px; cursor: grab; user-select: none; color: #00b4ff;">⚡️ Lightning Activity</div>
+          <div class="floating-panel-header">⚡️ Lightning Activity</div>
           <div style="opacity: 0.7; font-size: 10px;">Connecting...</div>
         `;
 
@@ -694,19 +686,9 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemory
       onAdd: function () {
         const panelWrapper = L.DomUtil.create('div', 'panel-wrapper');
         const div = L.DomUtil.create('div', 'lightning-proximity', panelWrapper);
-        div.style.cssText = `
-          background: var(--bg-panel);
-          border-radius: 5px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--text-primary);
-          border: 1px solid var(--border-color);
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          min-width: 200px;
-          max-width: 280px;
-        `;
+
         div.innerHTML =
-          '<div style="font-family: \'JetBrains Mono\', monospace; font-weight: 700; margin: 0; padding: 10px; font-size: 13px; color: #00b4ff;">📍 Nearby Strikes (30km)</div><div style="opacity: 0.7; font-size: 10px; text-align: center;">No recent strikes</div>';
+          '<div class="floating-panel-header">📍 Nearby Strikes (30km)</div><div style="opacity: 0.7; font-size: 10px; text-align: center;">No recent strikes</div>';
 
         // Prevent map interaction
         L.DomEvent.disableClickPropagation(div);

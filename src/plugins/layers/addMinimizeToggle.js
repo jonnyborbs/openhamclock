@@ -6,7 +6,6 @@ export function addMinimizeToggle(element, storageKey, options = {}) {
   const {
     contentClassName = 'panel-content',
     buttonClassName = 'panel-minimize-btn',
-    titleColor = '#00b4ff',
     getIsMinimized,
     onToggle,
     persist = true,
@@ -25,16 +24,8 @@ export function addMinimizeToggle(element, storageKey, options = {}) {
   const header = element.firstElementChild;
   if (!header) return;
 
-  const existingTitle = header.querySelector('[data-drag-handle="true"]');
   const existingButton = header.querySelector(`.${buttonClassName}`);
   const existingWrapper = element.querySelector(`.${contentClassName}`);
-
-  if (existingTitle) {
-    existingTitle.style.fontFamily = "'JetBrains Mono', monospace";
-    existingTitle.style.fontSize = '13px';
-    existingTitle.style.fontWeight = '700';
-    existingTitle.style.color = titleColor;
-  }
 
   const readState = () => {
     if (typeof getIsMinimized === 'function') return !!getIsMinimized();
@@ -49,7 +40,8 @@ export function addMinimizeToggle(element, storageKey, options = {}) {
   const syncState = (button, wrapper) => {
     const isMinimized = readState();
     wrapper.style.display = isMinimized ? 'none' : 'block';
-    button.innerHTML = isMinimized ? '▶' : '▼';
+    button.innerHTML = '▶';
+    button.style.transform = isMinimized ? 'rotate(0deg)' : 'rotate(90deg)';
     element.style.cursor = isMinimized ? 'pointer' : 'default';
   };
 
@@ -68,7 +60,8 @@ export function addMinimizeToggle(element, storageKey, options = {}) {
           e.stopPropagation();
           const next = existingWrapper.style.display !== 'none';
           existingWrapper.style.display = next ? 'none' : 'block';
-          existingButton.innerHTML = next ? '▶' : '▼';
+          existingButton.innerHTML = '▶';
+          existingButton.style.transform = next ? 'rotate(90deg)' : 'rotate(0deg)';
           element.style.cursor = next ? 'pointer' : 'default';
           writeState(next);
         },
@@ -87,23 +80,14 @@ export function addMinimizeToggle(element, storageKey, options = {}) {
 
   const minimizeBtn = document.createElement('button');
   minimizeBtn.className = buttonClassName;
-  minimizeBtn.innerHTML = '▼';
+  minimizeBtn.innerHTML = '▶';
   minimizeBtn.style.cssText = `
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 16px;
-    min-width: 16px;
-    height: 16px;
-    background: none;
-    border: none;
-    color: #888;
     cursor: pointer;
     user-select: none;
-    padding: 2px 4px;
-    margin: 0;
-    font-size: 10px;
-    line-height: 1;
+    transform: rotate(0deg);
   `;
   minimizeBtn.title = 'Minimize/Maximize';
   minimizeBtn.addEventListener(
@@ -122,12 +106,6 @@ export function addMinimizeToggle(element, storageKey, options = {}) {
   title.textContent = header.textContent.replace(/[▼▶]/g, '').trim();
   title.dataset.dragHandle = 'true';
   title.style.flex = '1';
-  title.style.cursor = 'grab';
-  title.style.userSelect = 'none';
-  title.style.fontFamily = "'JetBrains Mono', monospace";
-  title.style.fontSize = '13px';
-  title.style.fontWeight = '700';
-  title.style.color = titleColor;
 
   header.textContent = '';
   header.appendChild(title);
@@ -141,7 +119,7 @@ export function addMinimizeToggle(element, storageKey, options = {}) {
       e.stopPropagation();
       const hidden = contentWrapper.style.display === 'none';
       contentWrapper.style.display = hidden ? 'block' : 'none';
-      minimizeBtn.innerHTML = hidden ? '▼' : '▶';
+      minimizeBtn.style.transform = hidden ? 'rotate(90deg)' : 'rotate(0deg)';
       element.style.cursor = hidden ? 'default' : 'pointer';
       writeState(!hidden);
     },

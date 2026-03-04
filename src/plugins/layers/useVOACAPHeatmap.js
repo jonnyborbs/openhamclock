@@ -211,20 +211,8 @@ export function useLayer({ map, enabled, opacity, locator }) {
           .map((p) => `<option value="${p}" ${p === propPower ? 'selected' : ''}>${p}W</option>`)
           .join('');
 
-        container.style.cssText = `
-          background: var(--bg-panel);
-          border-radius: 5px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--text-primary);
-          border: 1px solid var(--border-color);
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          min-width: 200px;
-          max-width: 280px;
-        `;
-
         container.innerHTML = `
-            <div style="font-family: 'JetBrains Mono', monospace; font-weight: 700; margin: 0; padding: 10px; font-size: 13px; color: #00b4ff;">🌐 VOACAP Heatmap</div>
+            <div class="floating-panel-header">🌐 VOACAP Heatmap</div>
 
               <div style="margin-bottom: 6px;">
                 <label style="color: var(--text-secondary); font-size: 10px;">Band</label>

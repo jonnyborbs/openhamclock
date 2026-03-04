@@ -462,18 +462,11 @@ export function useLayer({
         const panelWrapper = L.DomUtil.create('div', 'panel-wrapper');
         const div = L.DomUtil.create('div', 'rbn-control', panelWrapper);
         div.style.cssText = `
-          background: var(--bg-panel);
-          border-radius: 5px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--text-primary);
-          border: 1px solid var(--border-color);
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
           min-width: 250px;
           max-width: 300px;
         `;
         div.innerHTML = `
-        <div style="font-family: 'JetBrains Mono', monospace; font-weight: 700; margin: 0; padding: 10px; font-size: 13px; color: #00b4ff;">📡 RBN: ${callsign}</div>
+        <div class="floating-panel-header">📡 RBN: ${callsign}</div>
 
           <div id="rbn-stats-display" style="margin-bottom: 8px; color: var(--text-secondary);">
           Spots: <strong>0</strong> | Skimmers: <strong>0</strong><br>

@@ -288,23 +288,12 @@ export function useLayer({ enabled = false, opacity = 0.5, map = null }) {
       onAdd: function () {
         const panelWrapper = L.DomUtil.create('div', 'panel-wrapper');
         const container = L.DomUtil.create('div', 'grayline-control', panelWrapper);
-        container.style.cssText = `
-          background: var(--bg-panel);
-          border-radius: 5px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--text-primary);
-          border: 1px solid var(--border-color);
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          min-width: 200px;
-          max-width: 280px;
-        `;
 
         const now = new Date();
         const timeStr = now.toUTCString();
 
         container.innerHTML = `
-          <div style="font-family: 'JetBrains Mono', monospace; font-weight: 700; margin: 0; padding: 10px; font-size: 13px; color: #00b4ff;">🌅 Gray Line</div>
+          <div class="floating-panel-header">🌅 Gray Line</div>
 
           <div style="margin-bottom: 8px; padding: 8px; background: var(--bg-tertiary); border-radius: 3px;">
             <div style="font-size: 9px; opacity: 0.7; margin-bottom: 2px;">UTC TIME</div>

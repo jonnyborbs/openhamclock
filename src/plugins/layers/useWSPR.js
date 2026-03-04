@@ -401,20 +401,10 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       onAdd: function () {
         const panelWrapper = L.DomUtil.create('div', 'panel-wrapper');
         const container = L.DomUtil.create('div', 'wspr-filter-control', panelWrapper);
-        container.style.cssText = `
-          background: var(--bg-panel);
-          border-radius: 5px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--text-primary);
-          border: 1px solid var(--border-color);
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          min-width: 200px;
-          max-width: 280px;
-        `;
 
         container.innerHTML = `
-          <div style="font-family: 'JetBrains Mono', monospace; font-weight: 700; margin: 0; padding: 10px; font-size: 13px; color: #00b4ff;">🎛️ Filters</div>
+          <div class="floating-panel-header">🎛️ Filters</div>
+
           <div style="margin-bottom: 8px;">
             <label style="display: block; margin-bottom: 3px;">Band:</label>
             <select id="wspr-band-filter" style="width: 100%; padding: 4px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 3px;">
@@ -596,19 +586,10 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       onAdd: function () {
         const panelWrapper = L.DomUtil.create('div', 'panel-wrapper');
         const div = L.DomUtil.create('div', 'wspr-stats', panelWrapper);
-        div.style.cssText = `
-          background: var(--bg-panel);
-          border-radius: 5px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--text-primary);
-          border: 1px solid var(--border-color);
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          min-width: 200px;
-          max-width: 280px;
-        `;
+
         div.innerHTML = `
-          <div style="font-family: 'JetBrains Mono', monospace; font-weight: 700; margin: 0; padding: 10px; font-size: 13px; color: #00b4ff;">📊 WSPR Activity</div>
+          <div class="floating-panel-header">📊 WSPR Activity</div>
+
           <div style="margin-bottom: 8px; padding: 6px; background: var(--bg-tertiary); border-radius: 3px;">
             <div style="font-size: 10px; opacity: 0.8; margin-bottom: 2px;">Propagation Score</div>
             <div style="font-size: 18px; font-weight: bold; color: var(--text-muted);">--/100</div>
@@ -663,19 +644,10 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       onAdd: function () {
         const panelWrapper = L.DomUtil.create('div', 'panel-wrapper');
         const div = L.DomUtil.create('div', 'wspr-legend', panelWrapper);
-        div.style.cssText = `
-          background: var(--bg-panel);
-          border-radius: 5px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--text-primary);
-          border: 1px solid var(--border-color);
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          min-width: 200px;
-          max-width: 280px;
-        `;
+
         div.innerHTML = `
-          <div style="font-family: 'JetBrains Mono', monospace; font-weight: 700; margin: 0; padding: 10px; font-size: 13px; color: #00b4ff;">📡 Signal Strength</div>
+          <div class="floating-panel-header">📡 Signal Strength</div>
+
           <div><span style="color: var(--accent-green);">●</span> Excellent (&gt; 5 dB)</div>
           <div><span style="color: var(--accent-green-dim);">●</span> Good (0 to 5 dB)</div>
           <div><span style="color: var(--accent-amber);">●</span> Moderate (-10 to 0 dB)</div>
@@ -724,19 +696,9 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       onAdd: function () {
         const panelWrapper = L.DomUtil.create('div', 'panel-wrapper');
         const div = L.DomUtil.create('div', 'wspr-chart', panelWrapper);
-        div.style.cssText = `
-          background: var(--bg-panel);
-          border-radius: 5px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: var(--text-primary);
-          border: 1px solid var(--border-color);
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          min-width: 200px;
-          max-width: 280px;
-        `;
+
         div.innerHTML =
-          '<div style="font-family: \'JetBrains Mono\', monospace; font-weight: 700; margin: 0; padding: 10px; font-size: 13px; color: #00b4ff;">📊 Band Activity</div><div style="opacity: 0.7;">Loading...</div>';
+          '<div class="floating-panel-header">📊 Band Activity</div><div style="opacity: 0.7;">Loading...</div>';
 
         // Prevent map interaction when clicking/dragging on this control
         L.DomEvent.disableClickPropagation(div);
@@ -1148,7 +1110,8 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         } else {
           // Initial render before minimize toggle is added
           statsContainer.innerHTML = `
-            <div style="font-family: 'JetBrains Mono', monospace; font-weight: 700; margin-bottom: 6px; font-size: 13px; color: #00b4ff;">📊 WSPR Activity</div>
+            <div class="floating-panel-header">📊 WSPR Activity</div>
+
             ${contentHTML}
           `;
         }
@@ -1194,7 +1157,8 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         } else {
           // Initial render before minimize toggle is added
           chartContainer.innerHTML = `
-            <div style="font-family: 'JetBrains Mono', monospace; font-weight: 700; margin-bottom: 6px; font-size: 13px; color: #00b4ff;">📊 Band Activity</div>
+            <div class="floating-panel-header">📊 Band Activity</div>
+
             ${chartContentHTML}
           `;
         }

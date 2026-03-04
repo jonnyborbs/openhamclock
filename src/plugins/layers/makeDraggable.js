@@ -157,6 +157,7 @@ export function makeDraggable(
     (e) => {
       if (e.button !== 0) return;
       isDragging = true;
+      updateCursor();
       didDrag = false;
       startX = e.clientX;
       startY = e.clientY;
@@ -178,6 +179,10 @@ export function makeDraggable(
     (e) => {
       if (!isDragging) return;
 
+      if (!didDrag && (Math.abs(e.clientX - startX) > 2 || Math.abs(e.clientY - startY) > 2)) {
+        didDrag = true;
+      }
+
       let nextLeft = startLeft + (e.clientX - startX);
       let nextTop = startTop + (e.clientY - startY);
 
@@ -198,7 +203,8 @@ export function makeDraggable(
       if (!isDragging) return;
       isDragging = false;
       el.style.opacity = '1';
-      updateCursor(e);
+      el.style.transition = previousTransition;
+      updateCursor();
       suppressClick = didDrag;
 
       if (snap) {
