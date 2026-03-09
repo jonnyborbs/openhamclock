@@ -10,9 +10,12 @@
  *   url           string   OpenHamClock server URL (e.g. https://openhamclock.com)
  *   key           string   Relay authentication key
  *   session       string   Browser session ID for per-user isolation
- *   udpPort       number   UDP port to listen on (default: 2237)
- *   batchInterval number   Batch send interval in ms (default: 2000)
- *   verbose       boolean  Log all decoded messages (default: false)
+ *   udpPort            number   UDP port to listen on (default: 2237)
+ *   batchInterval      number   Batch send interval in ms (default: 2000)
+ *   verbose            boolean  Log all decoded messages (default: false)
+ *   multicast          boolean  Join a multicast group (default: false)
+ *   multicastGroup     string   Multicast group IP (default: '224.0.0.1')
+ *   multicastInterface string   Local NIC IP for multi-homed systems; '' = OS default
  */
 
 const dgram = require('dgram');
@@ -249,6 +252,10 @@ const descriptor = {
     const serverUrl = (cfg.url || '').replace(/\/$/, '');
     const relayEndpoint = `${serverUrl}/api/wsjtx/relay`;
 
+    const mcEnabled = !!cfg.multicast;
+    const mcGroup = cfg.multicastGroup || '224.0.0.1';
+    const mcInterface = cfg.multicastInterface || undefined; // undefined → OS picks NIC
+
     let socket = null;
     let batchTimer = null;
     let heartbeatInterval = null;
@@ -426,6 +433,19 @@ const descriptor = {
         console.log(`[WsjtxRelay] Listening for WSJT-X on UDP ${addr.address}:${addr.port}`);
         console.log(`[WsjtxRelay] Relaying to ${serverUrl}`);
 
+        if (mcEnabled) {
+          try {
+            socket.addMembership(mcGroup, mcInterface);
+            const ifaceLabel = mcInterface || '0.0.0.0 (OS default)';
+            console.log(`[WsjtxRelay] Joined multicast group ${mcGroup} on interface ${ifaceLabel}`);
+          } catch (err) {
+            console.error(`[WsjtxRelay] Failed to join multicast group ${mcGroup}: ${err.message}`);
+            console.error(
+              `[WsjtxRelay] Falling back to unicast — check that ${mcGroup} is a valid multicast address and your OS supports multicast on this interface`,
+            );
+          }
+        }
+
         scheduleBatch();
 
         // Initial health check then heartbeat
@@ -469,6 +489,15 @@ const descriptor = {
         healthInterval = null;
       }
       if (socket) {
+        if (mcEnabled) {
+          try {
+            socket.dropMembership(mcGroup, mcInterface);
+            console.log(`[WsjtxRelay] Left multicast group ${mcGroup}`);
+          } catch (err) {
+            // Socket may already be closing or membership was never joined — safe to ignore
+            console.error(`[WsjtxRelay] dropMembership failed (non-fatal): ${err.message}`);
+          }
+        }
         try {
           socket.close();
         } catch (e) {}
@@ -488,6 +517,8 @@ const descriptor = {
         consecutiveErrors,
         udpPort: cfg.udpPort || 2237,
         serverUrl,
+        multicast: mcEnabled,
+        multicastGroup: mcEnabled ? mcGroup : null,
       };
     }
 

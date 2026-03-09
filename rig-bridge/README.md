@@ -160,20 +160,26 @@ Edit `rig-bridge-config.json`:
     "session": "your-session-id",
     "udpPort": 2237,
     "batchInterval": 2000,
-    "verbose": false
+    "verbose": false,
+    "multicast": false,
+    "multicastGroup": "224.0.0.1",
+    "multicastInterface": ""
   }
 }
 ```
 
-| Field           | Description                                      | Default                    |
-| --------------- | ------------------------------------------------ | -------------------------- |
-| `enabled`       | Activate the relay on startup                    | `false`                    |
-| `url`           | OpenHamClock server URL                          | `https://openhamclock.com` |
-| `key`           | Relay authentication key (from your OHC account) | —                          |
-| `session`       | Browser session ID for per-user isolation        | —                          |
-| `udpPort`       | UDP port WSJT-X is sending to                    | `2237`                     |
-| `batchInterval` | How often decoded messages are sent (ms)         | `2000`                     |
-| `verbose`       | Log every decoded message to the console         | `false`                    |
+| Field                | Description                                             | Default                    |
+| -------------------- | ------------------------------------------------------- | -------------------------- |
+| `enabled`            | Activate the relay on startup                           | `false`                    |
+| `url`                | OpenHamClock server URL                                 | `https://openhamclock.com` |
+| `key`                | Relay authentication key (from your OHC account)        | —                          |
+| `session`            | Browser session ID for per-user isolation               | —                          |
+| `udpPort`            | UDP port WSJT-X is sending to                           | `2237`                     |
+| `batchInterval`      | How often decoded messages are sent (ms)                | `2000`                     |
+| `verbose`            | Log every decoded message to the console                | `false`                    |
+| `multicast`          | Join a UDP multicast group to receive WSJT-X packets    | `false`                    |
+| `multicastGroup`     | Multicast group IP address to join                      | `224.0.0.1`                |
+| `multicastInterface` | Local NIC IP for multi-homed systems; `""` = OS default | `""`                       |
 
 ### In WSJT-X
 
@@ -181,6 +187,29 @@ Make sure WSJT-X is configured to send UDP packets to `localhost` on the same po
 **File → Settings → Reporting → UDP Server → `127.0.0.1:2237`**
 
 The relay runs alongside your radio plugin — you can use direct USB or TCI at the same time.
+
+### Multicast Mode
+
+By default the relay uses **unicast** — WSJT-X sends packets directly to `127.0.0.1` and only this process receives them.
+
+If you want multiple applications on the same machine or LAN to receive WSJT-X packets simultaneously, enable multicast:
+
+1. In WSJT-X: **File → Settings → Reporting → UDP Server** — set the address to `224.0.0.1`
+2. In `rig-bridge-config.json` (or via the setup UI at `http://localhost:5555`):
+
+```json
+{
+  "wsjtxRelay": {
+    "multicast": true,
+    "multicastGroup": "224.0.0.1",
+    "multicastInterface": ""
+  }
+}
+```
+
+Leave `multicastInterface` blank unless you have multiple network adapters and need to specify which one to use (enter its local IP, e.g. `"192.168.1.100"`).
+
+> `224.0.0.1` is the WSJT-X conventional multicast group. It is link-local — packets are not routed across subnet boundaries.
 
 ---
 
@@ -216,18 +245,19 @@ Executables are output to the `dist/` folder.
 
 ## Troubleshooting
 
-| Problem                   | Solution                                                                         |
-| ------------------------- | -------------------------------------------------------------------------------- |
-| No COM ports found        | Install USB driver (Silicon Labs CP210x for Yaesu, FTDI for some Kenwood)        |
-| Port opens but no data    | Check baud rate matches radio's CAT Rate setting                                 |
-| Icom not responding       | Verify CI-V address matches your radio model                                     |
-| CORS errors in browser    | The bridge allows all origins by default                                         |
-| Port already in use       | Close flrig/rigctld if running — you don't need them anymore                     |
-| PTT not responsive        | Enable **Hardware Flow (RTS/CTS)** (especially for FT-991A/FT-710)               |
-| macOS Comms Failure       | The bridge automatically applies a `stty` fix for CP210x drivers.                |
-| TCI: Connection refused   | Enable TCI in your SDR app (Thetis → Setup → CAT Control → Enable TCI Server)    |
-| TCI: No frequency updates | Check `trx` / `vfo` index in config match the active transceiver in your SDR app |
-| TCI: Remote SDR           | Set `tci.host` to the IP of the machine running the SDR application              |
+| Problem                   | Solution                                                                                                                                                    |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No COM ports found        | Install USB driver (Silicon Labs CP210x for Yaesu, FTDI for some Kenwood)                                                                                   |
+| Port opens but no data    | Check baud rate matches radio's CAT Rate setting                                                                                                            |
+| Icom not responding       | Verify CI-V address matches your radio model                                                                                                                |
+| CORS errors in browser    | The bridge allows all origins by default                                                                                                                    |
+| Port already in use       | Close flrig/rigctld if running — you don't need them anymore                                                                                                |
+| PTT not responsive        | Enable **Hardware Flow (RTS/CTS)** (especially for FT-991A/FT-710)                                                                                          |
+| macOS Comms Failure       | The bridge automatically applies a `stty` fix for CP210x drivers.                                                                                           |
+| TCI: Connection refused   | Enable TCI in your SDR app (Thetis → Setup → CAT Control → Enable TCI Server)                                                                               |
+| TCI: No frequency updates | Check `trx` / `vfo` index in config match the active transceiver in your SDR app                                                                            |
+| TCI: Remote SDR           | Set `tci.host` to the IP of the machine running the SDR application                                                                                         |
+| Multicast: no packets     | Verify `multicastGroup` matches what WSJT-X sends to; check OS firewall allows multicast UDP; set `multicastInterface` to the correct NIC IP if multi-homed |
 
 ---
 

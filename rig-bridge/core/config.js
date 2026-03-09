@@ -47,6 +47,9 @@ const DEFAULT_CONFIG = {
     udpPort: 2237, // UDP port to listen on for WSJT-X packets
     batchInterval: 2000, // Batch send interval in ms
     verbose: false, // Log all decoded messages
+    multicast: false, // Join a multicast group instead of unicast
+    multicastGroup: '224.0.0.1', // WSJT-X conventional multicast group
+    multicastInterface: '', // Local NIC IP for multi-homed systems; '' = let OS choose
   },
 };
 

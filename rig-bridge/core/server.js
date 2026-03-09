@@ -554,6 +554,28 @@ function buildSetupHtml(version) {
             </div>
           </div>
 
+          <div class="checkbox-row">
+            <input type="checkbox" id="wsjtxMulticast" onchange="toggleWsjtxMulticastOpts()">
+            <span>Enable Multicast</span>
+          </div>
+          <div class="help-text" style="margin-top:-8px; margin-bottom:10px;">
+            Join a UDP multicast group so multiple apps can receive WSJT-X packets simultaneously.
+            In WSJT-X set UDP Server to <code>224.0.0.1</code> instead of <code>127.0.0.1</code>.
+          </div>
+
+          <div id="wsjtxMulticastOpts" style="display:none;">
+            <div class="row">
+              <div>
+                <label>Multicast Group</label>
+                <input type="text" id="wsjtxMulticastGroup" placeholder="224.0.0.1">
+              </div>
+              <div>
+                <label>Multicast Interface</label>
+                <input type="text" id="wsjtxMulticastInterface" placeholder="Leave blank for OS default">
+              </div>
+            </div>
+          </div>
+
           <div style="font-size:12px; color:#6b7280; margin-bottom:14px;">
             Status: <span id="wsjtxStatusText" style="color:#c4c9d4;">—</span>
           </div>
@@ -622,12 +644,21 @@ function buildSetupHtml(version) {
       document.getElementById('wsjtxSession').value = w.session || '';
       document.getElementById('wsjtxPort').value = w.udpPort || 2237;
       document.getElementById('wsjtxInterval').value = w.batchInterval || 2000;
+      document.getElementById('wsjtxMulticast').checked = !!w.multicast;
+      document.getElementById('wsjtxMulticastGroup').value = w.multicastGroup || '224.0.0.1';
+      document.getElementById('wsjtxMulticastInterface').value = w.multicastInterface || '';
       toggleWsjtxOpts();
+      toggleWsjtxMulticastOpts();
     }
 
     function toggleWsjtxOpts() {
       const enabled = document.getElementById('wsjtxEnabled').checked;
       document.getElementById('wsjtxOpts').style.display = enabled ? 'block' : 'none';
+    }
+
+    function toggleWsjtxMulticastOpts() {
+      const on = document.getElementById('wsjtxMulticast').checked;
+      document.getElementById('wsjtxMulticastOpts').style.display = on ? 'block' : 'none';
     }
 
     async function saveIntegrations() {
@@ -638,6 +669,9 @@ function buildSetupHtml(version) {
         session: document.getElementById('wsjtxSession').value.trim(),
         udpPort: parseInt(document.getElementById('wsjtxPort').value) || 2237,
         batchInterval: parseInt(document.getElementById('wsjtxInterval').value) || 2000,
+        multicast: document.getElementById('wsjtxMulticast').checked,
+        multicastGroup: document.getElementById('wsjtxMulticastGroup').value.trim() || '224.0.0.1',
+        multicastInterface: document.getElementById('wsjtxMulticastInterface').value.trim(),
       };
       try {
         const res = await fetch('/api/config', {

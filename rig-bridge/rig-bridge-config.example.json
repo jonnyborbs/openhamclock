@@ -26,6 +26,9 @@
     "session": "",
     "udpPort": 2237,
     "batchInterval": 2000,
-    "verbose": false
+    "verbose": false,
+    "multicast": false,
+    "multicastGroup": "224.0.0.1",
+    "multicastInterface": ""
   }
 }
