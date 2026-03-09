@@ -955,7 +955,7 @@ export const DockableApp = ({
                   ? 'Unlock layout — allow drag, resize, and close'
                   : 'Lock layout — prevent accidental changes'
               }
-              className="panel-layout-lock-button"
+              className={`panel-layout-lock-button ${layoutLocked ? 'locked' : 'unlocked'}`}
             >
               {layoutLocked ? '🔒' : '🔓'} Layout {layoutLocked ? 'Locked' : 'Unlocked'}
             </button>

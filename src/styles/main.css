@@ -367,15 +367,21 @@ body::before {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   background: var(--bg-tertiary);
-  border: 1px solid var(--accent-amber);
+  border: 1px solid var(--border-color);
   border-radius: 4px;
   padding: 3px 8px;
   font-size: 11px;
   font-family: 'JetBrains Mono', monospace;
   cursor: pointer;
   margin: 1em auto;
+}
+
+.panel-layout-lock-button.locked {
+  color: var(--accent-amber);
+  background: rgba(255, 170, 0, 0.15);
+  border-color: var(--accent-amber);
 }
 
 /* ============================================
