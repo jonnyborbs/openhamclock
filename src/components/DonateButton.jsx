@@ -39,11 +39,14 @@ export default function DonateButton({ compact = false, fontSize = '12px', paddi
           fontWeight: '600',
           display: 'flex',
           alignItems: 'center',
-          gap: '4px',
+          justifyContent: compact ? 'center' : 'flex-start',
+          gap: '6px',
           whiteSpace: 'nowrap',
+          width: '100%',
         }}
       >
-        ❤️{compact ? '' : ' Support Us'}
+        <span style={{ fontSize: '14px' }}>❤️</span>
+        {compact ? '' : ' Support Us'}
       </button>
 
       {open && (
