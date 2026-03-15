@@ -392,7 +392,7 @@ const App = () => {
 
     // Map all decodes with resolved coordinates (CQ, QSO exchanges, prefix estimates)
     // WorldMap deduplicates by callsign, keeping most recent
-    return wsjtx.decodes.filter((d) => d.lat && d.lon && d.timestamp >= ageCutoff);
+    return wsjtx.decodes.filter((d) => d.lat != null && d.lon != null && d.timestamp >= ageCutoff);
   }, [wsjtx.decodes]);
 
   // Map hover
