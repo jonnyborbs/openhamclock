@@ -31,6 +31,7 @@ import {
   KeybindingsPanel,
   DXLocalTime,
 } from './components';
+import MeshtasticPanel from './components/MeshtasticPanel.jsx';
 
 import { resetLayout, loadLayout, saveLayout } from './store/layoutStore.js';
 import { DockableLayoutProvider } from './contexts';
@@ -68,6 +69,8 @@ export const DockableApp = ({
   // Weather
   localWeather,
   dxWeather,
+  localAlerts,
+  dxAlerts,
   showDxWeather,
 
   // Space weather & solar
@@ -151,6 +154,10 @@ export const DockableApp = ({
   updateInProgress,
   isLocalInstall,
   keybindingsList,
+
+  // Layout lock (from parent — sidebar controls it)
+  layoutLocked: layoutLockedProp,
+  onToggleLayoutLock,
 }) => {
   const layoutRef = useRef(null);
   const [model, setModel] = useState(() => Model.fromJson(loadLayout()));
@@ -158,23 +165,26 @@ export const DockableApp = ({
   const [targetTabSetId, setTargetTabSetId] = useState(null);
   const saveTimeoutRef = useRef(null);
 
-  // Layout lock — prevents accidental drag/resize/close of panels
-  const [layoutLocked, setLayoutLocked] = useState(() => {
+  // Layout lock — controlled by parent (sidebar), fall back to local state if no prop
+  const [localLayoutLocked, setLocalLayoutLocked] = useState(() => {
     try {
       return localStorage.getItem('openhamclock_layoutLocked') === 'true';
     } catch {
       return false;
     }
   });
-  const toggleLayoutLock = useCallback(() => {
-    setLayoutLocked((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem('openhamclock_layoutLocked', String(next));
-      } catch {}
-      return next;
+  const layoutLocked = layoutLockedProp !== undefined ? layoutLockedProp : localLayoutLocked;
+  const toggleLayoutLock =
+    onToggleLayoutLock ||
+    (() => {
+      setLocalLayoutLocked((prev) => {
+        const next = !prev;
+        try {
+          localStorage.setItem('openhamclock_layoutLocked', String(next));
+        } catch {}
+        return next;
+      });
     });
-  }, []);
   const handleResetLayout = useCallback(() => {
     if (confirm('Reset panel layout to default? This will undo any customizations.')) {
       const defaultLayout = resetLayout();
@@ -329,7 +339,7 @@ export const DockableApp = ({
       // 2. Set DX Location if location data is available
       // For DX Cluster spots, we need to find the path data which contains coordinates
       // For POTA/SOTA, the spot object itself has lat/lon
-      if (spot.lat && spot.lon) {
+      if (spot.lat != null && spot.lon != null) {
         handleDXChange({ lat: spot.lat, lon: spot.lon });
       } else if (spot.call) {
         // Try to find in DX Cluster paths
@@ -423,7 +433,7 @@ export const DockableApp = ({
       'on-air': { name: 'On Air', icon: '🔴' },
       'id-timer': { name: 'ID Timer', icon: '📢' },
       keybindings: { name: 'Keyboard Shortcuts', icon: '⌨️' },
-      layout: { name: 'Layout', icon: '📐' },
+      meshtastic: { name: 'Meshtastic', icon: '📡' },
     };
   }, [isLocalInstall]);
 
@@ -464,7 +474,7 @@ export const DockableApp = ({
         </div>
       </div>
 
-      <WeatherPanel weatherData={localWeather} allUnits={config.allUnits} nodeId={nodeId} />
+      <WeatherPanel weatherData={localWeather} allUnits={config.allUnits} nodeId={nodeId} alerts={localAlerts} />
     </div>
   );
 
@@ -582,7 +592,9 @@ export const DockableApp = ({
           </div>
         </div>
 
-        {showDxWeather && <WeatherPanel weatherData={dxWeather} allUnits={config.allUnits} nodeId={nodeId} />}
+        {showDxWeather && (
+          <WeatherPanel weatherData={dxWeather} allUnits={config.allUnits} nodeId={nodeId} alerts={dxAlerts} />
+        )}
       </div>
     );
   };
@@ -700,23 +712,23 @@ export const DockableApp = ({
           break;
 
         case 'solar':
-          content = <SolarPanel solarIndices={solarIndices} />;
+          content = <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} />;
           break;
 
         case 'solar-image':
-          content = <SolarPanel solarIndices={solarIndices} forcedMode="image" />;
+          content = <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} forcedMode="image" />;
           break;
 
         case 'solar-indices':
-          content = <SolarPanel solarIndices={solarIndices} forcedMode="indices" />;
+          content = <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} forcedMode="indices" />;
           break;
 
         case 'solar-xray':
-          content = <SolarPanel solarIndices={solarIndices} forcedMode="xray" />;
+          content = <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} forcedMode="xray" />;
           break;
 
         case 'lunar':
-          content = <SolarPanel solarIndices={solarIndices} forcedMode="lunar" />;
+          content = <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} forcedMode="lunar" />;
           break;
 
         case 'propagation':
@@ -952,35 +964,8 @@ export const DockableApp = ({
           content = <KeybindingsPanel keybindings={keybindingsList} nodeId={nodeId} />;
           break;
 
-        case 'layout':
-          content = (
-            <div className="panel" style={{ height: '100%' }}>
-              <button
-                onClick={toggleLayoutLock}
-                title={
-                  layoutLocked
-                    ? 'Unlock layout — allow drag, resize, and close'
-                    : 'Lock layout — prevent accidental changes'
-                }
-                className={`panel-layout-lock-button ${layoutLocked ? 'locked' : 'unlocked'}`}
-              >
-                {layoutLocked ? '🔒' : '🔓'} Layout {layoutLocked ? 'Locked' : 'Unlocked'}
-              </button>
-              <button
-                id="panel-layout-reset-button"
-                onClick={handleResetLayout}
-                className="panel-layout-reset-button"
-                title={layoutLocked ? 'Unlock layout to reset' : 'Reset panel layout'}
-                disabled={layoutLocked}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                  <path d="M3 3v5h5" />
-                </svg>
-                {t('station.settings.layout.reset.button')}
-              </button>
-            </div>
-          );
+        case 'meshtastic':
+          content = <MeshtasticPanel />;
           break;
 
         default:
@@ -1009,6 +994,8 @@ export const DockableApp = ({
       showDxWeather,
       localWeather,
       dxWeather,
+      localAlerts,
+      dxAlerts,
       solarIndices,
       propagation,
       bandConditions,
@@ -1226,11 +1213,14 @@ export const DockableApp = ({
         flexDirection: 'column',
         height: '100vh',
         width: '100vw',
+        padding: '8px',
+        gap: '8px',
         background: 'var(--bg-primary)',
+        boxSizing: 'border-box',
       }}
     >
       {/* Header */}
-      <div style={{ flexShrink: 0, padding: '8px 8px 0 8px' }}>
+      <div style={{ flexShrink: 0 }}>
         <Header
           config={config}
           utcTime={utcTime}
@@ -1253,7 +1243,7 @@ export const DockableApp = ({
       </div>
 
       {/* Dockable Layout */}
-      <div style={{ flex: 1, position: 'relative', padding: '8px', minHeight: 0 }}>
+      <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
         <DockableLayoutProvider model={model}>
           <Layout
             ref={layoutRef}

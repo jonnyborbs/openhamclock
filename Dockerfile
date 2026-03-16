@@ -47,6 +47,7 @@ RUN npm install --omit=dev
 
 # Copy server files
 COPY server.js ./
+COPY server/ ./server/
 COPY config.js ./
 COPY src/server ./src/server
 
