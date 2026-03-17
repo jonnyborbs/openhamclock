@@ -139,6 +139,17 @@ function unwrapAndCopyPolygon(upperPoints, lowerPoints) {
   return copies;
 }
 
+// Compute the base terminator latitude (solarAltitude=0) at a given hour angle.
+// Used as a reference point so offset lines (+5°, -5°, etc.) pick the correct
+// quadratic root — the one that parallels the terminator, not the antipodal one.
+function baseTerminatorLat(sinDec, cosDec, cosHA) {
+  const tanDec = sinDec / cosDec;
+  if (Math.abs(tanDec) < 1e-10) {
+    return cosHA > 0 ? -Math.PI / 2 : Math.PI / 2;
+  }
+  return Math.atan(-cosHA / tanDec);
+}
+
 // Generate terminator line for a specific solar altitude
 // Uses half-angle substitution (t = tan(lat/2)) to get an analytical quadratic solution.
 // This eliminates gaps from Newton-Raphson convergence failures in v1.0.1.
@@ -184,12 +195,15 @@ function generateTerminatorLine(date, solarAltitude = 0, numPoints = 360) {
       const lat2 = 2 * Math.atan(t2);
 
       // Pick the root in valid latitude range [-π/2, π/2]
-      // One root traces the main S-curve, the other is typically out of range
       const v1 = Math.abs(lat1) <= Math.PI / 2 + 0.01;
       const v2 = Math.abs(lat2) <= Math.PI / 2 + 0.01;
 
       if (v1 && v2) {
-        lat = Math.abs(lat1) < Math.abs(lat2) ? lat1 : lat2;
+        // Both roots valid — pick the one closest to the base terminator (altitude=0).
+        // This ensures +5° and -5° lines both parallel the terminator instead of
+        // one tracing the near side and the other the far (antipodal) side.
+        const baseLat = baseTerminatorLat(sinDec, cosDec, cosHA);
+        lat = Math.abs(lat1 - baseLat) <= Math.abs(lat2 - baseLat) ? lat1 : lat2;
       } else if (v1) {
         lat = lat1;
       } else if (v2) {
