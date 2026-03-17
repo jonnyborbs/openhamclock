@@ -167,6 +167,8 @@ module.exports = function (app, ctx) {
       // DX Cluster settings
       spotRetentionMinutes: CONFIG.spotRetentionMinutes,
       dxClusterSource: CONFIG.dxClusterSource,
+      dxUdpHost: CONFIG.dxUdpHost,
+      dxUdpPort: CONFIG.dxUdpPort,
 
       // Whether config is incomplete (show setup wizard)
       configIncomplete: CONFIG.callsign === 'N0CALL' || !CONFIG.gridSquare,

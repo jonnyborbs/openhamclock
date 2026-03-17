@@ -152,6 +152,8 @@ const CONFIG = {
   dxClusterSource: process.env.DX_CLUSTER_SOURCE || jsonConfig.dxCluster?.source || 'auto',
   dxClusterHost: process.env.DX_CLUSTER_HOST || jsonConfig.dxCluster?.host || '',
   dxClusterPort: parseInt(process.env.DX_CLUSTER_PORT) || jsonConfig.dxCluster?.port || 7300,
+  dxUdpHost: process.env.DX_UDP_HOST || jsonConfig.dxCluster?.udpHost || '',
+  dxUdpPort: parseInt(process.env.DX_UDP_PORT) || jsonConfig.dxCluster?.udpPort || 12060,
   dxClusterCallsign: process.env.DX_CLUSTER_CALLSIGN || jsonConfig.dxCluster?.callsign || '',
   dxClusterSpotterLat: Number.isFinite(parseFloat(process.env.DX_CLUSTER_SPOTTER_LAT))
     ? parseFloat(process.env.DX_CLUSTER_SPOTTER_LAT)

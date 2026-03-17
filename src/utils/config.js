@@ -61,6 +61,7 @@ export const DEFAULT_CONFIG = {
   },
   dxClusterSource: 'dxspider-proxy',
   customDxCluster: { enabled: false, host: '', port: 7300 },
+  udpDxCluster: { host: '', port: 12060 },
 };
 
 // Cache for server config
@@ -121,6 +122,10 @@ export const loadConfig = () => {
       showDxPaths: serverConfig.showDxPaths ?? config.showDxPaths,
       panels: { ...config.panels, ...serverConfig.panels },
       dxClusterSource: serverConfig.dxClusterSource || config.dxClusterSource,
+      udpDxCluster: {
+        host: serverConfig.dxUdpHost || config.udpDxCluster.host,
+        port: parseInt(serverConfig.dxUdpPort, 10) || config.udpDxCluster.port,
+      },
     };
   }
 
@@ -146,6 +151,7 @@ export const loadConfig = () => {
       defaultDX: localConfig.defaultDX || config.defaultDX,
       panels: { ...config.panels, ...localConfig.panels },
       refreshIntervals: { ...config.refreshIntervals, ...localConfig.refreshIntervals },
+      udpDxCluster: localConfig.udpDxCluster || config.udpDxCluster,
     };
   }
 

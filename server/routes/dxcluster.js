@@ -3,6 +3,8 @@
  * Lines ~2936-4193 of original server.js
  */
 
+const dns = require('dns');
+const dgram = require('dgram');
 const net = require('net');
 const dns = require('dns');
 const { gridToLatLon, getBandFromKHz } = require('../utils/grid');
@@ -784,6 +786,211 @@ module.exports = function (app, ctx) {
     return ts;
   }
 
+  const DXUDP_SESSION_MAX_AGE = 15 * 60 * 1000;
+  const DXUDP_SPOT_MAX_AGE = 60 * 60 * 1000;
+  const DXUDP_MAX_SESSIONS = 20;
+  const DXUDP_MAX_SPOTS = 500;
+  const dxUdpSessions = new Map();
+
+  function toHHMMz(ts) {
+    const d = new Date(Number.isFinite(ts) ? ts : Date.now());
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}z`;
+  }
+
+  function parseFreqToMHz(value) {
+    const v = parseFloat(value);
+    if (!Number.isFinite(v) || v <= 0) return null;
+    if (v >= 1000000) return v / 1000000;
+    if (v >= 30000) return v / 1000;
+    return v;
+  }
+
+  function maybeExtractGrid(value) {
+    if (!value || typeof value !== 'string') return null;
+    const m = value.trim().toUpperCase().match(/\b([A-R]{2}\d{2}(?:[A-X]{2})?)\b/);
+    return m ? m[1] : null;
+  }
+
+  function parseTimestampValue(value, fallbackTs) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value < 1e12 ? value * 1000 : value;
+    }
+    const str = String(value || '').trim();
+    if (!str) return fallbackTs;
+    if (/^\d{2}:\d{2}z$/i.test(str)) return parseSpotHHMMzToTimestamp(str, fallbackTs);
+
+    const hhmm = str.match(/^(\d{2})(\d{2})z?$/i);
+    if (hhmm) return parseSpotHHMMzToTimestamp(`${hhmm[1]}:${hhmm[2]}z`, fallbackTs);
+
+    const parsed = Date.parse(str);
+    return Number.isFinite(parsed) ? parsed : fallbackTs;
+  }
+
+  function normalizeUdpSpotCandidate(candidate, fallbackTs = Date.now()) {
+    if (!candidate || typeof candidate !== 'object') return null;
+
+    const spotter = String(candidate.spotter || candidate.de || candidate.sourceCall || '').trim().toUpperCase();
+    const dxCall = String(candidate.dxCall || candidate.call || candidate.callsign || '').trim().toUpperCase();
+    const freqMHz = parseFreqToMHz(candidate.freqMHz ?? candidate.freq ?? candidate.frequency);
+    if (!spotter || !dxCall || !Number.isFinite(freqMHz)) return null;
+
+    const timestamp = parseTimestampValue(candidate.timestamp ?? candidate.time, fallbackTs);
+    const comment = String(candidate.comment || candidate.info || candidate.text || candidate.remarks || '').trim();
+    const dxGrid = maybeExtractGrid(candidate.dxGrid || candidate.grid || comment);
+    const spotterGrid = maybeExtractGrid(candidate.spotterGrid);
+
+    return {
+      spotter,
+      dxCall,
+      freq: freqMHz.toFixed(3),
+      comment,
+      time: toHHMMz(timestamp),
+      timestamp,
+      dxGrid,
+      spotterGrid,
+      id: `${dxCall}-${freqMHz.toFixed(3)}-${spotter}-${timestamp}`,
+    };
+  }
+
+  function parseUdpSpotPayload(payload, fallbackTs = Date.now()) {
+    const text = String(payload || '').trim();
+    if (!text) return [];
+
+    try {
+      const parsedJson = JSON.parse(text);
+      const arr = Array.isArray(parsedJson) ? parsedJson : [parsedJson];
+      return arr.map((item) => normalizeUdpSpotCandidate(item, fallbackTs)).filter(Boolean);
+    } catch {}
+
+    const dxDe = text.match(/^DX\s+de\s+([A-Z0-9\/-]+)[^:]*:\s*([0-9.]+)\s+([A-Z0-9\/-]+)\s*(.*?)\s*(\d{4}Z?)?\s*$/i);
+    if (dxDe) {
+      const [, spotter, freq, dxCall, rawComment, hhmm] = dxDe;
+      const comment = (rawComment || '').trim().replace(/\s+\d{4}Z?$/i, '').trim();
+      return [normalizeUdpSpotCandidate({ spotter, dxCall, freq, comment, time: hhmm || undefined }, fallbackTs)].filter(
+        Boolean,
+      );
+    }
+
+    if (text.includes('^')) {
+      const parts = text.split('^');
+      if (parts.length >= 3) {
+        return [
+          normalizeUdpSpotCandidate(
+            { spotter: parts[0], freq: parts[1], dxCall: parts[2], comment: parts[3] || '', time: parts[4] || '' },
+            fallbackTs,
+          ),
+        ].filter(Boolean);
+      }
+    }
+
+    if (/[;,\t]/.test(text)) {
+      const delim = text.includes(';') ? ';' : text.includes('\t') ? '\t' : ',';
+      const parts = text.split(delim).map((p) => p.trim());
+      if (parts.length >= 3) {
+        return [
+          normalizeUdpSpotCandidate(
+            { spotter: parts[0], freq: parts[1], dxCall: parts[2], comment: parts[3] || '', time: parts[4] || '' },
+            fallbackTs,
+          ),
+        ].filter(Boolean);
+      }
+    }
+
+    return [];
+  }
+
+  function isMulticastHost(host) {
+    if (!host) return false;
+    const ipVersion = net.isIP(host);
+    if (ipVersion === 4) {
+      const firstOctet = parseInt(host.split('.')[0], 10);
+      return firstOctet >= 224 && firstOctet <= 239;
+    }
+    if (ipVersion === 6) {
+      return host.toLowerCase().startsWith('ff');
+    }
+    return false;
+  }
+
+  function getOrCreateDxUdpSession(host, port) {
+    const normalizedHost = String(host || '').trim();
+    const normalizedPort = Number.isFinite(port) ? port : 12060;
+    const key = `${normalizedHost || 'any'}:${normalizedPort}`;
+    const existing = dxUdpSessions.get(key);
+    if (existing) {
+      existing.lastAccess = Date.now();
+      return existing;
+    }
+
+    if (dxUdpSessions.size >= DXUDP_MAX_SESSIONS) {
+      const oldest = [...dxUdpSessions.entries()].sort((a, b) => (a[1].lastAccess || 0) - (b[1].lastAccess || 0))[0];
+      if (oldest) {
+        try {
+          oldest[1].socket?.close();
+        } catch {}
+        dxUdpSessions.delete(oldest[0]);
+      }
+    }
+
+    const session = {
+      key,
+      host: normalizedHost,
+      port: normalizedPort,
+      socket: dgram.createSocket({ type: 'udp4', reuseAddr: true }),
+      spots: [],
+      started: false,
+      lastAccess: Date.now(),
+    };
+
+    session.socket.on('message', (buf, rinfo) => {
+      if (session.host && !isMulticastHost(session.host) && rinfo?.address && rinfo.address !== session.host) {
+        return;
+      }
+
+      const now = Date.now();
+      const parsed = parseUdpSpotPayload(buf.toString('utf8'), now);
+      if (!parsed.length) return;
+
+      session.spots.push(...parsed);
+      session.spots = session.spots
+        .filter((s) => now - (s.timestamp || now) <= DXUDP_SPOT_MAX_AGE)
+        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+        .slice(0, DXUDP_MAX_SPOTS);
+    });
+
+    session.socket.on('error', (err) => {
+      logErrorOnce('DX UDP', `${session.host || 'any'}:${session.port} ${err.message}`);
+    });
+
+    session.socket.on('listening', () => {
+      session.started = true;
+      try {
+        if (isMulticastHost(session.host)) {
+          session.socket.addMembership(session.host);
+        }
+      } catch (err) {
+        logErrorOnce('DX UDP', `Multicast ${session.host}:${session.port} ${err.message}`);
+      }
+    });
+
+    session.socket.bind(session.port, '0.0.0.0');
+    dxUdpSessions.set(key, session);
+    return session;
+  }
+
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, session] of dxUdpSessions.entries()) {
+      session.spots = (session.spots || []).filter((s) => now - (s.timestamp || now) <= DXUDP_SPOT_MAX_AGE);
+      if (now - (session.lastAccess || 0) > DXUDP_SESSION_MAX_AGE) {
+        try {
+          session.socket?.close();
+        } catch {}
+        dxUdpSessions.delete(key);
+      }
+    }
+  }, 60 * 1000);
+
   /**
    * SSRF protection: resolve hostname to IP and reject private/reserved addresses.
    * Returns the resolved IP so callers can connect to the IP directly, preventing
@@ -863,6 +1070,9 @@ module.exports = function (app, ctx) {
     const customHost = (req.query.host || CONFIG.dxClusterHost || '').trim();
     const parsedPort = parseInt(req.query.port, 10);
     const customPort = Number.isFinite(parsedPort) ? parsedPort : CONFIG.dxClusterPort;
+    const udpHost = (req.query.udpHost || CONFIG.dxUdpHost || '').trim();
+    const parsedUdpPort = parseInt(req.query.udpPort, 10);
+    const udpPort = Number.isFinite(parsedUdpPort) ? parsedUdpPort : CONFIG.dxUdpPort;
     const userCallsign = (req.query.callsign || CONFIG.dxClusterCallsign || '').trim();
 
     // SECURITY: Validate custom host to prevent SSRF (internal network scanning)
@@ -881,15 +1091,31 @@ module.exports = function (app, ctx) {
       }
     }
 
+    if (source === 'udp') {
+      if (udpHost && !net.isIP(udpHost)) {
+        return res.status(400).json({ error: 'UDP host must be a valid IPv4/IPv6 address (or blank)' });
+      }
+      if (udpPort < 1 || udpPort > 65535) {
+        return res.status(400).json({ error: 'UDP port must be between 1 and 65535' });
+      }
+    }
+
     // Generate cache key based on source profile so custom/proxy/auto don't mix.
     const cacheKey =
       source === 'custom'
         ? `custom-${resolvedHost}-${customPort}-${getDxClusterLoginCallsign(userCallsign)}`
+        : source === 'udp'
+          ? `udp-${udpHost || 'any'}-${udpPort}`
         : `source-${source}`;
     const pathsCache = getDxPathsCache(cacheKey);
 
     // Check cache first (but not for custom sources - they might have different data)
-    if (source !== 'custom' && Date.now() - pathsCache.timestamp < DXPATHS_CACHE_TTL && pathsCache.paths.length > 0) {
+    if (
+      source !== 'custom' &&
+      source !== 'udp' &&
+      Date.now() - pathsCache.timestamp < DXPATHS_CACHE_TTL &&
+      pathsCache.paths.length > 0
+    ) {
       logDebug('[DX Paths] Returning', pathsCache.paths.length, 'cached paths');
       return res.json(pathsCache.paths);
     }
@@ -903,11 +1129,31 @@ module.exports = function (app, ctx) {
       let newSpots = [];
       let usedSource = 'none';
 
+      if (source === 'udp') {
+        const udpSession = getOrCreateDxUdpSession(udpHost, udpPort);
+        udpSession.lastAccess = now;
+        newSpots = (udpSession.spots || []).slice(0, 100).map((s) => ({
+          spotter: s.spotter,
+          spotterGrid: s.spotterGrid || null,
+          dxCall: s.dxCall,
+          dxGrid: s.dxGrid || null,
+          freq: s.freq,
+          comment: s.comment || '',
+          time: s.time || toHHMMz(s.timestamp),
+          timestamp: s.timestamp || now,
+          id: s.id || `${s.dxCall}-${s.freq}-${s.spotter}-${s.timestamp || now}`,
+        }));
+        usedSource = 'udp';
+        if (newSpots.length > 0) {
+          logDebug('[DX Paths] Got', newSpots.length, 'spots from UDP');
+        }
+      }
+
       // Handle custom telnet source (persistent connection, no reconnect-per-poll)
       if (source === 'custom' && !resolvedHost) {
         logDebug('[DX Paths] Custom source selected but no host provided — check DX Cluster settings');
       }
-      if (source === 'custom' && resolvedHost) {
+      if (newSpots.length === 0 && source === 'custom' && resolvedHost) {
         logDebug(
           `[DX Paths] Using custom telnet session: ${resolvedHost}:${customPort} as ${getDxClusterLoginCallsign(userCallsign)}`,
         );
@@ -942,7 +1188,7 @@ module.exports = function (app, ctx) {
       }
 
       // Try proxy if not using custom or custom failed
-      if (newSpots.length === 0 && source !== 'custom') {
+      if (newSpots.length === 0 && source !== 'custom' && source !== 'udp') {
         try {
           const proxyResponse = await fetch(`${DXSPIDER_PROXY_URL}/api/spots?limit=100`, {
             headers: { 'User-Agent': 'OpenHamClock/3.14.11' },
@@ -973,7 +1219,7 @@ module.exports = function (app, ctx) {
       }
 
       // Fallback to HamQTH if proxy failed (never for explicit custom source)
-      if (newSpots.length === 0 && source !== 'custom') {
+      if (newSpots.length === 0 && source !== 'custom' && source !== 'udp') {
         try {
           const response = await fetch('https://www.hamqth.com/dxc_csv.php?limit=50', {
             headers: { 'User-Agent': 'OpenHamClock/3.13.1' },
@@ -1328,5 +1574,5 @@ module.exports = function (app, ctx) {
   });
 
   // Return shared state
-  return { customDxSessions, dxSpotPathsCacheByKey };
+  return { customDxSessions, dxSpotPathsCacheByKey, dxUdpSessions };
 };

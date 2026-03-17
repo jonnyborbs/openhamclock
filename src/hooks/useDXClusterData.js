@@ -38,13 +38,22 @@ export const useDXClusterData = (filters = {}, config = {}) => {
       }
     }
 
+    if (source === 'udp' && config.udpDxCluster) {
+      if (config.udpDxCluster.host) {
+        params.append('udpHost', config.udpDxCluster.host);
+      }
+      if (config.udpDxCluster.port) {
+        params.append('udpPort', config.udpDxCluster.port);
+      }
+    }
+
     // Always send callsign for login (with SSID)
     if (config.callsign && config.callsign !== 'N0CALL') {
       params.append('callsign', config.callsign);
     }
 
     return params.toString();
-  }, [config.dxClusterSource, config.customDxCluster, config.callsign]);
+  }, [config.dxClusterSource, config.customDxCluster, config.udpDxCluster, config.callsign]);
 
   // Apply filters using the consolidated filter function from callsign.js
   const applyFilters = useCallback((data, filters) => {
