@@ -807,7 +807,10 @@ module.exports = function (app, ctx) {
 
   function maybeExtractGrid(value) {
     if (!value || typeof value !== 'string') return null;
-    const m = value.trim().toUpperCase().match(/\b([A-R]{2}\d{2}(?:[A-X]{2})?)\b/);
+    const m = value
+      .trim()
+      .toUpperCase()
+      .match(/\b([A-R]{2}\d{2}(?:[A-X]{2})?)\b/);
     return m ? m[1] : null;
   }
 
@@ -826,15 +829,26 @@ module.exports = function (app, ctx) {
     return Number.isFinite(parsed) ? parsed : fallbackTs;
   }
 
+  function normalizeUdpCallsign(value) {
+    return String(value || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[<>]/g, '')
+      .replace(/-?#$/, '');
+  }
+
   function normalizeUdpSpotCandidate(candidate, fallbackTs = Date.now()) {
     if (!candidate || typeof candidate !== 'object') return null;
 
-    const spotter = String(candidate.spotter || candidate.de || candidate.sourceCall || '').trim().toUpperCase();
-    const dxCall = String(candidate.dxCall || candidate.call || candidate.callsign || '').trim().toUpperCase();
+    const spotter = normalizeUdpCallsign(candidate.spotter || candidate.de || candidate.sourceCall || '');
+    const dxCall = normalizeUdpCallsign(candidate.dxCall || candidate.call || candidate.callsign || '');
     const freqMHz = parseFreqToMHz(candidate.freqMHz ?? candidate.freq ?? candidate.frequency);
     if (!spotter || !dxCall || !Number.isFinite(freqMHz)) return null;
 
-    const timestamp = parseTimestampValue(candidate.timestamp ?? candidate.time, fallbackTs);
+    let timestamp = parseTimestampValue(candidate.timestamp ?? candidate.time, fallbackTs);
+    if (!Number.isFinite(timestamp) || Math.abs(timestamp - fallbackTs) > 12 * 60 * 60 * 1000) {
+      timestamp = fallbackTs;
+    }
     const comment = String(candidate.comment || candidate.info || candidate.text || candidate.remarks || '').trim();
     const dxGrid = maybeExtractGrid(candidate.dxGrid || candidate.grid || comment);
     const spotterGrid = maybeExtractGrid(candidate.spotterGrid);
@@ -852,6 +866,29 @@ module.exports = function (app, ctx) {
     };
   }
 
+  function extractXmlTag(xml, tagName) {
+    const match = String(xml || '').match(new RegExp(`<${tagName}>([^<]*)</${tagName}>`, 'i'));
+    return match ? match[1].trim() : '';
+  }
+
+  function parseMacLoggerDxXmlSpot(xml, fallbackTs) {
+    if (!/<spot>/i.test(xml)) return null;
+
+    const action = extractXmlTag(xml, 'action').toLowerCase();
+    if (action && action !== 'add') return null;
+
+    return normalizeUdpSpotCandidate(
+      {
+        dxCall: extractXmlTag(xml, 'dxcall'),
+        frequency: extractXmlTag(xml, 'frequency'),
+        spotter: extractXmlTag(xml, 'spottercall'),
+        comment: extractXmlTag(xml, 'comment'),
+        timestamp: extractXmlTag(xml, 'timestamp'),
+      },
+      fallbackTs,
+    );
+  }
+
   function parseUdpSpotPayload(payload, fallbackTs = Date.now()) {
     const text = String(payload || '').trim();
     if (!text) return [];
@@ -862,13 +899,21 @@ module.exports = function (app, ctx) {
       return arr.map((item) => normalizeUdpSpotCandidate(item, fallbackTs)).filter(Boolean);
     } catch {}
 
+    if (text.startsWith('<?xml') || text.startsWith('<spot') || text.startsWith('<RadioInfo')) {
+      const xmlSpot = parseMacLoggerDxXmlSpot(text, fallbackTs);
+      return xmlSpot ? [xmlSpot] : [];
+    }
+
     const dxDe = text.match(/^DX\s+de\s+([A-Z0-9\/-]+)[^:]*:\s*([0-9.]+)\s+([A-Z0-9\/-]+)\s*(.*?)\s*(\d{4}Z?)?\s*$/i);
     if (dxDe) {
       const [, spotter, freq, dxCall, rawComment, hhmm] = dxDe;
-      const comment = (rawComment || '').trim().replace(/\s+\d{4}Z?$/i, '').trim();
-      return [normalizeUdpSpotCandidate({ spotter, dxCall, freq, comment, time: hhmm || undefined }, fallbackTs)].filter(
-        Boolean,
-      );
+      const comment = (rawComment || '')
+        .trim()
+        .replace(/\s+\d{4}Z?$/i, '')
+        .trim();
+      return [
+        normalizeUdpSpotCandidate({ spotter, dxCall, freq, comment, time: hhmm || undefined }, fallbackTs),
+      ].filter(Boolean);
     }
 
     if (text.includes('^')) {
@@ -1106,7 +1151,7 @@ module.exports = function (app, ctx) {
         ? `custom-${resolvedHost}-${customPort}-${getDxClusterLoginCallsign(userCallsign)}`
         : source === 'udp'
           ? `udp-${udpHost || 'any'}-${udpPort}`
-        : `source-${source}`;
+          : `source-${source}`;
     const pathsCache = getDxPathsCache(cacheKey);
 
     // Check cache first (but not for custom sources - they might have different data)
@@ -1524,8 +1569,8 @@ module.exports = function (app, ctx) {
             comment: spot.comment,
             time: spot.time,
             id: spot.id,
-            // Sorting is driven by spot-provided HHMMz time when available.
-            timestamp: parseSpotHHMMzToTimestamp(spot.time, Number.isFinite(spot.timestamp) ? spot.timestamp : now),
+            // Preserve source timestamps for retention; only fall back to HH:MMz parsing when no timestamp exists.
+            timestamp: Number.isFinite(spot.timestamp) ? spot.timestamp : parseSpotHHMMzToTimestamp(spot.time, now),
           };
         })
         .filter(Boolean);
