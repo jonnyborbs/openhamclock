@@ -87,9 +87,7 @@ export const PropagationPanel = ({
     );
   }
 
-  const { solarData, distance, currentBands, currentHour, hourlyPredictions, muf, luf, ionospheric, dataSource } =
-    propagation;
-  const hasRealData = ionospheric?.method === 'direct' || ionospheric?.method === 'interpolated';
+  const { solarData, distance, currentBands, currentHour, hourlyPredictions, muf, luf, dataSource } = propagation;
   const isDaytime = new Date().getUTCHours() >= 6 && new Date().getUTCHours() <= 18;
 
   // Heat map colors - supports both schemes
@@ -175,9 +173,6 @@ export const PropagationPanel = ({
       <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>
           {viewMode === 'bands' ? t('band.conditions') : viewMode === 'health' ? '📶 Band Health' : '⌇ VOACAP'}
-          {hasRealData && viewMode !== 'bands' && viewMode !== 'health' && (
-            <span style={{ color: '#00ff88', fontSize: '10px', marginLeft: '4px' }}>●</span>
-          )}
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           {!forcedMode && (
@@ -419,7 +414,7 @@ export const PropagationPanel = ({
               display: 'flex',
               justifyContent: 'space-between',
               padding: '4px 8px',
-              background: hasRealData ? 'rgba(0, 255, 136, 0.1)' : 'var(--bg-tertiary)',
+              background: 'var(--bg-tertiary)',
               borderRadius: '4px',
               marginBottom: '4px',
               fontSize: '11px',
@@ -437,10 +432,8 @@ export const PropagationPanel = ({
                 <span style={{ color: 'var(--text-muted)' }}> MHz</span>
               </span>
             </div>
-            <span style={{ color: hasRealData ? '#00ff88' : 'var(--text-muted)', fontSize: '10px' }}>
-              {hasRealData
-                ? `⌇ Iono: ${ionospheric?.source || 'ionosonde'}${ionospheric?.distance ? ` (${formatDistance(ionospheric.distance, allUnits.dist)} from path)` : ''}`
-                : `⚡ ${t('propagation.estimated')}`}
+            <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+              {dataSource || t('propagation.estimated')}
             </span>
             {dataSource && dataSource.includes('ITU') && (
               <span
@@ -571,8 +564,7 @@ export const PropagationPanel = ({
                   </span>
                 </div>
                 <div style={{ color: 'var(--text-muted)' }}>
-                  {formatDistance(distance || 0, allUnits.dist)} •{' '}
-                  {ionospheric?.foF2 ? `foF2=${ionospheric.foF2}` : `SSN=${solarData?.ssn}`}
+                  {formatDistance(distance || 0, allUnits.dist)} • SSN={solarData?.ssn}
                 </div>
               </div>
             </div>
@@ -594,17 +586,10 @@ export const PropagationPanel = ({
                   <span style={{ color: 'var(--text-muted)' }}>SFI </span>
                   <span style={{ color: 'var(--accent-amber)' }}>{solarData?.sfi}</span>
                 </span>
-                {ionospheric?.foF2 ? (
-                  <span>
-                    <span style={{ color: 'var(--text-muted)' }}>foF2 </span>
-                    <span style={{ color: '#00ff88' }}>{ionospheric.foF2}</span>
-                  </span>
-                ) : (
-                  <span>
-                    <span style={{ color: 'var(--text-muted)' }}>SSN </span>
-                    <span style={{ color: 'var(--accent-cyan)' }}>{solarData?.ssn}</span>
-                  </span>
-                )}
+                <span>
+                  <span style={{ color: 'var(--text-muted)' }}>SSN </span>
+                  <span style={{ color: 'var(--accent-cyan)' }}>{solarData?.ssn}</span>
+                </span>
                 <span>
                   <span style={{ color: 'var(--text-muted)' }}>K </span>
                   <span style={{ color: solarData?.kIndex >= 4 ? '#ff4444' : '#00ff88' }}>{solarData?.kIndex}</span>
