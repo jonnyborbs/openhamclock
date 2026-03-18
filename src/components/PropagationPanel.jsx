@@ -2,11 +2,15 @@
  * PropagationPanel Component (VOACAP)
  * Toggleable between heatmap chart, bar chart, and band conditions view
  */
-import React, { useState, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatDistance } from '../utils/geo.js';
+import { saveConfig, loadConfig } from '../utils/config.js';
 import BandHealthPanel from './BandHealthPanel.jsx';
 import useAutoRotate from '../hooks/app/useAutoRotate.js';
+
+const MODES = ['SSB', 'CW', 'FT8', 'FT4', 'WSPR', 'JS8', 'RTTY', 'AM'];
+const POWERS = [5, 10, 25, 50, 100, 200, 500, 1000, 1500];
 
 export const PropagationPanel = ({
   propagation,
@@ -19,6 +23,44 @@ export const PropagationPanel = ({
   clusterFilters,
 }) => {
   const { t } = useTranslation();
+
+  // Local state for inline controls — initialized from prop, synced back on change
+  const [localMode, setLocalMode] = useState(propConfig.mode || 'SSB');
+  const [localPower, setLocalPower] = useState(propConfig.power || 100);
+  const [localAntenna, setLocalAntenna] = useState(propConfig.antenna || 'isotropic');
+
+  // Keep local state in sync if parent config changes (e.g. settings panel update)
+  useEffect(() => {
+    if (propConfig.mode && propConfig.mode !== localMode) setLocalMode(propConfig.mode);
+  }, [propConfig.mode]);
+  useEffect(() => {
+    if (propConfig.power && propConfig.power !== localPower) setLocalPower(propConfig.power);
+  }, [propConfig.power]);
+  useEffect(() => {
+    if (propConfig.antenna && propConfig.antenna !== localAntenna) setLocalAntenna(propConfig.antenna);
+  }, [propConfig.antenna]);
+
+  // Antenna profiles fetched from server
+  const [antennaProfiles, setAntennaProfiles] = useState(null);
+  useEffect(() => {
+    fetch('/api/propagation/antennas')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data) setAntennaProfiles(data);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Update propagation config (mode, power, antenna) — update local state + persist
+  const updatePropConfig = useCallback((updates) => {
+    if (updates.mode != null) setLocalMode(updates.mode);
+    if (updates.power != null) setLocalPower(updates.power);
+    if (updates.antenna != null) setLocalAntenna(updates.antenna);
+    const cfg = loadConfig();
+    cfg.propagation = { ...cfg.propagation, ...updates };
+    saveConfig(cfg);
+  }, []);
+
   // Load view mode preference from localStorage
   const [internalViewMode, setViewMode] = useState(() => {
     try {
@@ -87,9 +129,7 @@ export const PropagationPanel = ({
     );
   }
 
-  const { solarData, distance, currentBands, currentHour, hourlyPredictions, muf, luf, ionospheric, dataSource } =
-    propagation;
-  const hasRealData = ionospheric?.method === 'direct' || ionospheric?.method === 'interpolated';
+  const { solarData, distance, currentBands, currentHour, hourlyPredictions, muf, luf, dataSource } = propagation;
   const isDaytime = new Date().getUTCHours() >= 6 && new Date().getUTCHours() <= 18;
 
   // Heat map colors - supports both schemes
@@ -167,22 +207,28 @@ export const PropagationPanel = ({
   };
 
   return (
-    <div
-      className="panel"
-      style={{ cursor: forcedMode ? 'default' : 'pointer' }}
-      onClick={forcedMode ? undefined : cycleViewMode}
-    >
+    <div className="panel">
       <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>
           {viewMode === 'bands' ? t('band.conditions') : viewMode === 'health' ? '📶 Band Health' : '⌇ VOACAP'}
-          {hasRealData && viewMode !== 'bands' && viewMode !== 'health' && (
-            <span style={{ color: '#00ff88', fontSize: '10px', marginLeft: '4px' }}>●</span>
-          )}
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           {!forcedMode && (
-            <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-              {viewModeLabels[viewMode]} • {t('propagation.view.toggle')}
+            <span
+              onClick={cycleViewMode}
+              style={{
+                fontSize: '10px',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                padding: '1px 6px',
+                borderRadius: '3px',
+                background: 'var(--bg-tertiary)',
+                border: '1px solid var(--border-color)',
+                userSelect: 'none',
+              }}
+              title={t('propagation.view.toggle')}
+            >
+              {viewModeLabels[viewMode]} ▸
             </span>
           )}
           {/* Auto-rotate controls */}
@@ -419,7 +465,7 @@ export const PropagationPanel = ({
               display: 'flex',
               justifyContent: 'space-between',
               padding: '4px 8px',
-              background: hasRealData ? 'rgba(0, 255, 136, 0.1)' : 'var(--bg-tertiary)',
+              background: 'var(--bg-tertiary)',
               borderRadius: '4px',
               marginBottom: '4px',
               fontSize: '11px',
@@ -437,10 +483,8 @@ export const PropagationPanel = ({
                 <span style={{ color: 'var(--text-muted)' }}> MHz</span>
               </span>
             </div>
-            <span style={{ color: hasRealData ? '#00ff88' : 'var(--text-muted)', fontSize: '10px' }}>
-              {hasRealData
-                ? `⌇ Iono: ${ionospheric?.source || 'ionosonde'}${ionospheric?.distance ? ` (${formatDistance(ionospheric.distance, allUnits.dist)} from path)` : ''}`
-                : `⚡ ${t('propagation.estimated')}`}
+            <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+              {dataSource || t('propagation.estimated')}
             </span>
             {dataSource && dataSource.includes('ITU') && (
               <span
@@ -454,6 +498,94 @@ export const PropagationPanel = ({
                 }}
               >
                 🔬 ITU-R P.533
+              </span>
+            )}
+          </div>
+
+          {/* Inline Mode / Power / Antenna controls */}
+          <div
+            style={{
+              display: 'flex',
+              gap: '4px',
+              alignItems: 'center',
+              padding: '3px 8px',
+              marginBottom: '4px',
+              fontSize: '10px',
+              flexWrap: 'wrap',
+            }}
+          >
+            {/* Mode */}
+            <select
+              value={localMode}
+              onChange={(e) => updatePropConfig({ mode: e.target.value })}
+              style={{
+                background: 'var(--bg-tertiary)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '3px',
+                padding: '2px 4px',
+                fontSize: '10px',
+                fontFamily: 'JetBrains Mono, monospace',
+              }}
+            >
+              {MODES.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+
+            {/* Power */}
+            <select
+              value={localPower}
+              onChange={(e) => updatePropConfig({ power: parseInt(e.target.value) })}
+              style={{
+                background: 'var(--bg-tertiary)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '3px',
+                padding: '2px 4px',
+                fontSize: '10px',
+                fontFamily: 'JetBrains Mono, monospace',
+              }}
+            >
+              {POWERS.map((p) => (
+                <option key={p} value={p}>
+                  {p}W
+                </option>
+              ))}
+            </select>
+
+            {/* Antenna */}
+            {antennaProfiles && (
+              <select
+                value={localAntenna}
+                onChange={(e) => updatePropConfig({ antenna: e.target.value })}
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '3px',
+                  padding: '2px 4px',
+                  fontSize: '10px',
+                  fontFamily: 'JetBrains Mono, monospace',
+                  maxWidth: '110px',
+                }}
+              >
+                {Object.entries(antennaProfiles).map(([key, profile]) => (
+                  <option key={key} value={key}>
+                    {profile.name} ({profile.gain > 0 ? '+' : ''}
+                    {profile.gain}dBi)
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {/* Signal margin indicator */}
+            {propagation?.signalMargin != null && (
+              <span style={{ color: propagation.signalMargin >= 0 ? '#00ff88' : '#ff6666', marginLeft: 'auto' }}>
+                {propagation.signalMargin > 0 ? '+' : ''}
+                {propagation.signalMargin}dB
               </span>
             )}
           </div>
@@ -485,7 +617,8 @@ export const PropagationPanel = ({
                     >
                       {band.replace('m', '')}
                     </div>
-                    {Array.from({ length: 24 }, (_, hour) => {
+                    {Array.from({ length: 24 }, (_, i) => {
+                      const hour = (currentHour - 12 + i + 24) % 24;
                       let rel = 0;
                       if (hour === currentHour && currentBands?.length > 0) {
                         const currentBandData = currentBands.find((b) => b.band === band);
@@ -524,13 +657,21 @@ export const PropagationPanel = ({
                 }}
               >
                 <div>UTC</div>
-                {[0, '', '', 3, '', '', 6, '', '', 9, '', '', 12, '', '', 15, '', '', 18, '', '', 21, '', ''].map(
-                  (h, i) => (
-                    <div key={i} style={{ textAlign: 'center' }}>
-                      {h}
+                {Array.from({ length: 24 }, (_, i) => {
+                  const hour = (currentHour - 12 + i + 24) % 24;
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        textAlign: 'center',
+                        fontWeight: hour === currentHour ? '700' : 'normal',
+                        color: hour === currentHour ? 'var(--text-primary)' : undefined,
+                      }}
+                    >
+                      {hour % 3 === 0 ? hour : ''}
                     </div>
-                  ),
-                )}
+                  );
+                })}
               </div>
 
               {/* Legend */}
@@ -571,8 +712,7 @@ export const PropagationPanel = ({
                   </span>
                 </div>
                 <div style={{ color: 'var(--text-muted)' }}>
-                  {formatDistance(distance || 0, allUnits.dist)} •{' '}
-                  {ionospheric?.foF2 ? `foF2=${ionospheric.foF2}` : `SSN=${solarData?.ssn}`}
+                  {formatDistance(distance || 0, allUnits.dist)} • SSN={solarData?.ssn}
                 </div>
               </div>
             </div>
@@ -594,17 +734,10 @@ export const PropagationPanel = ({
                   <span style={{ color: 'var(--text-muted)' }}>SFI </span>
                   <span style={{ color: 'var(--accent-amber)' }}>{solarData?.sfi}</span>
                 </span>
-                {ionospheric?.foF2 ? (
-                  <span>
-                    <span style={{ color: 'var(--text-muted)' }}>foF2 </span>
-                    <span style={{ color: '#00ff88' }}>{ionospheric.foF2}</span>
-                  </span>
-                ) : (
-                  <span>
-                    <span style={{ color: 'var(--text-muted)' }}>SSN </span>
-                    <span style={{ color: 'var(--accent-cyan)' }}>{solarData?.ssn}</span>
-                  </span>
-                )}
+                <span>
+                  <span style={{ color: 'var(--text-muted)' }}>SSN </span>
+                  <span style={{ color: 'var(--accent-cyan)' }}>{solarData?.ssn}</span>
+                </span>
                 <span>
                   <span style={{ color: 'var(--text-muted)' }}>K </span>
                   <span style={{ color: solarData?.kIndex >= 4 ? '#ff4444' : '#00ff88' }}>{solarData?.kIndex}</span>

@@ -51,6 +51,16 @@ export default function useAppConfig() {
     applyTheme(config.theme || 'dark');
   }, []);
 
+  // Listen for config changes from other components (e.g. PropagationPanel inline controls)
+  // saveConfig() dispatches this event after writing to localStorage.
+  useEffect(() => {
+    const onConfigChange = (e) => {
+      if (e.detail) setConfig(e.detail);
+    };
+    window.addEventListener('openhamclock-config-change', onConfigChange);
+    return () => window.removeEventListener('openhamclock-config-change', onConfigChange);
+  }, []);
+
   const handleSaveConfig = (newConfig) => {
     setConfig(newConfig);
     saveConfig(newConfig);

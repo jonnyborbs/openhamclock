@@ -1040,32 +1040,47 @@ export const WorldMap = ({
 
       const now = new Date();
 
-      // Sun marker
+      // Sun marker — SVG sun with rays
       const sunPos = getSunPosition(now);
+      const sunSvg = `<svg width="28" height="28" viewBox="0 0 28 28" xmlns="http://www.w3.org/2000/svg">
+        <defs><radialGradient id="sg"><stop offset="0%" stop-color="#fff8a0"/><stop offset="50%" stop-color="#ffdd00"/><stop offset="100%" stop-color="#ff9900"/></radialGradient></defs>
+        <g stroke="#ffaa00" stroke-width="1.5" stroke-linecap="round">
+          <line x1="14" y1="1" x2="14" y2="5"/><line x1="14" y1="23" x2="14" y2="27"/>
+          <line x1="1" y1="14" x2="5" y2="14"/><line x1="23" y1="14" x2="27" y2="14"/>
+          <line x1="4.8" y1="4.8" x2="7.6" y2="7.6"/><line x1="20.4" y1="20.4" x2="23.2" y2="23.2"/>
+          <line x1="23.2" y1="4.8" x2="20.4" y2="7.6"/><line x1="4.8" y1="23.2" x2="7.6" y2="20.4"/>
+        </g>
+        <circle cx="14" cy="14" r="7" fill="url(#sg)" stroke="#ffaa00" stroke-width="1"/>
+      </svg>`;
       const sunIcon = L.divIcon({
-        className: 'custom-marker sun-marker',
-        html: '☼',
-        iconSize: [24, 24],
-        iconAnchor: [12, 12],
+        className: 'sun-marker-icon',
+        html: sunSvg,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
       });
       sunMarkerRef.current = L.marker([sunPos.lat, sunPos.lon], {
         icon: sunIcon,
       })
-        .bindPopup(`<b>☼ Subsolar Point</b><br>${sunPos.lat.toFixed(2)}°, ${sunPos.lon.toFixed(2)}°`)
+        .bindPopup(`<b>Subsolar Point</b><br>${sunPos.lat.toFixed(2)}°, ${sunPos.lon.toFixed(2)}°`)
         .addTo(map);
 
-      // Moon marker
+      // Moon marker — SVG crescent moon
       const moonPos = getMoonPosition(now);
+      const moonSvg = `<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <defs><radialGradient id="mg" cx="40%" cy="40%"><stop offset="0%" stop-color="#f0f0ff"/><stop offset="100%" stop-color="#b0b0cc"/></radialGradient></defs>
+        <circle cx="12" cy="12" r="9" fill="url(#mg)" stroke="#aaaacc" stroke-width="1"/>
+        <circle cx="16" cy="10" r="7" fill="rgba(0,0,20,0.85)"/>
+      </svg>`;
       const moonIcon = L.divIcon({
-        className: 'custom-marker moon-marker',
-        html: '☽',
+        className: 'moon-marker-icon',
+        html: moonSvg,
         iconSize: [24, 24],
         iconAnchor: [12, 12],
       });
       moonMarkerRef.current = L.marker([moonPos.lat, moonPos.lon], {
         icon: moonIcon,
       })
-        .bindPopup(`<b>☽ Sublunar Point</b><br>${moonPos.lat.toFixed(2)}°, ${moonPos.lon.toFixed(2)}°`)
+        .bindPopup(`<b>Sublunar Point</b><br>${moonPos.lat.toFixed(2)}°, ${moonPos.lon.toFixed(2)}°`)
         .addTo(map);
     };
 
@@ -2363,10 +2378,6 @@ export const WorldMap = ({
               </span>
             </div>
           )}
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-            <span style={{ color: '#ffcc00' }}>☼&nbsp;{t('app.legend.sun')}</span>
-            <span style={{ color: '#aaaaaa' }}>☽&nbsp;{t('app.legend.moon')}</span>
-          </div>
         </div>
       )}
       {!hideOverlays && !mapUiHidden && showLegend && editingBand && (

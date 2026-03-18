@@ -27,6 +27,7 @@ export const DEFAULT_CONFIG = {
   propagation: {
     mode: 'SSB', // SSB, CW, FT8, FT4, WSPR, JS8, RTTY, PSK31
     power: 100, // TX power in watts
+    antenna: 'isotropic', // Antenna profile key
   },
   theme: 'dark', // 'dark', 'light', 'legacy', or 'retro'
   layout: 'modern', // 'modern' or 'classic'

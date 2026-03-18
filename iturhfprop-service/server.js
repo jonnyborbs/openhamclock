@@ -43,7 +43,9 @@ const LOG_INTERVAL = 5 * 60 * 1000; // Only log every 5 minutes
 
 function getCacheKey(params) {
   // Round coordinates to 1 decimal place for better cache hits
-  const key = `${params.txLat.toFixed(1)},${params.txLon.toFixed(1)}-${params.rxLat.toFixed(1)},${params.rxLon.toFixed(1)}-${params.month}-${params.hour}-${params.ssn}`;
+  const pw = Math.round(params.txPower || 100);
+  const gn = Math.round((params.txGain || 0) * 10);
+  const key = `${params.txLat.toFixed(1)},${params.txLon.toFixed(1)}-${params.rxLat.toFixed(1)},${params.rxLon.toFixed(1)}-${params.month}-${params.hour}-${params.ssn}-${pw}-${gn}`;
   return key;
 }
 
@@ -170,12 +172,12 @@ PathTXName "TX"
 Path.L_tx.lat ${txLat.toFixed(4)}
 Path.L_tx.lng ${txLon.toFixed(4)}
 TXAntFilePath "ISOTROPIC"
-TXGOS 0.0
+TXGOS ${txGain.toFixed(1)}
 PathRXName "RX"
 Path.L_rx.lat ${rxLat.toFixed(4)}
 Path.L_rx.lng ${rxLon.toFixed(4)}
 RXAntFilePath "ISOTROPIC"
-RXGOS 0.0
+RXGOS ${rxGain.toFixed(1)}
 AntennaOrientation "TX2RX"
 Path.year ${year}
 Path.month ${month}
@@ -622,7 +624,7 @@ app.get('/api/predict', async (req, res) => {
  */
 app.get('/api/predict/hourly', async (req, res) => {
   try {
-    const { txLat, txLon, rxLat, rxLon, month, ssn, year = new Date().getFullYear() } = req.query;
+    const { txLat, txLon, rxLat, rxLon, month, ssn, year = new Date().getFullYear(), txPower, txGain } = req.query;
 
     // Validate required params
     if (!txLat || !txLon || !rxLat || !rxLon) {
@@ -637,6 +639,8 @@ app.get('/api/predict/hourly', async (req, res) => {
       year: parseInt(year),
       month: parseInt(month) || new Date().getMonth() + 1,
       ssn: parseInt(ssn) || 100,
+      txPower: parseInt(txPower) || 100,
+      txGain: parseFloat(txGain) || 0,
     };
 
     // Run predictions for each hour (0-23 UTC)
@@ -684,7 +688,7 @@ app.get('/api/predict/hourly', async (req, res) => {
  */
 app.get('/api/bands', async (req, res) => {
   try {
-    const { txLat, txLon, rxLat, rxLon, month, hour, ssn } = req.query;
+    const { txLat, txLon, rxLat, rxLon, month, hour, ssn, txPower, txGain } = req.query;
 
     if (!txLat || !txLon || !rxLat || !rxLon) {
       return res.status(400).json({ error: 'Missing required coordinates' });
@@ -699,6 +703,8 @@ app.get('/api/bands', async (req, res) => {
       month: parseInt(month) || new Date().getMonth() + 1,
       hour: parseInt(hour) || new Date().getUTCHours() || 12,
       ssn: parseInt(ssn) || 100,
+      txPower: parseInt(txPower) || 100,
+      txGain: parseFloat(txGain) || 0,
       frequencies: Object.values(HF_BANDS),
     };
 

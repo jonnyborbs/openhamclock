@@ -11,6 +11,7 @@ export const usePropagation = (deLocation, dxLocation, propagationConfig = {}) =
 
   const mode = propagationConfig.mode || 'SSB';
   const power = propagationConfig.power || 100;
+  const antenna = propagationConfig.antenna || 'isotropic';
 
   useEffect(() => {
     if (!deLocation || !dxLocation) return;
@@ -24,6 +25,7 @@ export const usePropagation = (deLocation, dxLocation, propagationConfig = {}) =
           dxLon: dxLocation.lon,
           mode,
           power,
+          antenna,
         });
 
         const response = await fetch(`/api/propagation?${params}`);
@@ -41,7 +43,7 @@ export const usePropagation = (deLocation, dxLocation, propagationConfig = {}) =
     fetchPropagation();
     const interval = setInterval(fetchPropagation, 10 * 60 * 1000); // 10 minutes
     return () => clearInterval(interval);
-  }, [deLocation?.lat, deLocation?.lon, dxLocation?.lat, dxLocation?.lon, mode, power]);
+  }, [deLocation?.lat, deLocation?.lon, dxLocation?.lat, dxLocation?.lon, mode, power, antenna]);
 
   return { data, loading };
 };

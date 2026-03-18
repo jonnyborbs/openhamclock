@@ -421,18 +421,16 @@ body::before {
   height: 32px;
 }
 
-.sun-marker {
-  background: radial-gradient(circle, #ffdd00 0%, #ff8800 100%);
-  width: 24px;
-  height: 24px;
-  border: 2px solid #ffaa00;
-}
-
-.moon-marker {
-  background: radial-gradient(circle, #e8e8f0 0%, #8888aa 100%);
-  width: 24px;
-  height: 24px;
-  border: 2px solid #aaaacc;
+.sun-marker-icon,
+.moon-marker-icon {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 0 4px rgba(0, 0, 0, 0.6));
 }
 
 /* Classic theme markers - square */
