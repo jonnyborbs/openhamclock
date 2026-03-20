@@ -10,6 +10,24 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 const POLL_INTERVAL = 10000;
 const DIRECT_POLL_MS = 10000;
 
+// Polyfill for crypto.randomUUID — not available over plain HTTP (non-secure context)
+function generateUUID() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // crypto.getRandomValues is available even in non-secure contexts
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (c) =>
+      (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16),
+    );
+  }
+  // Last-resort fallback
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
 // Per-user MQTT session ID — persisted in localStorage so it survives page reloads
 function getMeshSessionId() {
   const key = 'openhamclock_mesh_session';
@@ -18,10 +36,7 @@ function getMeshSessionId() {
     id = localStorage.getItem(key);
   } catch {}
   if (id && /^[a-zA-Z0-9_-]{8,64}$/.test(id)) return id;
-  id =
-    typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID().replace(/-/g, '').slice(0, 32)
-      : Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+  id = generateUUID().replace(/-/g, '').slice(0, 32);
   try {
     localStorage.setItem(key, id);
   } catch {}
