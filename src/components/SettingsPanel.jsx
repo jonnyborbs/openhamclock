@@ -475,7 +475,7 @@ export const SettingsPanel = ({
             fontSize: '20px',
           }}
         >
-          {t('station.settings.title')}
+          ⚙ {t('station.settings.title')}
         </h2>
 
         {/* Tab Navigation */}
@@ -504,7 +504,7 @@ export const SettingsPanel = ({
               fontFamily: 'JetBrains Mono, monospace',
             }}
           >
-            {t('station.settings.tab1.title')}
+            📻 {t('station.settings.tab.title.station')}
           </button>
 
           <button
@@ -522,7 +522,7 @@ export const SettingsPanel = ({
               fontFamily: 'JetBrains Mono, monospace',
             }}
           >
-            Integrations
+            🔌 {t('station.settings.tab.title.integrations')}
           </button>
 
           <button
@@ -540,7 +540,7 @@ export const SettingsPanel = ({
               fontFamily: 'JetBrains Mono, monospace',
             }}
           >
-            Display
+            🎨 {t('station.settings.tab.title.display')}
           </button>
 
           <button
@@ -558,8 +558,9 @@ export const SettingsPanel = ({
               fontFamily: 'JetBrains Mono, monospace',
             }}
           >
-            {t('station.settings.tab2.title')}
+            🗺️ {t('station.settings.tab.title.mapLayers')}
           </button>
+
           <button
             onClick={() => setActiveTab('satellites')}
             style={{
@@ -575,8 +576,9 @@ export const SettingsPanel = ({
               fontFamily: 'JetBrains Mono, monospace',
             }}
           >
-            {t('station.settings.tab3.title')}
+            🛰️ {t('station.settings.tab.title.satellites')}
           </button>
+
           <button
             onClick={() => {
               setActiveTab('profiles');
@@ -595,8 +597,9 @@ export const SettingsPanel = ({
               fontFamily: 'JetBrains Mono, monospace',
             }}
           >
-            Profiles
+            👤 {t('station.settings.tab.title.profiles')}
           </button>
+
           <button
             onClick={() => setActiveTab('community')}
             style={{
@@ -612,7 +615,7 @@ export const SettingsPanel = ({
               fontFamily: 'JetBrains Mono, monospace',
             }}
           >
-            Community
+            🌐 {t('station.settings.tab.title.community')}
           </button>
         </div>
 

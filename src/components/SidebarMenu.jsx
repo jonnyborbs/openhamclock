@@ -8,19 +8,9 @@
  * replacing the separate "Layout" dockable panel.
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { IconGear, IconExpand, IconShrink } from './Icons.jsx';
 import DonateButton from './DonateButton.jsx';
-
-// Sidebar menu items — each maps to a settings tab
-const MENU_ITEMS = [
-  { id: 'station', icon: '📻', label: 'Station' },
-  { id: 'integrations', icon: '🔌', label: 'Integrations' },
-  { id: 'display', icon: '🎨', label: 'Display' },
-  { id: 'layers', icon: '🗺️', label: 'Layers' },
-  { id: 'satellites', icon: '🛰️', label: 'Satellites' },
-  { id: 'profiles', icon: '👤', label: 'Profiles' },
-  { id: 'community', icon: '🌐', label: 'Community' },
-];
 
 const COLLAPSED_WIDTH = 40;
 const EXPANDED_WIDTH = 180;
@@ -58,6 +48,19 @@ export default function SidebarMenu({
   const hoverTimeout = useRef(null);
   const hideTimeout = useRef(null);
   const isMobile = breakpoint === 'mobile';
+
+  const { t } = useTranslation();
+
+  // Sidebar menu items — each maps to a settings tab
+  const MENU_ITEMS = [
+    { id: 'station', icon: '📻', label: `${t('station.settings.tab.title.station')}` },
+    { id: 'integrations', icon: '🔌', label: `${t('station.settings.tab.title.integrations')}` },
+    { id: 'display', icon: '🎨', label: `${t('station.settings.tab.title.display')}` },
+    { id: 'layers', icon: '🗺️', label: `${t('station.settings.tab.title.mapLayers')}` },
+    { id: 'satellites', icon: '🛰️', label: `${t('station.settings.tab.title.satellites')}` },
+    { id: 'profiles', icon: '👤', label: `${t('station.settings.tab.title.profiles')}` },
+    { id: 'community', icon: '🌐', label: `${t('station.settings.tab.title.community')}` },
+  ];
 
   // Don't render sidebar on mobile
   if (isMobile) return null;
