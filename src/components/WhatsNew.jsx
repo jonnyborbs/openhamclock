@@ -18,7 +18,69 @@ const ANNOUNCEMENT = {
 // ─── Changelog ──────────────────────────────────────────────
 // Add new versions at the TOP of this array.
 // Each entry: { version, date, heading, features: [...] }
+// ─── Versioning ─────────────────────────────────────────────
+// Starting with v26.1.1 we adopted a year-based versioning scheme:
+//   X.Y.Z  →  X = current year, Y = visual/UI changes, Z = backend changes
+//
+// Historical note: prior version numbers (v1 through v15) were inherited from
+// the original HamClock project and got out of sync at one point — we simply
+// continued with the existing numbering rather than correcting it mid-stream.
+// The jump to v26 resets the scheme to something meaningful going forward.
+
 const CHANGELOG = [
+  {
+    version: '26.1.1',
+    date: '2026-03-20',
+    heading:
+      'New versioning scheme (year.ui.backend), SDR integration for rig-bridge, DX cluster text filter, RBN spotter filter, DX favorites, improved activation panel icons, DX target panel toggle, bug fixes, and satellite updates.',
+    features: [
+      {
+        icon: '📻',
+        title: 'SDR Integration — FlexRadio SmartSDR & RTL-SDR',
+        desc: 'Rig-bridge now supports FlexRadio 6000/8000 series via native SmartSDR TCP API (port 4992) and cheap RTL-SDR dongles via rtl_tcp. No rigctld or Windows-only software needed.',
+      },
+      {
+        icon: '🔍',
+        title: 'DX Cluster — Comment Text Filter',
+        desc: 'New "Text" tab in DX Cluster filters lets you search spot comments for contest and event keywords like TEST, SSS, SKCC. Multiple keywords use OR logic — great for finding short-duration events quickly.',
+      },
+      {
+        icon: '📡',
+        title: 'RBN — Filter by Spotter',
+        desc: 'The RBN panel now has a spotter filter field. Enter one or more skimmer callsigns (e.g. NU4F, W3LPL) to see only spots from nearby stations — useful for monitoring local propagation.',
+      },
+      {
+        icon: '⭐',
+        title: 'DX Favorites',
+        desc: 'Save up to 10 DX target grid squares as favorites for quick switching. Star button next to the grid input lets you add, rename, and recall saved locations with a single click. Syncs across devices.',
+      },
+      {
+        icon: '🎯',
+        title: 'DX Target Panel Toggle',
+        desc: 'You can now independently show or hide the DX target info panel (grid, bearing, sun times) via Settings → Layers, separate from the DE/DX map markers.',
+      },
+      {
+        icon: '🎨',
+        title: 'Activation Panel — Shape & Color Icons',
+        desc: 'POTA, WWFF, SOTA, and WWBOTA tabs and panel headers now show their actual map marker shape and color (▲ ▼ ◆ ■) instead of generic icons. Removed from the band legend to reduce clutter.',
+      },
+      {
+        icon: '🛰️',
+        title: 'Satellite — PO-101 Restored',
+        desc: 'PO-101 (DIWATA-2B) has been restored to the satellite list — it is still active with FM downlink on 145.900 MHz.',
+      },
+      {
+        icon: '🐛',
+        title: 'Bug Fixes',
+        desc: 'Fixed SOTA labels toggle crash (default value on wrong prop), DX cluster filter badge count not reflecting exclude filters, and activation panel border divider crash when using filtered data.',
+      },
+      {
+        icon: '🗺️',
+        title: 'Azimuthal Projection — All Map Styles',
+        desc: 'Azimuthal projection now supports all tile map styles (satellite, terrain, dark, streets, etc.) — projection is a separate toggle from style.',
+      },
+    ],
+  },
   {
     version: '15.7.3',
     date: '2026-03-17',

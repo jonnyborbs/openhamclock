@@ -292,6 +292,8 @@
   "station.settings.layout.compact.describe": "→ 4:3 や小型画面向けのデータ重視レイアウト",
   "station.settings.layout.dockable": "ドッキング可能",
   "station.settings.layout.dockable.describe": "サイズ変更可能、ドラッグ可能なタブ付きパネル",
+  "station.settings.layout.emcomm": "EmComm (Beta)",
+  "station.settings.layout.emcomm.describe": "Emergency Communications operations dashboard (Beta)",
   "station.settings.layout.modern": "モダン",
   "station.settings.layout.modern.describe": "→ モダンなレスポンシブグリッド",
   "station.settings.layout.reset.button": "パネルレイアウトをリセット",

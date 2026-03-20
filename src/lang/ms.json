@@ -292,6 +292,8 @@
   "station.settings.layout.compact.describe": "→ Susun atur data-dahulu untuk skrin 4:3",
   "station.settings.layout.dockable": "Boleh Dok",
   "station.settings.layout.dockable.describe": "Panel boleh suaiz dan seret dengan tab",
+  "station.settings.layout.emcomm": "EmComm (Beta)",
+  "station.settings.layout.emcomm.describe": "Emergency Communications operations dashboard (Beta)",
   "station.settings.layout.modern": "Moden",
   "station.settings.layout.modern.describe": "→ Susun atur grid responsif moden",
   "station.settings.layout.reset.button": "Tetapkan Semula Susun Atur",

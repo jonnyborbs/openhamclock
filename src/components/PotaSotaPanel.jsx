@@ -84,19 +84,41 @@ export const PotaSotaPanel = ({
     } catch {}
   };
 
+  const tabColors = { pota: '#44cc44', wwff: '#a3f3a3', sota: '#ff9632', wwbota: '#8b7fff' };
+  const tabShapes = { pota: '▲', wwff: '▼', sota: '◆', wwbota: '■' };
+
   const tabStyle = (tab) => ({
     flex: 1,
     padding: '3px 0',
     background: activeTab === tab ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
     border: 'none',
-    borderBottom: activeTab === tab ? `2px solid ${tab === 'pota' ? '#44cc44' : '#ff9632'}` : '2px solid transparent',
-    color: activeTab === tab ? (tab === 'pota' ? '#44cc44' : '#ff9632') : '#666',
+    borderBottom: activeTab === tab ? `2px solid ${tabColors[tab]}` : '2px solid transparent',
+    color: activeTab === tab ? tabColors[tab] : '#666',
     fontSize: tab === 'wwbota' ? '9px' : '10px',
     fontFamily: 'JetBrains Mono, monospace',
     fontWeight: activeTab === tab ? '700' : '400',
     cursor: 'pointer',
     transition: 'all 0.15s ease',
   });
+
+  const tabBadge = (tab) => (
+    <span
+      style={{
+        display: 'inline-block',
+        background: tabColors[tab],
+        color: '#000',
+        padding: '0px 3px',
+        borderRadius: '2px',
+        fontWeight: '700',
+        fontSize: '9px',
+        lineHeight: 1.3,
+        verticalAlign: 'middle',
+        marginRight: '2px',
+      }}
+    >
+      {tabShapes[tab]}
+    </span>
+  );
 
   const potaStaleMin = potaLastUpdated ? Math.floor((Date.now() - potaLastUpdated) / 60000) : null;
   const sotaStaleMin = sotaLastUpdated ? Math.floor((Date.now() - sotaLastUpdated) / 60000) : null;
@@ -118,25 +140,25 @@ export const PotaSotaPanel = ({
         }}
       >
         <button style={tabStyle('pota')} onClick={() => handleTabChange('pota')}>
-          ▲ POTA {potaData?.length > 0 ? `(${potaData.length})` : ''}
+          {tabBadge('pota')} POTA {potaData?.length > 0 ? `(${potaData.length})` : ''}
           {potaStaleMin >= 5 && (
             <span style={{ color: potaStaleMin >= 10 ? '#ff4444' : '#ffaa00' }}>{staleWarning(potaStaleMin)}</span>
           )}
         </button>
         <button style={tabStyle('wwff')} onClick={() => handleTabChange('wwff')}>
-          ▲ WWFF {wwffData?.length > 0 ? `(${wwffData.length})` : ''}
+          {tabBadge('wwff')} WWFF {wwffData?.length > 0 ? `(${wwffData.length})` : ''}
           {wwffStaleMin >= 5 && (
             <span style={{ color: wwffStaleMin >= 10 ? '#ff4444' : '#ffaa00' }}>{staleWarning(wwffStaleMin)}</span>
           )}
         </button>
         <button style={tabStyle('sota')} onClick={() => handleTabChange('sota')}>
-          ⛰ SOTA {sotaData?.length > 0 ? `(${sotaData.length})` : ''}
+          {tabBadge('sota')} SOTA {sotaData?.length > 0 ? `(${sotaData.length})` : ''}
           {sotaStaleMin >= 5 && (
             <span style={{ color: sotaStaleMin >= 10 ? '#ff4444' : '#ffaa00' }}>{staleWarning(sotaStaleMin)}</span>
           )}
         </button>
         <button style={tabStyle('wwbota')} onClick={() => handleTabChange('wwbota')}>
-          ☢️ WWBOTA {wwbotaData?.length > 0 ? `(${wwbotaData.length})` : ''}
+          {tabBadge('wwbota')} WWBOTA {wwbotaData?.length > 0 ? `(${wwbotaData.length})` : ''}
           <span style={{ color: wwbotaConnected ? '#44cc44' : '#ff4444', marginLeft: '4px' }}>
             {wwbotaConnected ? '' : '✗'}
           </span>

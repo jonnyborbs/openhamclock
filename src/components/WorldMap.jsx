@@ -118,6 +118,7 @@ export const WorldMap = ({
   rotatorIsStale = false,
   rotatorControlEnabled,
   onRotatorTurnRequest,
+  onMapReady,
 }) => {
   const { t } = useTranslation();
   const mapRef = useRef(null);
@@ -639,9 +640,13 @@ export const WorldMap = ({
     }, 60000);
 
     map.on('moveend', () => {
-      const center = map.getCenter();
-      const zoom = map.getZoom();
-      setMapView({ center: [center.lat, center.lng], zoom });
+      try {
+        const center = map.getCenter();
+        const zoom = map.getZoom();
+        setMapView({ center: [center.lat, center.lng], zoom });
+      } catch {
+        // Leaflet may throw if map panes are gone during resize/unmount
+      }
     });
 
     // Click handler:
@@ -674,6 +679,7 @@ export const WorldMap = ({
     });
 
     mapInstanceRef.current = map;
+    if (onMapReady) onMapReady(map);
 
     // Apply initial map lock state if saved
     if (mapLocked) {
@@ -1980,26 +1986,24 @@ export const WorldMap = ({
       />
 
       {/* Render plugin layers on active map (Mercator or Azimuthal) */}
-      {(() => {
-        const activeMap = isAzimuthal ? azimuthalMapRef.current : mapInstanceRef.current;
-        if (!activeMap) return null;
-        return getAllLayers().map((layerDef) => (
-          <PluginLayer
-            key={`${layerDef.id}-${isAzimuthal ? 'az' : 'merc'}`}
-            plugin={layerDef}
-            enabled={pluginLayerStates[layerDef.id]?.enabled ?? layerDef.defaultEnabled}
-            opacity={pluginLayerStates[layerDef.id]?.opacity ?? layerDef.defaultOpacity}
-            mapBandFilter={mapBandFilter}
-            config={pluginLayerStates[layerDef.id]?.config ?? layerDef.config}
-            map={activeMap}
-            satellites={satellites}
-            allUnits={allUnits}
-            callsign={callsign}
-            locator={deLocator}
-            lowMemoryMode={lowMemoryMode}
-          />
-        ));
-      })()}
+      {/* Always render all PluginLayer components to preserve React hook count.
+          Pass map={null} when no active map — hooks inside guard against it. */}
+      {getAllLayers().map((layerDef) => (
+        <PluginLayer
+          key={layerDef.id}
+          plugin={layerDef}
+          enabled={pluginLayerStates[layerDef.id]?.enabled ?? layerDef.defaultEnabled}
+          opacity={pluginLayerStates[layerDef.id]?.opacity ?? layerDef.defaultOpacity}
+          mapBandFilter={mapBandFilter}
+          config={pluginLayerStates[layerDef.id]?.config ?? layerDef.config}
+          map={isAzimuthal ? azimuthalMapRef.current : mapInstanceRef.current}
+          satellites={satellites}
+          allUnits={allUnits}
+          callsign={callsign}
+          locator={deLocator}
+          lowMemoryMode={lowMemoryMode}
+        />
+      ))}
 
       {/* Unified map control dock */}
       {!isAzimuthal && (
@@ -2391,66 +2395,6 @@ export const WorldMap = ({
                   </button>
                 );
               })}
-            </div>
-          )}
-          {showPOTA && (
-            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-              <span
-                style={{
-                  background: '#44cc44',
-                  color: '#000',
-                  padding: '2px 5px',
-                  borderRadius: '3px',
-                  fontWeight: '600',
-                }}
-              >
-                ▲&nbsp;POTA
-              </span>
-            </div>
-          )}
-          {showWWFF && (
-            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-              <span
-                style={{
-                  background: '#a3f3a3',
-                  color: '#000',
-                  padding: '2px 5px',
-                  borderRadius: '3px',
-                  fontWeight: '600',
-                }}
-              >
-                ▼&nbsp;WWFF
-              </span>
-            </div>
-          )}
-          {showSOTA && (
-            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-              <span
-                style={{
-                  background: '#ff9632',
-                  color: '#000',
-                  padding: '2px 5px',
-                  borderRadius: '3px',
-                  fontWeight: '600',
-                }}
-              >
-                ◆&nbsp;SOTA
-              </span>
-            </div>
-          )}
-          {showWWBOTA && (
-            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-              <span
-                style={{
-                  background: '#8b7fff',
-                  color: '#000',
-                  padding: '2px 5px',
-                  borderRadius: '3px',
-                  fontWeight: '600',
-                }}
-              >
-                ■&nbsp;WWBOTA
-              </span>
             </div>
           )}
         </div>

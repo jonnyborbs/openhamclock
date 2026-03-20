@@ -433,6 +433,7 @@ export const SettingsPanel = ({
     tablet: t('station.settings.layout.tablet.describe'),
     compact: t('station.settings.layout.compact.describe'),
     dockable: t('station.settings.layout.dockable.describe'),
+    emcomm: t('station.settings.layout.emcomm.describe'),
   };
   const unitString = (t) => {
     return t == 'imperial' ? '🇺🇸 Imperial' : '🌍 Metric';
@@ -2297,7 +2298,7 @@ export const SettingsPanel = ({
                 {t('station.settings.layout')}
               </label>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                {['modern', 'classic', 'tablet', 'compact', 'dockable'].map((l) => (
+                {['modern', 'classic', 'tablet', 'compact', 'dockable', 'emcomm'].map((l) => (
                   <button
                     key={l}
                     onClick={() => setLayout(l)}
@@ -2320,7 +2321,9 @@ export const SettingsPanel = ({
                           ? '📱'
                           : l === 'compact'
                             ? '📊'
-                            : '⊞'}{' '}
+                            : l === 'emcomm'
+                              ? '📍'
+                              : '⊞'}{' '}
                     {l === 'dockable' ? t('station.settings.layout.dockable') : t('station.settings.layout.' + l)}
                   </button>
                 ))}
@@ -2391,6 +2394,12 @@ export const SettingsPanel = ({
         {activeTab === 'layers' && (
           <div>
             {(() => {
+              const togglePanelVisible = (panelKey) => {
+                const panels = { ...config.panels };
+                panels[panelKey] = { ...panels[panelKey], visible: !(panels[panelKey]?.visible !== false) };
+                onSave({ ...config, panels });
+              };
+
               const overlayCards = [
                 {
                   id: 'de-dx-markers',
@@ -2399,6 +2408,14 @@ export const SettingsPanel = ({
                   icon: '📍',
                   title: 'DE/DX Markers',
                   description: 'Show or hide your DE and DX position markers on the map',
+                },
+                {
+                  id: 'dx-target-panel',
+                  checked: config.panels?.dxLocation?.visible !== false,
+                  onChange: () => togglePanelVisible('dxLocation'),
+                  icon: '🎯',
+                  title: 'DX Target Panel',
+                  description: 'Show or hide the DX target info panel (grid, bearing, sun times)',
                 },
                 {
                   id: 'dx-news-ticker',

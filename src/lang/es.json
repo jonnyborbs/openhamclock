@@ -290,6 +290,8 @@
   "station.settings.layout.compact.describe": "→ Diseño centrado en datos para pantallas 4:3 o más pequeñas",
   "station.settings.layout.dockable": "Acoplable",
   "station.settings.layout.dockable.describe": "Paneles redimensionables y arrastrables con pestañas",
+  "station.settings.layout.emcomm": "EmComm (Beta)",
+  "station.settings.layout.emcomm.describe": "Emergency Communications operations dashboard (Beta)",
   "station.settings.layout.modern": "Moderno",
   "station.settings.layout.modern.describe": "→ Diseño moderno con cuadrícula adaptable",
   "station.settings.layout.reset.button": "Restablecer diseño",

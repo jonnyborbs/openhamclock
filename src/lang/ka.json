@@ -292,6 +292,8 @@
   "station.settings.layout.compact.describe": "→ მონაცემების ხედი 4:3 და მცირე ეკრანებისთვის",
   "station.settings.layout.dockable": "მოქნილი",
   "station.settings.layout.dockable.describe": "გადაადგილებადი პანელები ჩანართებით",
+  "station.settings.layout.emcomm": "EmComm (Beta)",
+  "station.settings.layout.emcomm.describe": "Emergency Communications operations dashboard (Beta)",
   "station.settings.layout.modern": "თანამედროვე",
   "station.settings.layout.modern.describe": "→ თანამედროვე ადაპტიური ბადე",
   "station.settings.layout.reset.button": "განლაგების აღდგენა",

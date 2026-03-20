@@ -292,6 +292,8 @@
   "station.settings.layout.compact.describe": "→ Data-first layout for 4:3 and smaller screens",
   "station.settings.layout.dockable": "Dockable",
   "station.settings.layout.dockable.describe": "Pannelli ridimensionabili e trascinabili con schede",
+  "station.settings.layout.emcomm": "EmComm (Beta)",
+  "station.settings.layout.emcomm.describe": "Emergency Communications operations dashboard (Beta)",
   "station.settings.layout.modern": "Moderno",
   "station.settings.layout.modern.describe": "→ Layout moderno con griglia reattiva",
   "station.settings.layout.reset.button": "Ripristina layout",

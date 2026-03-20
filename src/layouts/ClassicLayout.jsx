@@ -4,6 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { DXNewsTicker, WorldMap } from '../components';
 import { DXGridInput } from '../components/DXGridInput.jsx';
+import { DXFavorites } from '../components/DXFavorites.jsx';
 import { getBandColor, getBandColorForBand } from '../utils';
 import { calculateBearing, calculateDistance, formatDistance } from '../utils/geo.js';
 import CallsignLink from '../components/CallsignLink.jsx';
@@ -1874,15 +1875,16 @@ export default function ClassicLayout(props) {
               gap: '8px',
             }}
           >
-            <span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               {deGrid} →{' '}
               <DXGridInput
                 dxGrid={dxGrid}
                 onDXChange={handleDXChange}
                 dxLocked={dxLocked}
                 style={{ color: 'var(--text-muted)', fontSize: '14px' }}
-              />{' '}
-              • {dxLocked ? t('app.dxLock.lockedShort') : t('app.dxLock.clickToSet')}
+              />
+              <DXFavorites dxLocation={dxLocation} dxGrid={dxGrid} onDXChange={handleDXChange} dxLocked={dxLocked} /> •{' '}
+              {dxLocked ? t('app.dxLock.lockedShort') : t('app.dxLock.clickToSet')}
             </span>
             <button
               onClick={handleToggleDxLock}

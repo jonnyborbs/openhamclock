@@ -11,6 +11,7 @@ import SidebarMenu from './components/SidebarMenu.jsx';
 import DockableLayout from './layouts/DockableLayout.jsx';
 import ClassicLayout from './layouts/ClassicLayout.jsx';
 import ModernLayout from './layouts/ModernLayout.jsx';
+import EmcommLayout from './layouts/EmcommLayout.jsx';
 
 import { resetLayout } from './store/layoutStore.js';
 import { RigProvider } from './contexts/RigContext.jsx';
@@ -34,6 +35,7 @@ import {
   usePSKReporter,
   useWSJTX,
   useAPRS,
+  useEmcommData,
 } from './hooks';
 
 import useAppConfig from './hooks/app/useAppConfig';
@@ -314,6 +316,10 @@ const App = () => {
   });
   const wsjtx = useWSJTX();
   const aprsData = useAPRS();
+  const emcommData = useEmcommData({
+    location: config.location,
+    enabled: config.layout === 'emcomm',
+  });
 
   // ── WSJT-X → DX Target ──
   // When the operator selects a callsign in WSJT-X (setting Std Msgs),
@@ -496,6 +502,7 @@ const App = () => {
     pskReporter,
     wsjtx,
     aprsData,
+    emcommData,
     filteredPskSpots,
     wsjtxMapSpots,
     dxFilters,
@@ -621,7 +628,9 @@ const App = () => {
       />
 
       <RigProvider rigConfig={config.rigControl || { enabled: false, host: 'http://localhost', port: 5555 }}>
-        {config.layout === 'dockable' ? (
+        {config.layout === 'emcomm' ? (
+          <EmcommLayout {...layoutProps} />
+        ) : config.layout === 'dockable' ? (
           <DockableLayout
             key={layoutResetKey}
             {...layoutProps}

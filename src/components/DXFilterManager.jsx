@@ -9,6 +9,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) =>
   const [newWatchlistCall, setNewWatchlistCall] = useState('');
   const [newDXExcludeCall, setNewDXExcludeCall] = useState('');
   const [newDEExcludeCall, setNewDEExcludeCall] = useState('');
+  const [newCommentKeyword, setNewCommentKeyword] = useState('');
 
   if (!isOpen) return null;
 
@@ -71,6 +72,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) =>
     if (filters?.bands?.length) count += filters.bands.length;
     if (filters?.modes?.length) count += filters.modes.length;
     if (filters?.watchlist?.length) count += filters.watchlist.length;
+    if (filters?.commentText?.length) count += filters.commentText.length;
 
     /* excludes */
     if (filters?.excludeContinents?.length) count += filters.excludeContinents.length;
@@ -148,6 +150,17 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) =>
         onFilterChange({ ...filters, excludeDECallList: [...current, newDEExcludeCall.toUpperCase()] });
       }
       setNewDEExcludeCall('');
+    }
+  };
+
+  const addCommentKeyword = () => {
+    if (newCommentKeyword.trim()) {
+      const current = filters?.commentText || [];
+      const kw = newCommentKeyword.trim().toUpperCase();
+      if (!current.includes(kw)) {
+        onFilterChange({ ...filters, commentText: [...current, kw] });
+      }
+      setNewCommentKeyword('');
     }
   };
 
@@ -764,6 +777,98 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) =>
     </div>
   );
 
+  const renderTextTab = () => (
+    <div>
+      <div style={{ marginBottom: '16px' }}>
+        <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '4px' }}>
+          Comment Text Filter
+        </div>
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+          Show only spots whose comment contains at least one of these keywords. Useful for finding contest or event
+          activity (e.g. TEST, SSS, SKCC).
+        </div>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <input
+            type="text"
+            value={newCommentKeyword}
+            onChange={(e) => setNewCommentKeyword(e.target.value.toUpperCase())}
+            onKeyPress={(e) => e.key === 'Enter' && addCommentKeyword()}
+            placeholder="e.g. TEST, SKCC, SSS..."
+            style={{
+              flex: 1,
+              padding: '8px 12px',
+              background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '4px',
+              color: 'var(--text-primary)',
+              fontSize: '13px',
+              fontFamily: 'JetBrains Mono',
+            }}
+          />
+          <button
+            onClick={addCommentKeyword}
+            style={{
+              padding: '8px 16px',
+              background: 'var(--accent-cyan)',
+              border: 'none',
+              borderRadius: '4px',
+              color: '#000',
+              fontWeight: '600',
+              cursor: 'pointer',
+            }}
+          >
+            Add
+          </button>
+        </div>
+      </div>
+      {(filters?.commentText || []).length > 0 && (
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+              Active keywords ({filters.commentText.length}):
+            </span>
+            <button
+              onClick={() => clearFilter('commentText')}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--accent-red)',
+                fontSize: '12px',
+                cursor: 'pointer',
+              }}
+            >
+              Clear All
+            </button>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            {filters.commentText.map((kw) => (
+              <div key={kw} style={{ ...chipStyle(true), display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {kw}
+                <button
+                  onClick={() => toggleArrayItem('commentText', kw)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--accent-red)',
+                    cursor: 'pointer',
+                    padding: 0,
+                    fontSize: '14px',
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '12px', lineHeight: '1.5' }}>
+        <strong>Tip:</strong> Keywords are matched case-insensitively against the spot comment text. If multiple
+        keywords are added, spots matching <em>any</em> of them will be shown (OR logic).
+      </div>
+    </div>
+  );
+
   const renderSettingsTab = () => {
     const retentionMinutes = filters?.spotRetentionMinutes || 30;
 
@@ -934,6 +1039,9 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) =>
           <button onClick={() => setActiveTab('watchlist')} style={tabStyle(activeTab === 'watchlist')}>
             Watchlist
           </button>
+          <button onClick={() => setActiveTab('text')} style={tabStyle(activeTab === 'text')}>
+            Text
+          </button>
           <button onClick={() => setActiveTab('exclude')} style={tabStyle(activeTab === 'exclude')}>
             Exclude
           </button>
@@ -948,6 +1056,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) =>
           {activeTab === 'bands' && renderBandsTab()}
           {activeTab === 'modes' && renderModesTab()}
           {activeTab === 'watchlist' && renderWatchlistTab()}
+          {activeTab === 'text' && renderTextTab()}
           {activeTab === 'exclude' && renderExcludeTab()}
           {activeTab === 'settings' && renderSettingsTab()}
         </div>

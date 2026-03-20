@@ -292,6 +292,8 @@
   "station.settings.layout.compact.describe": "→ 数据优先布局，适用于 4:3 或小屏幕",
   "station.settings.layout.dockable": "可停靠面板",
   "station.settings.layout.dockable.describe": "可调整大小、可拖拽的选项卡面板",
+  "station.settings.layout.emcomm": "EmComm (Beta)",
+  "station.settings.layout.emcomm.describe": "Emergency Communications operations dashboard (Beta)",
   "station.settings.layout.modern": "现代",
   "station.settings.layout.modern.describe": "→ 现代响应式网格布局",
   "station.settings.layout.reset.button": "重置面板布局",

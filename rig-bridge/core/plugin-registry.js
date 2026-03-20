@@ -47,7 +47,7 @@ class PluginRegistry {
     }
 
     // Single-export rig plugins
-    for (const file of ['rigctld', 'flrig', 'mock', 'tci']) {
+    for (const file of ['rigctld', 'flrig', 'mock', 'tci', 'smartsdr', 'rtl-tcp']) {
       try {
         const p = require(`../plugins/${file}`);
         this._descriptors.set(p.id, p);

@@ -292,6 +292,8 @@
   "station.settings.layout.compact.describe": "→ Disseny centrat en dades per a pantalles 4:3 o més petites",
   "station.settings.layout.dockable": "Acoblable",
   "station.settings.layout.dockable.describe": "Panells redimensionables i arrossegables amb pestanyes",
+  "station.settings.layout.emcomm": "EmComm (Beta)",
+  "station.settings.layout.emcomm.describe": "Emergency Communications operations dashboard (Beta)",
   "station.settings.layout.modern": "Modern",
   "station.settings.layout.modern.describe": "→ Disseny modern amb graella adaptable",
   "station.settings.layout.reset.button": "Restablir disseny",

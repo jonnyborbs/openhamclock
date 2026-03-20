@@ -38,6 +38,7 @@ import { DockableLayoutProvider } from './contexts';
 import { useRig } from './contexts/RigContext.jsx';
 import { calculateBearing, calculateDistance, formatDistance } from './utils/geo.js';
 import { DXGridInput } from './components/DXGridInput.jsx';
+import { DXFavorites } from './components/DXFavorites.jsx';
 import DXCCSelect from './components/DXCCSelect.jsx';
 import './styles/flexlayout-openhamclock.css';
 import useMapLayers from './hooks/app/useMapLayers';
@@ -421,10 +422,10 @@ export const DockableApp = ({
       'dx-cluster': { name: 'DX Cluster', icon: '📻' },
       'psk-reporter': { name: 'PSK Reporter', icon: '📡' },
       dxpeditions: { name: 'DXpeditions', icon: '🏝️' },
-      pota: { name: 'POTA', icon: '🏕️' },
-      wwff: { name: 'WWFF', icon: '🌲' },
-      sota: { name: 'SOTA', icon: '⛰️' },
-      wwbota: { name: 'WWBOTA', icon: '☢️' },
+      pota: { name: 'POTA', icon: '▲', iconColor: '#44cc44' },
+      wwff: { name: 'WWFF', icon: '▼', iconColor: '#a3f3a3' },
+      sota: { name: 'SOTA', icon: '◆', iconColor: '#ff9632' },
+      wwbota: { name: 'WWBOTA', icon: '■', iconColor: '#8b7fff' },
       aprs: { name: 'APRS', icon: '📍' },
       ...(isLocalInstall ? { rotator: { name: 'Rotator', icon: '🧭' } } : {}),
       contests: { name: 'Contests', icon: '🏆' },
@@ -526,6 +527,7 @@ export const DockableApp = ({
                   flex: '1 1 auto',
                 }}
               />
+              <DXFavorites dxLocation={dxLocation} dxGrid={dxGrid} onDXChange={handleDXChange} dxLocked={dxLocked} />
               <button
                 type="button"
                 onClick={() => setShowDxccSelect((prev) => !prev)}
@@ -1315,7 +1317,9 @@ export const DockableApp = ({
                           e.currentTarget.style.borderColor = '#2d3748';
                         }}
                       >
-                        <span style={{ fontSize: '16px', marginRight: '8px' }}>{p.icon}</span>
+                        <span style={{ fontSize: '16px', marginRight: '8px', color: p.iconColor || 'inherit' }}>
+                          {p.icon}
+                        </span>
                         <span style={{ color: '#e2e8f0', fontFamily: 'JetBrains Mono', fontSize: '12px' }}>
                           {p.name}
                         </span>
@@ -1355,7 +1359,9 @@ export const DockableApp = ({
                               e.currentTarget.style.borderColor = '#2d3748';
                             }}
                           >
-                            <span style={{ fontSize: '14px', marginRight: '6px' }}>{p.icon}</span>
+                            <span style={{ fontSize: '14px', marginRight: '6px', color: p.iconColor || 'inherit' }}>
+                              {p.icon}
+                            </span>
                             <span style={{ color: '#cbd5e0', fontFamily: 'JetBrains Mono', fontSize: '11px' }}>
                               {p.name}
                             </span>

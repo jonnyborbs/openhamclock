@@ -44,7 +44,7 @@ module.exports = function (app, ctx) {
   //
   // REMOVED (dead/decayed/not ham):
   //   AO-92 (43137) — re-entered Feb 2024
-  //   PO-101 (43678) — decommissioned, EOL Dec 2025
+  //   PO-101 (43678) — previously listed as decommissioned, restored (still active)
   //   AO-27 (22825) — dead since ~2020
   //   RS-15 (23439) — dead for years
   //   FO-99 (43937) — dead/marginal
@@ -144,6 +144,16 @@ module.exports = function (app, ctx) {
       downlink: '436.950 MHz',
       uplink: '145.920 MHz',
       tone: '67.0 Hz',
+    },
+    'PO-101': {
+      norad: 43678,
+      name: 'PO-101 (DIWATA-2B)',
+      color: '#cc66ff',
+      priority: 2,
+      mode: 'FM',
+      downlink: '145.900 MHz',
+      uplink: '437.500 MHz',
+      tone: '141.3 Hz',
     },
 
     // ── Weather Satellites — GOES & METEOR ─────────────────────────

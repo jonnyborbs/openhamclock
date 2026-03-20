@@ -186,6 +186,25 @@ const applyModeFilter = (item, filters) => {
  *
  * @returns {boolean} - true if item passes filters, false if filtered out
  */
+/**
+ * Applies the Comment Text filter, which is specified in the UI 'Text' tab of the DXCluster's 'Filters' dialog
+ * Includes only spots whose comment contains at least one of the search keywords (OR logic).
+ * <br/>
+ * **Used internally only, by applyDXFilters, do not export.**
+ *
+ * @param {Object} filters - Filter configuration
+ * @param {string} comment - the spot's comment text
+ * @returns {boolean} - true if item passes filters, false if filtered out
+ */
+const applyCommentTextFilter = (filters, comment) => {
+  if (filters.commentText?.length > 0) {
+    const upper = (comment || '').toUpperCase();
+    const matchesAny = filters.commentText.some((kw) => upper.includes(kw.toUpperCase()));
+    if (!matchesAny) return false;
+  }
+  return true;
+};
+
 const applyQuickSearchFilter = (filters, dxCall, spotter) => {
   if (filters.callsign && filters.callsign.trim()) {
     const search = filters.callsign.trim().toUpperCase();
@@ -233,6 +252,10 @@ export const applyDXFilters = (item, filters) => {
   }
 
   if (!applyModeFilter(item, filters)) {
+    return false;
+  }
+
+  if (!applyCommentTextFilter(filters, item.comment)) {
     return false;
   }
 

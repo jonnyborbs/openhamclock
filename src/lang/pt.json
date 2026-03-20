@@ -292,6 +292,8 @@
   "station.settings.layout.compact.describe": "→ Data-first layout for 4:3 and smaller screens",
   "station.settings.layout.dockable": "Acopl?vel",
   "station.settings.layout.dockable.describe": "Pain?is redimension?veis e arrast?veis com abas",
+  "station.settings.layout.emcomm": "EmComm (Beta)",
+  "station.settings.layout.emcomm.describe": "Emergency Communications operations dashboard (Beta)",
   "station.settings.layout.modern": "Moderno",
   "station.settings.layout.modern.describe": "→ Layout moderno com grade responsiva",
   "station.settings.layout.reset.button": "Redefinir layout",

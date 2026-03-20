@@ -292,6 +292,8 @@
   "station.settings.layout.compact.describe": "→ Mise en page privilégiant les données pour les écrans 4:3 et plus petits",
   "station.settings.layout.dockable": "Dockable",
   "station.settings.layout.dockable.describe": "Panneaux redimensionnables et déplaçables avec onglets",
+  "station.settings.layout.emcomm": "EmComm (Beta)",
+  "station.settings.layout.emcomm.describe": "Emergency Communications operations dashboard (Beta)",
   "station.settings.layout.modern": "Moderne",
   "station.settings.layout.modern.describe": "→ Disposition en grille réactive moderne",
   "station.settings.layout.reset.button": "Réinitialiser la disposition",

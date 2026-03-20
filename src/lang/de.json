@@ -292,6 +292,8 @@
   "station.settings.layout.compact.describe": "→ Data-first layout for 4:3 and smaller screens",
   "station.settings.layout.dockable": "Dockable",
   "station.settings.layout.dockable.describe": "Größenveränderbare, verschiebbare Panels mit Tabs",
+  "station.settings.layout.emcomm": "EmComm (Beta)",
+  "station.settings.layout.emcomm.describe": "Emergency Communications operations dashboard (Beta)",
   "station.settings.layout.modern": "Modern",
   "station.settings.layout.modern.describe": "→ Modernes responsives Grid-Layout",
   "station.settings.layout.reset.button": "Panel-Layout zurücksetzen",

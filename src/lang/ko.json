@@ -292,6 +292,8 @@
   "station.settings.layout.compact.describe": "→ 4:3 및 소형 화면을 위한 데이터 중심 레이아웃",
   "station.settings.layout.dockable": "도킹 가능",
   "station.settings.layout.dockable.describe": "크기 조절 가능한 드래그 탭 패널",
+  "station.settings.layout.emcomm": "EmComm (Beta)",
+  "station.settings.layout.emcomm.describe": "Emergency Communications operations dashboard (Beta)",
   "station.settings.layout.modern": "모던",
   "station.settings.layout.modern.describe": "→ 모던한 반응형 그리드 레이아웃",
   "station.settings.layout.reset.button": "패널 레이아웃 초기화",

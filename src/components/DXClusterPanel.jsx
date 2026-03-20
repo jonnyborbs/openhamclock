@@ -68,12 +68,14 @@ export const DXClusterPanel = ({
     if (filters?.bands?.length) count++;
     if (filters?.modes?.length) count++;
     if (filters?.watchlist?.length) count++;
+    if (filters?.commentText?.length) count++;
     if (filters?.callsign) count++;
     if (filters?.watchlistOnly) count++;
     if (filters?.excludeContinents) count += filters.excludeContinents.length;
     if (filters?.excludeCqZones) count += filters.excludeCqZones.length;
     if (filters?.excludeItuZones) count += filters.excludeItuZones.length;
-    if (filters?.excludeCallList) count += filters.excludeCallList.length;
+    if (filters?.excludeDXCallList) count += filters.excludeDXCallList.length;
+    if (filters?.excludeDECallList) count += filters.excludeDECallList.length;
 
     return count;
   };

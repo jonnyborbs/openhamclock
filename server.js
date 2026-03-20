@@ -231,6 +231,7 @@ Object.assign(ctx, spaceWeatherExports);
 // 3. Remaining routes (can use callsign + space-weather exports)
 require('./server/routes/rotator')(app, ctx);
 require('./server/routes/spots')(app, ctx);
+require('./server/routes/emcomm')(app, ctx);
 require('./server/routes/dxpeditions')(app, ctx);
 
 const dxclusterExports = require('./server/routes/dxcluster')(app, ctx);

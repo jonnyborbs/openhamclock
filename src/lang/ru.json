@@ -292,6 +292,8 @@
   "station.settings.layout.compact.describe": "→ Компактная для экранов 4:3 и меньше",
   "station.settings.layout.dockable": "Гибкая",
   "station.settings.layout.dockable.describe": "Перемещаемые панели с вкладками",
+  "station.settings.layout.emcomm": "EmComm (Beta)",
+  "station.settings.layout.emcomm.describe": "Emergency Communications operations dashboard (Beta)",
   "station.settings.layout.modern": "Современная",
   "station.settings.layout.modern.describe": "→ Современная адаптивная сетка",
   "station.settings.layout.reset.button": "Сбросить компоновку",

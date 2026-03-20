@@ -292,6 +292,8 @@
   "station.settings.layout.compact.describe": "→ Postavitev za zaslone 4:3 in manjše",
   "station.settings.layout.dockable": "Dockable",
   "station.settings.layout.dockable.describe": "Prilagodljive, premi?ne plo??e z zavihki",
+  "station.settings.layout.emcomm": "EmComm (Beta)",
+  "station.settings.layout.emcomm.describe": "Emergency Communications operations dashboard (Beta)",
   "station.settings.layout.modern": "Moderna",
   "station.settings.layout.modern.describe": "→ Moderna odzivna mrežna postavitev",
   "station.settings.layout.reset.button": "Ponastavi postavitev",
