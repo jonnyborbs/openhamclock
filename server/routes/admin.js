@@ -4,6 +4,7 @@
  */
 
 const { formatBytes, formatDuration } = require('../utils/helpers');
+const { execFile } = require('child_process');
 
 module.exports = function (app, ctx) {
   const {
@@ -947,9 +948,11 @@ module.exports = function (app, ctx) {
       if (!fs.existsSync(path.join(ROOT_DIR, '.git'))) {
         return res.status(503).json({ error: 'Not a git repository' });
       }
-      await execFilePromise('git', ['--version']);
+      await new Promise((resolve, reject) => {
+        execFile('git', ['--version'], (err) => (err ? reject(err) : resolve()));
+      });
     } catch (err) {
-      return res.status(500).json({ error: 'Update preflight failed' });
+      return res.status(500).json({ error: 'Update preflight failed: ' + (err.message || 'git not found') });
     }
 
     // Respond immediately; update runs asynchronously

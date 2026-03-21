@@ -516,8 +516,7 @@ export function useLayer({ enabled = false, opacity = 0.5, map = null }) {
       }
     }
 
-    // Twilight zones — graduated fill polygons for smooth day-to-night transition,
-    // plus boundary lines. Each band is a filled polygon between two terminator lines.
+    // Twilight zones — use quadratic solver, split at gaps to avoid jagged connections
     if (showTwilight) {
       const twilightDefs = [
         {
@@ -525,7 +524,6 @@ export function useLayer({ enabled = false, opacity = 0.5, map = null }) {
           color: '#4488ff',
           weight: 2,
           opMul: 0.6,
-          fillOp: 0.08,
           name: 'Civil Twilight',
           icon: '🌆',
           desc: 'Good propagation conditions',
@@ -535,7 +533,6 @@ export function useLayer({ enabled = false, opacity = 0.5, map = null }) {
           color: '#6666ff',
           weight: 1.5,
           opMul: 0.4,
-          fillOp: 0.12,
           name: 'Nautical Twilight',
           icon: '🌃',
           desc: 'Moderate propagation',
@@ -545,76 +542,12 @@ export function useLayer({ enabled = false, opacity = 0.5, map = null }) {
           color: '#8888ff',
           weight: 1,
           opMul: 0.3,
-          fillOp: 0.18,
           name: 'Astronomical Twilight',
           icon: '🌌',
           desc: 'Transition to night propagation',
         },
       ];
 
-      // Build graduated fill bands between successive terminator lines.
-      // Band 0: terminator (0°) → civil (-6°)
-      // Band 1: civil (-6°) → nautical (-12°)
-      // Band 2: nautical (-12°) → astronomical (-18°)
-      // Each uses the same longitudes as the base terminator for matched polygon construction.
-      const bandBoundaries = [terminator]; // 0° line is the first boundary
-      for (const tw of twilightDefs) {
-        const rawPoints = generateOffsetTerminator(solar, tw.alt, 360);
-        // For fill polygons we need matched point arrays (same length/longitudes as terminator).
-        // Replace null gaps with interpolated/clamped values so the polygon stays continuous.
-        const filled = rawPoints.map((pt, i) => {
-          if (pt !== null) return pt;
-          // Fallback: use the terminator point shifted toward the night side
-          const tPt = terminator[i] || terminator[Math.min(i, terminator.length - 1)];
-          if (!tPt) return [0, (i / rawPoints.length) * 360 - 180];
-          // Shift latitude toward the pole on the night side
-          const shift = solar.decDeg >= 0 ? -Math.abs(tw.alt) : Math.abs(tw.alt);
-          return [Math.max(-89.9, Math.min(89.9, tPt[0] + shift)), tPt[1]];
-        });
-        bandBoundaries.push(filled);
-      }
-
-      // Render graduated fill bands
-      for (let b = 0; b < twilightDefs.length; b++) {
-        const upper = bandBoundaries[b];
-        const lower = bandBoundaries[b + 1];
-        const tw = twilightDefs[b];
-
-        const fillPolygons = unwrapAndCopyPolygon(upper, lower);
-        if (fillPolygons.length > 0) {
-          const band = L.polygon(fillPolygons, {
-            color: 'transparent',
-            fillColor: '#000020',
-            fillOpacity: twilightOpacity * tw.fillOp,
-            weight: 0,
-            stroke: false,
-            interactive: false,
-          });
-          band.addTo(map);
-          newLayers.push(band);
-        }
-      }
-
-      // Night fill — everything beyond astronomical twilight (-18°)
-      // Create a polygon from the -18° line to the opposite pole
-      const astroLine = bandBoundaries[bandBoundaries.length - 1];
-      const nightPoleSign = solar.decDeg >= 0 ? -1 : 1; // night is on opposite side of sun
-      const nightCap = astroLine.map(([, lon]) => [nightPoleSign * 89.9, lon]);
-      const nightPolygons = unwrapAndCopyPolygon(astroLine, nightCap);
-      if (nightPolygons.length > 0) {
-        const nightFill = L.polygon(nightPolygons, {
-          color: 'transparent',
-          fillColor: '#000020',
-          fillOpacity: twilightOpacity * 0.25,
-          weight: 0,
-          stroke: false,
-          interactive: false,
-        });
-        nightFill.addTo(map);
-        newLayers.push(nightFill);
-      }
-
-      // Render twilight boundary lines on top
       for (const tw of twilightDefs) {
         const rawPoints = generateOffsetTerminator(solar, tw.alt, 360);
         const segments = splitIntoSegments(rawPoints);

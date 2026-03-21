@@ -147,11 +147,15 @@ function computeNightPolygon(time, resolution) {
 }
 
 // Graduated twilight band definitions: each band extends N degrees into the day side
-// from the previous boundary, with increasing fill opacity to create a soft edge.
+// from the terminator, with increasing fill opacity to create a visible soft edge.
+// More bands + wider spread = smoother, more obvious gradient.
 const TWILIGHT_BANDS = [
-  { offset: 3, opacity: 0.06 }, // lightest band (closest to day)
-  { offset: 6, opacity: 0.1 },
-  { offset: 9, opacity: 0.14 },
+  { offset: 18, opacity: 0.03 }, // outermost — faintest hint
+  { offset: 15, opacity: 0.06 },
+  { offset: 12, opacity: 0.1 },
+  { offset: 9, opacity: 0.15 },
+  { offset: 6, opacity: 0.22 },
+  { offset: 3, opacity: 0.3 }, // innermost — close to the night edge
 ];
 
 /**
@@ -216,7 +220,7 @@ export function createTerminator(options = {}) {
     for (const band of bandsCopy) {
       const poly = L.polygon(band.rings, {
         fillColor: fc,
-        fillOpacity: (baseOp * band.opacity) / 0.35, // scale relative to base opacity
+        fillOpacity: band.opacity * (baseOp / 0.35), // scale proportionally to night darkness setting
         color: 'transparent',
         weight: 0,
         stroke: false,
