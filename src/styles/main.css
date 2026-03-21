@@ -1170,6 +1170,7 @@ body::before {
 .terminator-path {
   pointer-events: none;
   z-index: 400 !important; /* Sit behind the city lights but in front of the map */
+  filter: blur(8px); /* Smooth gradient at the day/night boundary */
 }
 
 /* Hide city lights completely in 'Countries' or high-contrast modes */
