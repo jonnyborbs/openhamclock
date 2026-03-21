@@ -22,9 +22,9 @@ const ANNOUNCEMENT = {
 // Starting with v26.1.1 we adopted a year-based versioning scheme:
 //   X.Y.Z  →  X = current year, Y = visual/UI changes, Z = backend changes
 //
-// Historical note: prior version numbers (v1 through v15) were inherited from
-// the original HamClock project and got out of sync at one point — we simply
-// continued with the existing numbering rather than correcting it mid-stream.
+// Historical note: prior version numbers (v1 through v15) got out of sync at
+// one point — we simply continued with the existing numbering rather than
+// correcting it mid-stream.
 // The jump to v26 resets the scheme to something meaningful going forward.
 
 const CHANGELOG = [
