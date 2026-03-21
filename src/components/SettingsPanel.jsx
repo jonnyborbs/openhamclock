@@ -43,6 +43,7 @@ export const SettingsPanel = ({
 
   const [callsign, setCallsign] = useState(config?.callsign || '');
   const [headerSize, setheaderSize] = useState(config?.headerSize || 1.0);
+  const [swapHeaderClocks, setSwapHeaderClocks] = useState(config?.swapHeaderClocks || false);
   const [gridSquare, setGridSquare] = useState(config?.locator || '');
   const [lat, setLat] = useState(config?.location?.lat || 0);
   const [lon, setLon] = useState(config?.location?.lon || 0);
@@ -398,6 +399,7 @@ export const SettingsPanel = ({
       ...config,
       callsign: callsign.toUpperCase(),
       headerSize: headerSize,
+      swapHeaderClocks,
       location: { lat: parseFloat(lat), lon: parseFloat(lon) },
       theme,
       customTheme,
@@ -2315,6 +2317,31 @@ export const SettingsPanel = ({
                 }}
               >
                 {Number(headerSize).toFixed(1)}x
+              </div>
+            </div>
+
+            {/* Clock Order */}
+            <div style={{ marginBottom: '24px' }}>
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  color: 'var(--text-primary)',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={swapHeaderClocks}
+                  onChange={(e) => setSwapHeaderClocks(e.target.checked)}
+                  style={{ accentColor: 'var(--accent-amber)' }}
+                />
+                Show Local Time before UTC in header
+              </label>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                By default, UTC is shown first. Enable this to display Local Time first.
               </div>
             </div>
 

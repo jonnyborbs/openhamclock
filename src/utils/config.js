@@ -34,6 +34,7 @@ export const DEFAULT_CONFIG = {
   mouseZoom: 50, // Factor to affect rate of zooming with scrollwheel (1-100)
   timezone: '', // IANA timezone (e.g. 'America/Regina') — empty = browser default
   use12Hour: true,
+  swapHeaderClocks: false, // false = UTC first, true = Local first
   preventSleep: false, // Keep screen awake while app is open (tablet/kiosk mode)
   showSatellites: true,
   showPota: true,

@@ -104,53 +104,57 @@ export const Header = ({
         {!isMobile && <QRZToggle />}
       </div>
 
-      {/* UTC Clock */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
-        <span style={{ fontSize: labelSize, color: 'var(--accent-cyan)', fontWeight: '600' }}>UTC</span>
-        <span
-          style={{
-            fontSize: clockSize,
-            fontWeight: '700',
-            color: 'var(--accent-cyan)',
-            fontFamily: 'JetBrains Mono, Consolas, monospace',
-            whiteSpace: 'nowrap',
-            lineHeight: 1,
-          }}
-        >
-          {utcTime}
-        </span>
-        {!isMobile && (
-          <span style={{ fontSize: `${12 * scale}px`, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-            {utcDate}
-          </span>
-        )}
-      </div>
-
-      {/* Local Clock */}
-      <div
-        style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', flexShrink: 0 }}
-        onClick={onTimeFormatToggle}
-        title={`Click to switch to ${use12Hour ? '24-hour' : '12-hour'} format`}
-      >
-        <span style={{ fontSize: labelSize, color: 'var(--accent-amber)', fontWeight: '600' }}>LOCAL</span>
-        <span
-          style={{
-            fontSize: clockSize,
-            fontWeight: '700',
-            color: 'var(--accent-amber)',
-            fontFamily: 'JetBrains Mono, Consolas, monospace',
-            whiteSpace: 'nowrap',
-            lineHeight: 1,
-          }}
-        >
-          {localTime}
-        </span>
-        {!isMobile && (
-          <span style={{ fontSize: `${12 * scale}px`, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-            {localDate}
-          </span>
-        )}
-      </div>
+      {/* Clocks — order controlled by swapHeaderClocks config */}
+      {(config.swapHeaderClocks ? ['local', 'utc'] : ['utc', 'local']).map((clock) =>
+        clock === 'utc' ? (
+          <div key="utc" style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+            <span style={{ fontSize: labelSize, color: 'var(--accent-cyan)', fontWeight: '600' }}>UTC</span>
+            <span
+              style={{
+                fontSize: clockSize,
+                fontWeight: '700',
+                color: 'var(--accent-cyan)',
+                fontFamily: 'JetBrains Mono, Consolas, monospace',
+                whiteSpace: 'nowrap',
+                lineHeight: 1,
+              }}
+            >
+              {utcTime}
+            </span>
+            {!isMobile && (
+              <span style={{ fontSize: `${12 * scale}px`, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                {utcDate}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div
+            key="local"
+            style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', flexShrink: 0 }}
+            onClick={onTimeFormatToggle}
+            title={`Click to switch to ${use12Hour ? '24-hour' : '12-hour'} format`}
+          >
+            <span style={{ fontSize: labelSize, color: 'var(--accent-amber)', fontWeight: '600' }}>LOCAL</span>
+            <span
+              style={{
+                fontSize: clockSize,
+                fontWeight: '700',
+                color: 'var(--accent-amber)',
+                fontFamily: 'JetBrains Mono, Consolas, monospace',
+                whiteSpace: 'nowrap',
+                lineHeight: 1,
+              }}
+            >
+              {localTime}
+            </span>
+            {!isMobile && (
+              <span style={{ fontSize: `${12 * scale}px`, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                {localDate}
+              </span>
+            )}
+          </div>
+        ),
+      )}
 
       {/* Weather & Solar Stats — hidden on mobile */}
       {!isMobile && (
