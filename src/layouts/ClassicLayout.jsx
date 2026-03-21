@@ -226,19 +226,16 @@ export default function ClassicLayout(props) {
 
   // === Build rotating pane views ===
 
-  // Pane 1: DX Cluster, POTA, SOTA
+  // Pane 1: DX Cluster, POTA, SOTA, DXpeditions
   const pane1Views = [
     {
       label: 'DX Cluster',
       render: () => (
-        <div style={{ fontSize: '15px', overflow: 'auto', height: '100%' }}>
+        <div style={{ fontSize: '13px', overflow: 'auto', height: '100%' }}>
           {dxClusterData.spots?.slice(0, 10).map((spot, i) => (
             <div
               key={i}
               style={{
-                display: 'grid',
-                gridTemplateColumns: '80px 1fr 44px',
-                gap: '4px',
                 padding: '2px 0',
                 borderBottom: '1px solid #111',
                 cursor: 'pointer',
@@ -251,11 +248,33 @@ export default function ClassicLayout(props) {
                 handleSpotClick(spot);
               }}
             >
-              <span style={{ color: '#ffff00' }}>{fmtFreq(spot.freq)}</span>
-              <span style={{ color: '#00ffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                <CallsignLink call={spot.call} color="#00ffff" />
-              </span>
-              <span style={{ color: '#aaa', textAlign: 'right' }}>{spot.time || ''}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>
+                  <span style={{ color: '#ffff00' }}>{fmtFreq(spot.freq)}</span>
+                  <span style={{ color: '#00ffff', marginLeft: '6px' }}>
+                    <CallsignLink call={spot.call} color="#00ffff" />
+                  </span>
+                </span>
+                <span style={{ color: '#aaa', fontSize: '11px' }}>{spot.time || ''}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginTop: '1px' }}>
+                <span
+                  style={{
+                    color: '#666',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    maxWidth: '70%',
+                  }}
+                >
+                  {spot.comment || ''}
+                </span>
+                {spot.spotter && (
+                  <span style={{ color: '#555' }}>
+                    de <CallsignLink call={spot.spotter} color="#555" />
+                  </span>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -264,12 +283,12 @@ export default function ClassicLayout(props) {
     {
       label: 'POTA',
       render: () => (
-        <div style={{ fontSize: '15px', overflow: 'auto', height: '100%' }}>
+        <div style={{ fontSize: '13px', overflow: 'auto', height: '100%' }}>
           {(filteredPotaSpots || potaSpots?.data || []).slice(0, 8).map((spot, i) => (
             <div
               key={i}
               style={{
-                padding: '1px 0',
+                padding: '2px 0',
                 borderBottom: '1px solid #111',
                 cursor: 'pointer',
               }}
@@ -278,13 +297,33 @@ export default function ClassicLayout(props) {
                 handleParkSpotClick(spot);
               }}
             >
-              <span style={{ color: '#00ff00' }}>
-                <CallsignLink call={spot.activator || spot.call} color="#00ff00" />
-              </span>
-              <span style={{ color: '#aaa', marginLeft: '4px' }}>{spot.reference || spot.park || ''}</span>
-              <span style={{ color: '#ffff00', marginLeft: '4px' }}>
-                {spot.frequency ? fmtFreq(spot.frequency) : ''}
-              </span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>
+                  <span style={{ color: '#00ff00' }}>
+                    <CallsignLink call={spot.activator || spot.call} color="#00ff00" />
+                  </span>
+                  <span style={{ color: '#ffff00', marginLeft: '6px' }}>
+                    {spot.frequency ? fmtFreq(spot.frequency) : spot.freq ? fmtFreq(spot.freq) : ''}
+                  </span>
+                  {spot.mode && <span style={{ color: '#888', marginLeft: '4px' }}>{spot.mode}</span>}
+                </span>
+                <span style={{ color: '#aaa', fontSize: '11px' }}>{spot.time || ''}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginTop: '1px' }}>
+                <span style={{ color: '#22c55e' }}>{spot.ref || spot.reference || ''}</span>
+                <span
+                  style={{
+                    color: '#666',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    maxWidth: '60%',
+                    textAlign: 'right',
+                  }}
+                >
+                  {spot.name || spot.locationDesc || ''}
+                </span>
+              </div>
             </div>
           ))}
           {(filteredPotaSpots || potaSpots?.data || []).length === 0 && (
@@ -296,12 +335,12 @@ export default function ClassicLayout(props) {
     {
       label: 'SOTA',
       render: () => (
-        <div style={{ fontSize: '15px', overflow: 'auto', height: '100%' }}>
+        <div style={{ fontSize: '13px', overflow: 'auto', height: '100%' }}>
           {(filteredSotaSpots || sotaSpots?.data || []).slice(0, 8).map((spot, i) => (
             <div
               key={i}
               style={{
-                padding: '1px 0',
+                padding: '2px 0',
                 borderBottom: '1px solid #111',
                 cursor: 'pointer',
               }}
@@ -310,17 +349,77 @@ export default function ClassicLayout(props) {
                 handleParkSpotClick(spot);
               }}
             >
-              <span style={{ color: '#ff66ff' }}>
-                <CallsignLink call={spot.activator || spot.call} color="#ff66ff" />
-              </span>
-              <span style={{ color: '#aaa', marginLeft: '4px' }}>{spot.summit || spot.reference || ''}</span>
-              <span style={{ color: '#ffff00', marginLeft: '4px' }}>
-                {spot.frequency ? fmtFreq(spot.frequency) : ''}
-              </span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>
+                  <span style={{ color: '#ff66ff' }}>
+                    <CallsignLink call={spot.activator || spot.call} color="#ff66ff" />
+                  </span>
+                  <span style={{ color: '#ffff00', marginLeft: '6px' }}>
+                    {spot.frequency ? fmtFreq(spot.frequency) : spot.freq ? fmtFreq(spot.freq) : ''}
+                  </span>
+                  {spot.mode && <span style={{ color: '#888', marginLeft: '4px' }}>{spot.mode}</span>}
+                </span>
+                <span style={{ color: '#aaa', fontSize: '11px' }}>{spot.time || ''}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginTop: '1px' }}>
+                <span style={{ color: '#c084fc' }}>{spot.ref || spot.reference || ''}</span>
+                <span
+                  style={{
+                    color: '#666',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    maxWidth: '60%',
+                    textAlign: 'right',
+                  }}
+                >
+                  {spot.summit || spot.name || ''}
+                  {spot.points ? ` (${spot.points}pt)` : ''}
+                </span>
+              </div>
             </div>
           ))}
           {(filteredSotaSpots || sotaSpots?.data || []).length === 0 && (
             <div style={{ color: '#777', textAlign: 'center', marginTop: '8px' }}>No SOTA activations</div>
+          )}
+        </div>
+      ),
+    },
+    {
+      label: 'DXpeditions',
+      render: () => (
+        <div style={{ fontSize: '13px', overflow: 'auto', height: '100%' }}>
+          {(dxpeditions?.data || []).slice(0, 8).map((dx, i) => (
+            <div
+              key={i}
+              style={{
+                padding: '3px 0',
+                borderBottom: '1px solid #111',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>
+                  <CallsignLink call={dx.callsign} color="#ff8800" />
+                  {dx.isActive && (
+                    <span style={{ color: '#22c55e', marginLeft: '6px', fontSize: '10px', fontWeight: 700 }}>
+                      ACTIVE
+                    </span>
+                  )}
+                  {dx.isUpcoming && !dx.isActive && (
+                    <span style={{ color: '#eab308', marginLeft: '6px', fontSize: '10px' }}>UPCOMING</span>
+                  )}
+                </span>
+                <span style={{ color: '#aaa', fontSize: '11px' }}>{dx.dates || ''}</span>
+              </div>
+              <div style={{ fontSize: '11px', marginTop: '1px' }}>
+                <span style={{ color: '#ff8800' }}>{dx.entity || ''}</span>
+                {dx.bands && <span style={{ color: '#666', marginLeft: '6px' }}>{dx.bands}</span>}
+                {dx.modes && <span style={{ color: '#555', marginLeft: '4px' }}>{dx.modes}</span>}
+              </div>
+            </div>
+          ))}
+          {(!dxpeditions?.data || dxpeditions.data.length === 0) && (
+            <div style={{ color: '#777', textAlign: 'center', marginTop: '8px' }}>No active DXpeditions</div>
           )}
         </div>
       ),
@@ -868,8 +967,21 @@ export default function ClassicLayout(props) {
           {/* Bz */}
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '13px', color: '#aaa' }}>Bz</div>
-            <div style={{ fontSize: '20px', fontWeight: '700', color: '#00ffff' }}>
-              {bandConditions?.extras?.bzComponent || bandConditions?.extras?.bz || '--'}
+            <div
+              style={{
+                fontSize: '20px',
+                fontWeight: '700',
+                color: (() => {
+                  const bz = solarIndices?.data?.bz?.current;
+                  if (bz == null) return '#00ffff';
+                  if (bz < -10) return '#ef4444';
+                  if (bz < -5) return '#f59e0b';
+                  if (bz < 0) return '#eab308';
+                  return '#22c55e';
+                })(),
+              }}
+            >
+              {solarIndices?.data?.bz?.current != null ? `${solarIndices.data.bz.current} nT` : '--'}
             </div>
           </div>
           {/* X-ray */}
