@@ -7,7 +7,7 @@
  * In dockable layout mode, also shows layout lock/reset controls,
  * replacing the separate "Layout" dockable panel.
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconGear, IconExpand, IconShrink } from './Icons.jsx';
 import DonateButton from './DonateButton.jsx';
@@ -52,15 +52,18 @@ export default function SidebarMenu({
   const { t } = useTranslation();
 
   // Sidebar menu items — each maps to a settings tab
-  const MENU_ITEMS = [
-    { id: 'station', icon: '📻', label: `${t('station.settings.tab.title.station')}` },
-    { id: 'integrations', icon: '🔌', label: `${t('station.settings.tab.title.integrations')}` },
-    { id: 'display', icon: '🎨', label: `${t('station.settings.tab.title.display')}` },
-    { id: 'layers', icon: '🗺️', label: `${t('station.settings.tab.title.mapLayers')}` },
-    { id: 'satellites', icon: '🛰️', label: `${t('station.settings.tab.title.satellites')}` },
-    { id: 'profiles', icon: '👤', label: `${t('station.settings.tab.title.profiles')}` },
-    { id: 'community', icon: '🌐', label: `${t('station.settings.tab.title.community')}` },
-  ];
+  const MENU_ITEMS = useMemo(
+    () => [
+      { id: 'station', icon: '📻', label: t('station.settings.tab.title.station') },
+      { id: 'integrations', icon: '🔌', label: t('station.settings.tab.title.integrations') },
+      { id: 'display', icon: '🎨', label: t('station.settings.tab.title.display') },
+      { id: 'layers', icon: '🗺️', label: t('station.settings.tab.title.mapLayers') },
+      { id: 'satellites', icon: '🛰️', label: t('station.settings.tab.title.satellites') },
+      { id: 'profiles', icon: '👤', label: t('station.settings.tab.title.profiles') },
+      { id: 'community', icon: '🌐', label: t('station.settings.tab.title.community') },
+    ],
+    [t],
+  );
 
   // Persist mode
   useEffect(() => {
