@@ -1149,7 +1149,7 @@ module.exports = function (app, ctx) {
         '# Requires: Node.js 14+ (https://nodejs.org)',
         '#',
         '# In WSJT-X: Settings > Reporting > UDP Server',
-        '#   Address: 127.0.0.1   Port: 2237',
+        '#   Address: ' + (multicastAddress ? safeMulticastAddress : '127.0.0.1') + '   Port: 2237',
         '',
         'set -e',
         '',
