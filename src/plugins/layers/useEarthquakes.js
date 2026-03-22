@@ -1,4 +1,5 @@
 import i18n from '../../lang/i18n';
+import { esc, sanitizeUrl } from '../../utils/escapeHtml.js';
 
 import { useState, useEffect, useRef } from 'react';
 
@@ -236,18 +237,18 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemory
       circle.bindPopup(`
         <div style="font-family: 'JetBrains Mono', monospace; min-width: 200px;">
           <div style="font-size: 16px; font-weight: bold; color: ${color}; margin-bottom: 8px;">
-            ${isNew ? '🆕 ' : ''}M${mag.toFixed(1)} ${props.type === 'earthquake' ? '🌋' : '⚡'}
+            ${isNew ? '🆕 ' : ''}M${mag.toFixed(1)} ${esc(props.type) === 'earthquake' ? '🌋' : '⚡'}
           </div>
           <table style="font-size: 12px; width: 100%;">
-            <tr><td><b>Location:</b></td><td>${props.place || 'Unknown'}</td></tr>
-            <tr><td><b>Time:</b></td><td>${timeStr}</td></tr>
-            <tr><td><b>Age:</b></td><td>${ageStr}</td></tr>
+            <tr><td><b>Location:</b></td><td>${esc(props.place || 'Unknown')}</td></tr>
+            <tr><td><b>Time:</b></td><td>${esc(timeStr)}</td></tr>
+            <tr><td><b>Age:</b></td><td>${esc(ageStr)}</td></tr>
             <tr><td><b>Depth:</b></td><td>${depth.toFixed(1)} km</td></tr>
             <tr><td><b>Magnitude:</b></td><td>${mag.toFixed(1)}</td></tr>
-            <tr><td><b>Status:</b></td><td>${props.status || 'automatic'}</td></tr>
+            <tr><td><b>Status:</b></td><td>${esc(props.status || 'automatic')}</td></tr>
             ${props.tsunami ? '<tr><td colspan="2" style="color: red; font-weight: bold;">⚠️ TSUNAMI WARNING</td></tr>' : ''}
           </table>
-          ${props.url ? `<a href="${props.url}" target="_blank" style="color: var(--accent-cyan); font-size: 11px;">View Details →</a>` : ''}
+          ${props.url ? `<a href="${sanitizeUrl(props.url)}" target="_blank" style="color: var(--accent-cyan); font-size: 11px;">View Details →</a>` : ''}
         </div>
       `);
 

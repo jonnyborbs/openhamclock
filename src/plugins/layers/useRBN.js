@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { esc } from '../../utils/escapeHtml.js';
 import { addMinimizeToggle } from './addMinimizeToggle.js';
 import { makeDraggable } from './makeDraggable.js';
 
@@ -452,12 +453,12 @@ export function useLayer({
 
       marker.bindPopup(`
         <div style="font-family: 'JetBrains Mono', monospace;">
-          <strong>📡 ${skimmerCall}</strong><br>
-          Heard: <strong>${callsign}</strong><br>
+          <strong>📡 ${esc(skimmerCall)}</strong><br>
+          Heard: <strong>${esc(callsign)}</strong><br>
           SNR: <strong>${snr} dB</strong><br>
-          Band: <strong>${band}</strong><br>
+          Band: <strong>${esc(band)}</strong><br>
           Freq: <strong>${(freq / 1000).toFixed(1)} kHz</strong><br>
-          Grid: ${skimmerGrid}<br>
+          Grid: ${esc(skimmerGrid)}<br>
           Time: ${timestamp.toLocaleTimeString()}
         </div>
       `);

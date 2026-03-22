@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { WorldMap } from '../components';
 import { calculateDistance, formatDistance } from '../utils/geo.js';
+import { esc } from '../utils/escapeHtml.js';
 
 // APRS symbol codes for emergency-related stations
 const EMCOMM_SYMBOLS = new Set([
@@ -196,7 +197,7 @@ export default function EmcommLayout(props) {
             fillOpacity: 0.15,
             weight: 2,
           });
-          polygon.bindPopup(`<b>${alert.event}</b><br>${alert.headline || ''}`);
+          polygon.bindPopup(`<b>${esc(alert.event)}</b><br>${esc(alert.headline || '')}`);
           polygon.addTo(map);
           overlayLayersRef.current.push(polygon);
         });
@@ -216,9 +217,9 @@ export default function EmcommLayout(props) {
         fillOpacity: 0.6,
         weight: 2,
       });
-      const pop = `<b>${shelter.name || 'Shelter'}</b><br>
-        ${shelter.address || ''}, ${shelter.city || ''}<br>
-        Status: ${shelter.status || 'Unknown'}<br>
+      const pop = `<b>${esc(shelter.name || 'Shelter')}</b><br>
+        ${esc(shelter.address || '')}, ${esc(shelter.city || '')}<br>
+        Status: ${esc(shelter.status || 'Unknown')}<br>
         Capacity: ${shelter.currentPopulation || 0}/${shelter.evacuationCapacity || '?'}
         ${shelter.wheelchairAccessible ? ' ♿' : ''}${shelter.petFriendly ? ' 🐾' : ''}`;
       marker.bindPopup(pop);
@@ -236,25 +237,25 @@ export default function EmcommLayout(props) {
         fillOpacity: 0.5,
         weight: 2,
       });
-      let popupHtml = `<b style="color:#22d3ee">${station.ssid || station.call}</b>`;
-      popupHtml += `<br><span style="color:#888">${SYMBOL_LABELS[station.symbol] || 'EmComm'}</span>`;
+      let popupHtml = `<b style="color:#22d3ee">${esc(station.ssid || station.call)}</b>`;
+      popupHtml += `<br><span style="color:#888">${esc(SYMBOL_LABELS[station.symbol] || 'EmComm')}</span>`;
       if (station.tokens && station.tokens.length > 0) {
         popupHtml += '<br><div style="margin-top:4px">';
         station.tokens.forEach((t) => {
-          const meta = TOKEN_META[t.key] || { icon: '📦', label: t.key };
+          const meta = TOKEN_META[t.key] || { icon: '📦', label: esc(t.key) };
           let val;
           if (t.type === 'capacity') val = `${t.current}/${t.max}`;
-          else if (t.type === 'need') val = `<span style="color:#ef4444">${t.value} NEEDED</span>`;
+          else if (t.type === 'need') val = `<span style="color:#ef4444">${esc(t.value)} NEEDED</span>`;
           else if (t.type === 'critical') val = '<span style="color:#ef4444">CRITICAL</span>';
-          else val = t.value;
-          popupHtml += `${meta.icon} <b>${meta.label}:</b> ${val}<br>`;
+          else val = esc(t.value);
+          popupHtml += `${meta.icon} <b>${esc(meta.label)}:</b> ${val}<br>`;
         });
         popupHtml += '</div>';
         if (station.cleanComment) {
-          popupHtml += `<div style="color:#888;margin-top:4px">${station.cleanComment}</div>`;
+          popupHtml += `<div style="color:#888;margin-top:4px">${esc(station.cleanComment)}</div>`;
         }
       } else if (station.comment) {
-        popupHtml += `<br>${station.comment}`;
+        popupHtml += `<br>${esc(station.comment)}`;
       }
       marker.bindPopup(popupHtml);
       marker.addTo(map);

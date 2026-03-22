@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { esc } from '../../utils/escapeHtml.js';
 import { apiFetch } from '../../utils/apiFetch';
 
 // 👥 Active Users layer — shows all active OpenHamClock users on the map.
@@ -85,7 +86,7 @@ export function useLayer({ enabled = false, opacity = 0.85, map = null, callsign
           white-space: nowrap;
           box-shadow: 0 1px 4px rgba(0,0,0,0.4);
           line-height: 1.2;
-        ">${label}</div>`,
+        ">${esc(label)}</div>`,
         iconSize: null,
         iconAnchor: [20, 10],
       });
@@ -101,10 +102,10 @@ export function useLayer({ enabled = false, opacity = 0.85, map = null, callsign
       marker.bindPopup(`
         <div style="font-family: 'JetBrains Mono', monospace; min-width: 140px;">
           <div style="font-size: 14px; font-weight: bold; color: ${popupColor}; margin-bottom: 4px;">
-            👥 ${user.call}${isMe ? ' (you)' : ''}
+            👥 ${esc(user.call)}${isMe ? ' (you)' : ''}
           </div>
           <div style="font-size: 11px; color: #888;">
-            ${user.grid ? `Grid: ${user.grid}<br>` : ''}
+            ${user.grid ? `Grid: ${esc(user.grid)}<br>` : ''}
             Last seen: ${ageStr}
           </div>
         </div>

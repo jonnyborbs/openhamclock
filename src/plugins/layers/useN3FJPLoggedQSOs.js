@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { esc } from '../../utils/escapeHtml.js';
 import { addMinimizeToggle } from './addMinimizeToggle.js';
 import { makeDraggable } from './makeDraggable.js';
 import { getGreatCirclePoints, replicatePath } from '../../utils/geo.js';
@@ -288,13 +289,13 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null }) {
 
       dxMarker.bindPopup(
         `<div style="font-family: JetBrains Mono, monospace;">
-          <b>${dxCall}</b><br/>
-          ${mode ? `Mode: ${mode}<br/>` : ''}
-          ${freqMhz ? `Freq: ${freqMhz} MHz<br/>` : ''}
-          ${ts ? `Time: ${ts}<br/>` : ''}
-          ${q.dx_country ? `Country: ${q.dx_country}<br/>` : ''}
-          ${q.loc_source ? `Loc: ${q.loc_source}<br/>` : ''}
-          ${q.dx_grid ? `Grid: ${q.dx_grid}<br/>` : ''}
+          <b>${esc(dxCall)}</b><br/>
+          ${mode ? `Mode: ${esc(mode)}<br/>` : ''}
+          ${freqMhz ? `Freq: ${esc(freqMhz)} MHz<br/>` : ''}
+          ${ts ? `Time: ${esc(ts)}<br/>` : ''}
+          ${q.dx_country ? `Country: ${esc(q.dx_country)}<br/>` : ''}
+          ${q.loc_source ? `Loc: ${esc(q.loc_source)}<br/>` : ''}
+          ${q.dx_grid ? `Grid: ${esc(q.dx_grid)}<br/>` : ''}
           <span style="opacity:0.7;">Retention: ${retentionMinutes} min</span>
         </div>`,
       );

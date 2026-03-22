@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { esc } from '../../utils/escapeHtml.js';
 import { getBandColor, getBandFromFreq } from '../../utils/callsign.js';
 import { getGreatCirclePoints, replicatePath, replicatePoint } from '../../utils/geo.js';
 
@@ -148,10 +149,10 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null, mapBandFi
         })
           .bindPopup(
             `
-          <b>${qso.dxCall || ''}</b><br>
-          ${qso.mode || ''} ${bandLabel}<br>
-          ${timeLabel ? `${timeLabel}<br>` : ''}
-          ${sourceLabel}
+          <b>${esc(qso.dxCall || '')}</b><br>
+          ${esc(qso.mode || '')} ${esc(bandLabel)}<br>
+          ${timeLabel ? `${esc(timeLabel)}<br>` : ''}
+          ${esc(sourceLabel)}
         `,
           )
           .addTo(map);

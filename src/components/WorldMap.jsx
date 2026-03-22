@@ -35,15 +35,7 @@ import { filterDXPaths } from '../utils';
 // SECURITY: Escape HTML to prevent XSS in Leaflet popups/tooltips
 // DX cluster data, POTA/SOTA spots, and WSJT-X decodes come from external sources
 // and could contain malicious HTML/script tags in callsigns, comments, or park names.
-function esc(str) {
-  if (str == null) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+import { esc } from '../utils/escapeHtml.js';
 
 // Normalize callsign keys used for DX hover/highlight matching
 const normalizeCallsignKey = (v) => (v || '').toString().toUpperCase().trim();

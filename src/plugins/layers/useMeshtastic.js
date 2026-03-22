@@ -3,6 +3,7 @@
  * Shows mesh network nodes on the world map with position, name, and status.
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { esc } from '../../utils/escapeHtml.js';
 
 export const metadata = {
   id: 'meshtastic',
@@ -105,7 +106,7 @@ export const useLayer = ({ map, enabled, opacity }) => {
           ? `<tr><td style="color:#888;">Hops:</td><td align="right">${node.hopsAway}</td></tr>`
           : '';
       const hwStr = node.hwModel
-        ? `<tr><td style="color:#888;">Hardware:</td><td align="right">${node.hwModel}</td></tr>`
+        ? `<tr><td style="color:#888;">Hardware:</td><td align="right">${esc(node.hwModel)}</td></tr>`
         : '';
       const ageStr = node.lastHeard
         ? `<tr><td style="color:#888;">Last heard:</td><td align="right">${Math.round(age / 60000)}m ago</td></tr>`
@@ -114,9 +115,9 @@ export const useLayer = ({ map, enabled, opacity }) => {
       marker.bindPopup(
         `<div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; min-width: 160px;">
           <div style="font-weight:700; color:#fff; font-size:13px; margin-bottom:4px;">
-            📡 ${node.longName || node.shortName || node.id}
+            📡 ${esc(node.longName || node.shortName || node.id)}
           </div>
-          ${node.shortName && node.longName ? `<div style="color:#888; font-size:9px; margin-bottom:4px;">${node.id}</div>` : ''}
+          ${node.shortName && node.longName ? `<div style="color:#888; font-size:9px; margin-bottom:4px;">${esc(node.id)}</div>` : ''}
           <table style="width:100%; border-collapse:collapse;">
             <tr><td style="color:#888;">Position:</td><td align="right">${node.lat.toFixed(4)}°, ${node.lon.toFixed(4)}°</td></tr>
             ${altStr}${snrStr}${battStr}${hopsStr}${hwStr}${ageStr}
@@ -129,7 +130,7 @@ export const useLayer = ({ map, enabled, opacity }) => {
       );
 
       // Tooltip on hover
-      const displayName = node.shortName || node.longName || node.id;
+      const displayName = esc(node.shortName || node.longName || node.id);
       marker.bindTooltip(displayName, {
         permanent: false,
         direction: 'top',

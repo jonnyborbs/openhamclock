@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { esc } from '../../utils/escapeHtml.js';
 import { addMinimizeToggle } from './addMinimizeToggle.js';
 import { makeDraggable } from './makeDraggable.js';
 import { getBandFromFreq } from '../../utils/callsign.js';
@@ -904,7 +905,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       path.bindPopup(`
         <div style="font-family: 'JetBrains Mono', monospace; min-width: 240px;">
           <div style="font-size: 13px; font-weight: bold; color: ${getSNRColor(spot.snr)}; margin-bottom: 8px; text-align: center;">
-            ${spot.sender} ⇢ ${spot.receiver}
+            ${esc(spot.sender)} ⇢ ${esc(spot.receiver)}
           </div>
           ${
             spot.isAggregated
@@ -913,7 +914,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
             ${spot.pathCount || 1} propagation paths
           </div>
           <table style="font-size: 11px; width: 100%; line-height: 1.6;">
-            <tr><td style="opacity: 0.7;">Band:</td><td><b>${spot.band || 'Multi'}</b></td></tr>
+            <tr><td style="opacity: 0.7;">Band:</td><td><b>${esc(spot.band || 'Multi')}</b></td></tr>
             <tr><td style="opacity: 0.7;">Avg SNR:</td><td style="color: ${getSNRColor(spot.snr)}; font-weight: bold;">${spot.snr !== null ? spot.snr + ' dB' : 'N/A'}</td></tr>
             <tr><td style="opacity: 0.7;">Path Count:</td><td><b>${spot.pathCount || 1}</b></td></tr>
           </table>
@@ -958,8 +959,8 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         let txDetails = `
           <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; min-width: 220px;">
             <div style="font-weight: bold; color: #ff6600; margin-bottom: 6px; font-size: 12px;">📡 TX Station</div>
-            <div style="margin-bottom: 6px;"><b style="font-size: 13px;">${spot.sender}</b> ⇢ <b style="font-size: 13px;">${spot.receiver}</b></div>
-            <div style="opacity: 0.7; margin-bottom: 8px;">Grid: ${spot.senderGrid}</div>
+            <div style="margin-bottom: 6px;"><b style="font-size: 13px;">${esc(spot.sender)}</b> ⇢ <b style="font-size: 13px;">${esc(spot.receiver)}</b></div>
+            <div style="opacity: 0.7; margin-bottom: 8px;">Grid: ${esc(spot.senderGrid)}</div>
         `;
 
         // Add frequency and band
@@ -1025,8 +1026,8 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         let rxDetails = `
           <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; min-width: 220px;">
             <div style="font-weight: bold; color: #0088ff; margin-bottom: 6px; font-size: 12px;">📻 RX Station</div>
-            <div style="margin-bottom: 6px;"><b style="font-size: 13px;">${spot.sender}</b> ⇢ <b style="font-size: 13px;">${spot.receiver}</b></div>
-            <div style="opacity: 0.7; margin-bottom: 8px;">Grid: ${spot.receiverGrid}</div>
+            <div style="margin-bottom: 6px;"><b style="font-size: 13px;">${esc(spot.sender)}</b> ⇢ <b style="font-size: 13px;">${esc(spot.receiver)}</b></div>
+            <div style="opacity: 0.7; margin-bottom: 8px;">Grid: ${esc(spot.receiverGrid)}</div>
         `;
 
         // Add frequency and band

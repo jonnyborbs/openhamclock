@@ -1,4 +1,5 @@
 import i18n from '../../lang/i18n';
+import { esc, sanitizeUrl } from '../../utils/escapeHtml.js';
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 // 🌪️ Tornado Warnings layer — NWS Weather Alerts API
@@ -264,19 +265,19 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null, lowMemory
       marker.bindPopup(`
         <div style="font-family: 'JetBrains Mono', monospace; min-width: 250px; max-width: 350px;">
           <div style="font-size: 14px; font-weight: bold; color: ${style.color}; margin-bottom: 6px;">
-            ${isNew ? '🆕 ' : ''}${style.icon} ${event}
+            ${isNew ? '🆕 ' : ''}${style.icon} ${esc(event)}
           </div>
-          ${headline ? `<div style="font-size: 11px; font-weight: 600; margin-bottom: 8px; line-height: 1.3;">${headline}</div>` : ''}
+          ${headline ? `<div style="font-size: 11px; font-weight: 600; margin-bottom: 8px; line-height: 1.3;">${esc(headline)}</div>` : ''}
           <table style="font-size: 11px; width: 100%; line-height: 1.4;">
-            <tr><td style="white-space: nowrap; padding-right: 8px;"><b>Areas:</b></td><td>${areas}</td></tr>
-            <tr><td><b>Expires in:</b></td><td style="color: ${expiresIn !== null && expiresIn <= 15 ? '#FF3300' : 'inherit'}; font-weight: ${expiresIn !== null && expiresIn <= 15 ? '700' : 'normal'};">${expiresStr}</td></tr>
-            <tr><td><b>Severity:</b></td><td>${severity}</td></tr>
-            <tr><td><b>Urgency:</b></td><td>${urgency}</td></tr>
-            <tr><td><b>Certainty:</b></td><td>${certainty}</td></tr>
-            ${sender ? `<tr><td><b>Issued by:</b></td><td>${sender}</td></tr>` : ''}
+            <tr><td style="white-space: nowrap; padding-right: 8px;"><b>Areas:</b></td><td>${esc(areas)}</td></tr>
+            <tr><td><b>Expires in:</b></td><td style="color: ${expiresIn !== null && expiresIn <= 15 ? '#FF3300' : 'inherit'}; font-weight: ${expiresIn !== null && expiresIn <= 15 ? '700' : 'normal'};">${esc(expiresStr)}</td></tr>
+            <tr><td><b>Severity:</b></td><td>${esc(severity)}</td></tr>
+            <tr><td><b>Urgency:</b></td><td>${esc(urgency)}</td></tr>
+            <tr><td><b>Certainty:</b></td><td>${esc(certainty)}</td></tr>
+            ${sender ? `<tr><td><b>Issued by:</b></td><td>${esc(sender)}</td></tr>` : ''}
           </table>
-          ${shortDesc ? `<div style="font-size: 10px; color: #aaa; margin-top: 8px; line-height: 1.4; border-top: 1px solid #333; padding-top: 6px;">${shortDesc}</div>` : ''}
-          ${props.web ? `<div style="margin-top: 6px;"><a href="${props.web}" target="_blank" style="color: #00bcd4; font-size: 11px;">Full Alert →</a></div>` : ''}
+          ${shortDesc ? `<div style="font-size: 10px; color: #aaa; margin-top: 8px; line-height: 1.4; border-top: 1px solid #333; padding-top: 6px;">${esc(shortDesc)}</div>` : ''}
+          ${props.web ? `<div style="margin-top: 6px;"><a href="${sanitizeUrl(props.web)}" target="_blank" style="color: #00bcd4; font-size: 11px;">Full Alert →</a></div>` : ''}
         </div>
       `);
 

@@ -1,4 +1,5 @@
 import i18n from '../../lang/i18n';
+import { esc, sanitizeUrl } from '../../utils/escapeHtml.js';
 import { useState, useEffect, useRef } from 'react';
 
 // 🔥 Wildfires layer — NASA EONET (Earth Observatory Natural Events Tracker)
@@ -151,19 +152,20 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemory
       // Source links
       const sources = (event.sources || [])
         .map(
-          (s) => `<a href="${s.url}" target="_blank" style="color: var(--accent-cyan); font-size: 11px;">${s.id}</a>`,
+          (s) =>
+            `<a href="${sanitizeUrl(s.url)}" target="_blank" style="color: var(--accent-cyan); font-size: 11px;">${esc(s.id)}</a>`,
         )
         .join(' · ');
 
       marker.bindPopup(`
         <div style="font-family: 'JetBrains Mono', monospace; min-width: 220px;">
           <div style="font-size: 14px; font-weight: bold; color: ${color}; margin-bottom: 8px;">
-            ${isNew ? '🆕 ' : ''}🔥 ${title}
+            ${isNew ? '🆕 ' : ''}🔥 ${esc(title)}
           </div>
           <table style="font-size: 12px; width: 100%;">
-            <tr><td><b>Started:</b></td><td>${startStr}</td></tr>
-            <tr><td><b>Last Update:</b></td><td>${latestStr}</td></tr>
-            <tr><td><b>Age:</b></td><td>${ageStr}</td></tr>
+            <tr><td><b>Started:</b></td><td>${esc(startStr)}</td></tr>
+            <tr><td><b>Last Update:</b></td><td>${esc(latestStr)}</td></tr>
+            <tr><td><b>Age:</b></td><td>${esc(ageStr)}</td></tr>
             <tr><td><b>Reports:</b></td><td>${geom.length} detection${geom.length !== 1 ? 's' : ''}</td></tr>
           </table>
           ${sources ? `<div style="margin-top: 6px;">${sources}</div>` : ''}
