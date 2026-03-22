@@ -653,13 +653,13 @@ Operators at shelters or EOCs can encode structured resource data in their APRS 
 
 Token format (within the 67-character APRS comment field):
 
-```
-[Key Value]          — quantity (e.g., [Food 50])
-[Key Current/Max]    — capacity (e.g., [Beds 30/100])
-[Key -Value]         — resource NEEDED (e.g., [Water -100])
-[Key OK]             — status nominal
-[Key !]              — critical alert
-```
+| Token.            | Content                              |
+| ----------------- | ------------------------------------ |
+| [Key Value]       | quantity (e.g., [Food 50])           |
+| [Key Current/Max] | capacity (e.g., [Beds 30/100])       |
+| [Key -Value]      | resource NEEDED (e.g., [Water -100]) |
+| [Key OK]          | status nominal                       |
+| [Key !]           | critical alert                       |
 
 Built-in token keys with icons: `Beds`, `Water`, `Food`, `Power`, `Fuel`, `Med`, `Staff`, `Evac`, `Comms`, `Gen`. The parser accepts any key — unknown keys display with a generic icon.
 
