@@ -182,6 +182,7 @@ const staticOptions = {
   setHeaders: (res, filePath) => {
     if (filePath.endsWith('index.html') || filePath.endsWith('.html')) {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('CDN-Cache-Control', 'no-store'); // Cloudflare-specific: never cache at edge
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');
     }
@@ -267,6 +268,7 @@ app.get('*', (req, res) => {
   const publicIndex = path.join(ROOT_DIR, 'public', 'index.html');
   const indexPath = fs.existsSync(distIndex) ? distIndex : publicIndex;
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('CDN-Cache-Control', 'no-store'); // Cloudflare: never cache at edge
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.sendFile(indexPath);
