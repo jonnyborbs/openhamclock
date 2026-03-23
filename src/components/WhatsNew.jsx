@@ -29,8 +29,8 @@ const ANNOUNCEMENT = {
 
 const CHANGELOG = [
   {
-    version: '26.1.1',
-    date: '2026-03-20',
+    version: '26.1.2',
+    date: '2026-03-23',
     heading:
       'EmComm layout with APRS resource tracking, redesigned Classic layout, new versioning scheme, SDR integration, DX cluster text filter, RBN spotter filter, DX favorites, mutual reception indicator, UDP spot listener, WSJT-X multicast, swappable header clocks, Classic VOACAP heatmap, and bug fixes.',
     features: [
@@ -138,6 +138,16 @@ const CHANGELOG = [
         icon: '📡',
         title: 'WSJT-X Relay — Multicast Support',
         desc: 'The WSJT-X relay now supports UDP multicast, allowing multiple applications (WSJT-X, GridTracker, JTAlert, etc.) to receive the same UDP stream without port conflicts. Configure a multicast address in Settings → Station, and the relay download scripts include it automatically. Note: multicast support in the standalone relay is an interim solution — the longer-term plan is to consolidate relay functionality into rig-bridge.',
+      },
+      {
+        icon: '🐛',
+        title: 'Bug Fix — Update Preflight Error',
+        desc: 'Fixed the "Update preflight failed" error that appeared for all users when clicking the update button. The server-side pre-check now provides a clearer error message when git is not available in the deployment environment.',
+      },
+      {
+        icon: '🐛',
+        title: 'Bug Fix — Edge Browser Cache Issue',
+        desc: 'Fixed a crash in Microsoft Edge when switching to azimuthal projection. Leaflet icon creation was happening at module load time before the library was ready, causing a fatal error on browsers with aggressive caching. Azimuthal map now also has its own error boundary — if it fails, it falls back to flat projection instead of crashing the entire dashboard.',
       },
     ],
   },

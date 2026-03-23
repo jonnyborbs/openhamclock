@@ -103,6 +103,7 @@ const bandFromAnyFrequency = (freq) => {
 
 // ── Component ──────────────────────────────────────────────
 export default function AzimuthalMap({
+  leafletReady,
   deLocation,
   dxLocation,
   onDXChange,
@@ -254,7 +255,7 @@ export default function AzimuthalMap({
       leafletMapRef.current = null;
       if (onMapReady) onMapReady(null);
     };
-  }, [lat0, lon0, size.w > 0 ? 1 : 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lat0, lon0, size.w > 0 ? 1 : 0, leafletReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Resolve tile URL template for current style
   const useTiles =

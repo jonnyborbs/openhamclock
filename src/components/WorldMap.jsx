@@ -2,7 +2,7 @@
  * WorldMap Component
  * Leaflet map with DE/DX markers, terminator, DX paths, POTA/WWFF/SOTA/WWBOTA, satellites, PSKReporter, WSJT-X
  */
-import { useRef, useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MAP_STYLES } from '../utils/config.js';
 import {
@@ -36,6 +36,26 @@ import { filterDXPaths } from '../utils';
 // DX cluster data, POTA/SOTA spots, and WSJT-X decodes come from external sources
 // and could contain malicious HTML/script tags in callsigns, comments, or park names.
 import { esc } from '../utils/escapeHtml.js';
+
+// Lightweight error boundary for the azimuthal map — falls back to Mercator
+// instead of crashing the entire dashboard.
+class AzimuthalErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, info) {
+    console.error('[AzimuthalMap] Render crash, falling back to Mercator:', error, info);
+    if (this.props.onFallback) this.props.onFallback();
+  }
+  render() {
+    if (this.state.hasError) return null;
+    return this.props.children;
+  }
+}
 
 // Normalize callsign keys used for DX hover/highlight matching
 const normalizeCallsignKey = (v) => (v || '').toString().toUpperCase().trim();
@@ -376,8 +396,11 @@ export const WorldMap = ({
     }
   };
   const storedSettings = getStoredMapSettings();
+
   // Migration: saved isAzimuthal → split into projection + style
-  const initialStyle = storedSettings.isAzimuthal ? 'dark' : storedSettings.mapStyle || 'dark';
+  // Also validate that saved mapStyle still exists in MAP_STYLES to prevent stale references
+  const migratedStyle = storedSettings.isAzimuthal ? 'dark' : storedSettings.mapStyle || 'dark';
+  const initialStyle = MAP_STYLES[migratedStyle] ? migratedStyle : 'dark';
   const initialProjection = storedSettings.isAzimuthal ? 'azimuthal' : storedSettings.mapProjection || 'mercator';
   const [mapStyle, setMapStyle] = useState(initialStyle);
   const [mapProjection, setMapProjection] = useState(initialProjection);
@@ -1836,39 +1859,42 @@ export const WorldMap = ({
     <div style={{ position: 'relative', height: '100%', minHeight: '200px' }}>
       {/* Azimuthal equidistant projection (canvas-based) */}
       {isAzimuthal && (
-        <AzimuthalMap
-          deLocation={deLocation}
-          dxLocation={dxLocation}
-          onDXChange={onDXChange}
-          dxLocked={dxLocked}
-          potaSpots={potaSpots}
-          wwffSpots={wwffSpots}
-          sotaSpots={sotaSpots}
-          wwbotaSpots={wwbotaSpots}
-          dxPaths={dxPaths}
-          dxFilters={dxFilters}
-          mapBandFilter={mapBandFilter}
-          pskReporterSpots={pskReporterSpots}
-          wsjtxSpots={wsjtxSpots}
-          showDXPaths={showDXPaths}
-          showPOTA={showPOTA}
-          showWWFF={showWWFF}
-          showSOTA={showSOTA}
-          showWWBOTA={showWWBOTA}
-          showPSKReporter={showPSKReporter}
-          showPSKPaths={showPSKPaths}
-          showMutualReception={showMutualReception}
-          showWSJTX={showWSJTX}
-          onSpotClick={onSpotClick}
-          hoveredSpot={hoveredSpot}
-          callsign={callsign}
-          hideOverlays={hideOverlays}
-          hideUi={mapUiHidden}
-          tileStyle={mapStyle}
-          gibsOffset={gibsOffset}
-          lowMemoryMode={lowMemoryMode}
-          onMapReady={handleAzimuthalMapReady}
-        />
+        <AzimuthalErrorBoundary onFallback={() => setMapProjection('mercator')}>
+          <AzimuthalMap
+            leafletReady={leafletReady}
+            deLocation={deLocation}
+            dxLocation={dxLocation}
+            onDXChange={onDXChange}
+            dxLocked={dxLocked}
+            potaSpots={potaSpots}
+            wwffSpots={wwffSpots}
+            sotaSpots={sotaSpots}
+            wwbotaSpots={wwbotaSpots}
+            dxPaths={dxPaths}
+            dxFilters={dxFilters}
+            mapBandFilter={mapBandFilter}
+            pskReporterSpots={pskReporterSpots}
+            wsjtxSpots={wsjtxSpots}
+            showDXPaths={showDXPaths}
+            showPOTA={showPOTA}
+            showWWFF={showWWFF}
+            showSOTA={showSOTA}
+            showWWBOTA={showWWBOTA}
+            showPSKReporter={showPSKReporter}
+            showPSKPaths={showPSKPaths}
+            showMutualReception={showMutualReception}
+            showWSJTX={showWSJTX}
+            onSpotClick={onSpotClick}
+            hoveredSpot={hoveredSpot}
+            callsign={callsign}
+            hideOverlays={hideOverlays}
+            hideUi={mapUiHidden}
+            tileStyle={mapStyle}
+            gibsOffset={gibsOffset}
+            lowMemoryMode={lowMemoryMode}
+            onMapReady={handleAzimuthalMapReady}
+          />
+        </AzimuthalErrorBoundary>
       )}
 
       <div
@@ -1883,11 +1909,12 @@ export const WorldMap = ({
       />
 
       {/* Render plugin layers on active map (Mercator or Azimuthal) */}
-      {/* Always render all PluginLayer components to preserve React hook count.
-          Pass map={null} when no active map — hooks inside guard against it. */}
+      {/* Key includes projection so hooks fully remount when map instance changes.
+          This resets internal refs (layerGroupRef, controlRef) that are bound to a
+          specific Leaflet map — without this, layers stay on the hidden old map. */}
       {getAllLayers().map((layerDef) => (
         <PluginLayer
-          key={layerDef.id}
+          key={`${layerDef.id}-${isAzimuthal ? 'az' : 'merc'}`}
           plugin={layerDef}
           enabled={pluginLayerStates[layerDef.id]?.enabled ?? layerDef.defaultEnabled}
           opacity={pluginLayerStates[layerDef.id]?.opacity ?? layerDef.defaultOpacity}
