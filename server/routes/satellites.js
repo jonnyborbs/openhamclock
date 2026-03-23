@@ -411,6 +411,15 @@ module.exports = function (app, ctx) {
     },
 
     // ── Digipeaters ────────────────────────────────────────────────
+    'IO-86': {
+      norad: 40931,
+      name: 'IO-86 (LAPAN-A2/ORARI)',
+      color: '#33ccaa',
+      priority: 2,
+      mode: 'APRS Digipeater',
+      downlink: '145.825 MHz',
+      uplink: '145.825 MHz',
+    },
     'IO-117': {
       norad: 53106,
       name: 'IO-117 (GreenCube)',
