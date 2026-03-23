@@ -1909,11 +1909,12 @@ export const WorldMap = ({
       />
 
       {/* Render plugin layers on active map (Mercator or Azimuthal) */}
-      {/* Always render all PluginLayer components to preserve React hook count.
-          Pass map={null} when no active map — hooks inside guard against it. */}
+      {/* Key includes projection so hooks fully remount when map instance changes.
+          This resets internal refs (layerGroupRef, controlRef) that are bound to a
+          specific Leaflet map — without this, layers stay on the hidden old map. */}
       {getAllLayers().map((layerDef) => (
         <PluginLayer
-          key={layerDef.id}
+          key={`${layerDef.id}-${isAzimuthal ? 'az' : 'merc'}`}
           plugin={layerDef}
           enabled={pluginLayerStates[layerDef.id]?.enabled ?? layerDef.defaultEnabled}
           opacity={pluginLayerStates[layerDef.id]?.opacity ?? layerDef.defaultOpacity}
