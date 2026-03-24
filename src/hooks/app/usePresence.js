@@ -58,6 +58,18 @@ export default function usePresence({ callsign, locator }) {
 
     sendHeartbeat();
     const interval = setInterval(sendHeartbeat, HEARTBEAT_INTERVAL);
-    return () => clearInterval(interval);
+
+    // Remove presence immediately when the tab closes
+    const handleUnload = () => {
+      // navigator.sendBeacon is fire-and-forget — works even during unload
+      const payload = JSON.stringify({ callsign });
+      navigator.sendBeacon('/api/presence/leave', payload);
+    };
+    window.addEventListener('beforeunload', handleUnload);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('beforeunload', handleUnload);
+    };
   }, [callsign, locator]);
 }

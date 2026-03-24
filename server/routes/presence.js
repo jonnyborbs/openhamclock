@@ -53,6 +53,19 @@ module.exports = function (app, ctx) {
     res.json({ ok: true, active: activeUsers.size });
   });
 
+  // POST /api/presence/leave — user closing tab
+  app.post('/api/presence/leave', (req, res) => {
+    const { callsign } = req.body || {};
+    if (!callsign) return res.status(400).json({ error: 'callsign required' });
+    const call = String(callsign)
+      .toUpperCase()
+      .replace(/[^A-Z0-9/\-]/g, '');
+    if (activeUsers.delete(call)) {
+      logDebug(`[Presence] ${call} left`);
+    }
+    res.json({ ok: true });
+  });
+
   // GET /api/presence — get all active users
   app.get('/api/presence', (req, res) => {
     const cutoff = Date.now() - PRESENCE_TTL;

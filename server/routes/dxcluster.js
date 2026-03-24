@@ -39,6 +39,36 @@ module.exports = function (app, ctx) {
 
   const CALLSIGN_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
+  // Cross-reference a callsign against active DXpeditions.
+  // Returns { lat, lon, entity } if the call matches a known DXpedition,
+  // using the DXpedition's DXCC entity coordinates from cty.dat.
+  const { lookupCall } = require('../../src/server/ctydat.js');
+
+  function lookupDXpeditionLocation(call) {
+    const cache = ctx.dxpeditionCache;
+    if (!cache?.data?.dxpeditions) return null;
+    const upper = (call || '').toUpperCase();
+    // Check ALL DXpeditions (active + upcoming) — NG3K date parsing isn't
+    // always accurate, and a DXpedition being spotted means it IS active
+    const dxped = cache.data.dxpeditions.find((d) => d.callsign?.toUpperCase() === upper);
+    if (!dxped || !dxped.entity) return null;
+
+    // Look up the DXpedition entity in cty.dat's entity list
+    const { getCtyData } = require('../../src/server/ctydat.js');
+    const cty = getCtyData();
+    if (!cty?.entities) return null;
+
+    const entityName = dxped.entity.toLowerCase().replace(/\s+/g, ' ').trim();
+    const match = cty.entities.find((e) => {
+      const eName = (e.entity || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      return eName === entityName || eName.includes(entityName) || entityName.includes(eName);
+    });
+    if (match && match.lat != null && match.lon != null) {
+      return { lat: match.lat, lon: match.lon, country: match.entity, source: 'dxpedition' };
+    }
+    return null;
+  }
+
   // DX Spider Proxy URL (sibling service on Railway or external)
   const DXSPIDER_PROXY_URL = process.env.DXSPIDER_PROXY_URL || 'https://spider-production-1ec7.up.railway.app';
 
@@ -1620,8 +1650,17 @@ module.exports = function (app, ctx) {
           let dxLoc = null;
           let dxGridSquare = null;
 
-          // Check if spot already has dxGrid from proxy
-          if (spot.dxGrid) {
+          // Check if this is a known DXpedition FIRST — DXpedition entity
+          // coordinates are authoritative. Cluster nodes often send wrong grids
+          // (spotter's grid, cached home grid, etc.) which would place the
+          // DXpedition in Jersey or Alaska instead of the actual operating location.
+          const dxpedLoc = lookupDXpeditionLocation(spot.dxCall);
+          if (dxpedLoc) {
+            dxLoc = dxpedLoc;
+          }
+
+          // For non-DXpedition spots, use grid from proxy (most precise)
+          if (!dxLoc && spot.dxGrid) {
             const gridLoc = maidenheadToLatLon(spot.dxGrid);
             if (gridLoc) {
               dxLoc = {
@@ -1634,7 +1673,7 @@ module.exports = function (app, ctx) {
             }
           }
 
-          // If no grid yet, try extracting from comment
+          // Try extracting grid from comment
           if (!dxLoc && spot.comment) {
             const extractedGrids = extractGridsFromComment(spot.comment);
             if (extractedGrids.dxGrid) {
@@ -1651,24 +1690,24 @@ module.exports = function (app, ctx) {
             }
           }
 
-          // Fall back to HamQTH cached location (more accurate than prefix)
-          // HamQTH uses home callsign — but for portable ops, prefix location wins
-          if (!dxLoc && hamqthLocations[baseCallMap[spot.dxCall] || spot.dxCall]) {
-            // Only use HamQTH location if there's no operating prefix override
-            // (i.e. the call is not a compound prefix/callsign like PJ2/W9WI)
-            const opPrefix = prefixCallMap[spot.dxCall];
-            const homeCall = baseCallMap[spot.dxCall];
-            if (!opPrefix || opPrefix === homeCall) {
-              dxLoc = hamqthLocations[homeCall || spot.dxCall];
-            }
-          }
-
-          // Fall back to prefix location (now includes grid-based coordinates!)
+          // Prefix/CTY.DAT location — shows where the station IS OPERATING,
+          // which is what matters for the map. Must run before HamQTH which
+          // returns the operator's HOME location (e.g. XX9W operator lives in
+          // Greece but is operating from Macau).
           if (!dxLoc) {
             dxLoc = prefixLocations[prefixCallMap[spot.dxCall] || spot.dxCall];
             if (dxLoc && dxLoc.grid) {
               dxGridSquare = dxLoc.grid;
             }
+          }
+
+          // HamQTH cached location — only used as last resort for DX station,
+          // since it returns the operator's home QTH, not the operating location.
+          // Only use for compound calls where prefix resolution already ran
+          // (e.g. PJ2/W9WI where prefix gave PJ2 location).
+          if (!dxLoc && hamqthLocations[baseCallMap[spot.dxCall] || spot.dxCall]) {
+            const homeCall = baseCallMap[spot.dxCall];
+            dxLoc = hamqthLocations[homeCall || spot.dxCall];
           }
 
           // Spotter location - try grid first, then prefix
@@ -1782,6 +1821,23 @@ module.exports = function (app, ctx) {
         newSpots.length,
         'spots)',
       );
+
+      // Pre-warm P.533-14 propagation cache for new DX spots.
+      // Uses the server's configured DE location — covers most hosted users.
+      if (ctx.prewarmPropagation && CONFIG.latitude && CONFIG.longitude && newPaths.length > 0) {
+        const seen = new Set();
+        for (const p of newPaths) {
+          if (p.dxLat != null && p.dxLon != null) {
+            // Deduplicate by rounded DX coordinates
+            const dxKey = `${Math.round(p.dxLat)},${Math.round(p.dxLon)}`;
+            if (!seen.has(dxKey)) {
+              seen.add(dxKey);
+              ctx.prewarmPropagation(CONFIG.latitude, CONFIG.longitude, p.dxLat, p.dxLon);
+            }
+          }
+        }
+        if (seen.size > 0) logDebug(`[DX Paths] Queued P.533 pre-warm for ${seen.size} new DX targets`);
+      }
 
       // Update cache
       dxSpotPathsCacheByKey.set(cacheKey, {

@@ -139,6 +139,8 @@ function applyMiddleware(app, ctx) {
       cacheDuration = 1800;
     } else if (p.includes('/solar-indices') || p.includes('/noaa')) {
       cacheDuration = 300;
+    } else if (p.includes('/propagation/heatmap')) {
+      cacheDuration = 900; // 15 min — propagation changes slowly, heavy computation
     } else if (p.includes('/propagation')) {
       cacheDuration = 600;
     } else if (p.includes('/n0nbh') || p.includes('/hamqsl')) {

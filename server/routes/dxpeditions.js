@@ -7,7 +7,11 @@ module.exports = function (app, ctx) {
   const { fetch, logDebug, logErrorOnce } = ctx;
 
   // DXpedition Calendar - fetches from NG3K ADXO plain text version
-  let dxpeditionCache = { data: null, timestamp: 0, maxAge: 30 * 60 * 1000 }; // 30 min cache
+  const dxpeditionCache = { data: null, timestamp: 0, maxAge: 30 * 60 * 1000 }; // 30 min cache
+
+  // Expose cache so dxcluster.js can cross-reference spotted callsigns
+  // against active DXpeditions for accurate entity coordinates
+  ctx.dxpeditionCache = dxpeditionCache;
 
   app.get('/api/dxpeditions', async (req, res) => {
     try {

@@ -1763,7 +1763,24 @@ module.exports = function (app, ctx) {
       }
     }
 
-    // Try longest prefix match first (up to 4 chars) for non-US calls
+    // CTY.DAT first — community-maintained database with exact DXpedition
+    // callsign overrides and precise entity coordinates. More authoritative
+    // than the static prefix grid table for unusual/temporary callsigns.
+    const ctyResult = lookupCall(callsign);
+    if (ctyResult && ctyResult.lat != null && ctyResult.lon != null) {
+      return {
+        callsign,
+        lat: ctyResult.lat,
+        lon: ctyResult.lon,
+        grid: null,
+        country: ctyResult.entity || 'Unknown',
+        estimated: true,
+        source: 'cty.dat',
+      };
+    }
+
+    // Static prefix grid table — fallback when cty.dat hasn't loaded or
+    // doesn't have a match (up to 4 char longest prefix match)
     for (let len = 4; len >= 1; len--) {
       const prefix = upper.substring(0, len);
       if (prefixGrids[prefix]) {
@@ -1780,20 +1797,6 @@ module.exports = function (app, ctx) {
           };
         }
       }
-    }
-
-    // Fallback: try cty.dat database (has lat/lon for every DXCC entity)
-    const ctyResult = lookupCall(callsign);
-    if (ctyResult && ctyResult.lat != null && ctyResult.lon != null) {
-      return {
-        callsign,
-        lat: ctyResult.lat,
-        lon: ctyResult.lon,
-        grid: null,
-        country: ctyResult.entity || 'Unknown',
-        estimated: true,
-        source: 'prefix',
-      };
     }
 
     // Fallback to first character (most likely country for each letter)
