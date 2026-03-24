@@ -39,11 +39,17 @@ module.exports = function (app, ctx) {
     maxAge: 5 * 60 * 1000, // 5 minutes
   };
 
+  // Negative cache: if ITURHFProp fails, don't retry for 2 minutes
+  // Prevents 90s+ hangs on every DX click when the service is down
+  let iturhfpropDown = 0;
+  const ITURHFPROP_BACKOFF = 2 * 60 * 1000; // 2 minutes
+
   /**
    * Fetch base prediction from ITURHFProp service
    */
   async function fetchITURHFPropPrediction(txLat, txLon, rxLat, rxLon, ssn, month, hour, txPower, txGain) {
     if (!ITURHFPROP_URL) return null;
+    if (Date.now() - iturhfpropDown < ITURHFPROP_BACKOFF) return null;
 
     const pw = Math.round(txPower || 100);
     const gn = Math.round((txGain || 0) * 10) / 10;
@@ -60,7 +66,7 @@ module.exports = function (app, ctx) {
 
       // Create abort controller for timeout
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s — fail fast
 
       const response = await fetch(url, { signal: controller.signal });
       clearTimeout(timeoutId);
@@ -83,6 +89,7 @@ module.exports = function (app, ctx) {
 
       return data;
     } catch (err) {
+      iturhfpropDown = Date.now();
       if (err.name !== 'AbortError') {
         logErrorOnce('Hybrid', `ITURHFProp: ${err.message}`);
       }
@@ -104,6 +111,7 @@ module.exports = function (app, ctx) {
 
   async function fetchITURHFPropHourly(txLat, txLon, rxLat, rxLon, ssn, month, txPower, txGain) {
     if (!ITURHFPROP_URL) return null;
+    if (Date.now() - iturhfpropDown < ITURHFPROP_BACKOFF) return null; // service recently failed
 
     const pw = Math.round(txPower || 100);
     const gn = Math.round((txGain || 0) * 10) / 10;
@@ -121,7 +129,7 @@ module.exports = function (app, ctx) {
       const url = `${ITURHFPROP_URL}/api/predict/hourly?txLat=${txLat}&txLon=${txLon}&rxLat=${rxLat}&rxLon=${rxLon}&ssn=${ssn}&month=${month}&txPower=${pw}&txGain=${gn}`;
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s for 24-hour calc
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s — fail fast, fallback to built-in
 
       const response = await fetch(url, { signal: controller.signal });
       clearTimeout(timeoutId);
@@ -138,7 +146,10 @@ module.exports = function (app, ctx) {
 
       return data;
     } catch (err) {
-      if (err.name !== 'AbortError') {
+      iturhfpropDown = Date.now(); // back off for 2 minutes
+      if (err.name === 'AbortError') {
+        logErrorOnce('ITURHFProp', 'Hourly fetch timed out — using built-in model');
+      } else {
         logErrorOnce('ITURHFProp', `Hourly fetch: ${err.message}`);
       }
       return null;
@@ -196,44 +207,13 @@ module.exports = function (app, ctx) {
     );
 
     try {
-      // Get current space weather data
-      let sfi = 150,
-        ssn = 100,
-        kIndex = 2,
-        aIndex = 10;
-
-      try {
-        // Prefer SWPC summary (updates every few hours) + N0NBH for SSN
-        const [summaryRes, kRes] = await Promise.allSettled([
-          fetch('https://services.swpc.noaa.gov/products/summary/10cm-flux.json'),
-          fetch('https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json'),
-        ]);
-
-        if (summaryRes.status === 'fulfilled' && summaryRes.value.ok) {
-          try {
-            const summary = await summaryRes.value.json();
-            const flux = parseInt(summary?.Flux);
-            if (flux > 0) sfi = flux;
-          } catch {}
-        }
-        // Fallback: N0NBH cache (daily, same as hamqsl.com)
-        if (sfi === 150 && n0nbhCache.data?.solarData?.solarFlux) {
-          const flux = parseInt(n0nbhCache.data.solarData.solarFlux);
-          if (flux > 0) sfi = flux;
-        }
-        // SSN: prefer N0NBH (daily), then estimate from SFI
-        if (n0nbhCache.data?.solarData?.sunspots) {
-          const s = parseInt(n0nbhCache.data.solarData.sunspots);
-          if (s >= 0) ssn = s;
-        } else {
-          ssn = Math.max(0, Math.round((sfi - 67) / 0.97));
-        }
-        if (kRes.status === 'fulfilled' && kRes.value.ok) {
-          const data = await kRes.value.json();
-          if (data?.length > 1) kIndex = parseInt(data[data.length - 1][1]) || 2;
-        }
-      } catch (e) {
-        logDebug('[Propagation] Using default solar values');
+      // Solar data — uses shared 15-minute cache (same as heatmap)
+      const { sfi, ssn, kIndex } = await getSolarData();
+      // Also check N0NBH for more accurate SSN if available
+      let effectiveSSN = ssn;
+      if (n0nbhCache.data?.solarData?.sunspots) {
+        const s = parseInt(n0nbhCache.data.solarData.sunspots);
+        if (s >= 0) effectiveSSN = s;
       }
 
       // Calculate path geometry
@@ -254,7 +234,7 @@ module.exports = function (app, ctx) {
       const currentMonth = new Date().getMonth() + 1;
 
       logDebug('[Propagation] Distance:', Math.round(distance), 'km');
-      logDebug('[Propagation] Solar: SFI', sfi, 'SSN', ssn, 'K', kIndex);
+      logDebug('[Propagation] Solar: SFI', sfi, 'SSN', effectiveSSN, 'K', kIndex);
       const bands = ['160m', '80m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
       const bandFreqs = [1.8, 3.5, 7, 10, 14, 18, 21, 24, 28];
 
@@ -285,7 +265,7 @@ module.exports = function (app, ctx) {
           de.lon,
           dx.lat,
           dx.lon,
-          ssn,
+          effectiveSSN,
           currentMonth,
           txPower,
           txGain,
@@ -351,7 +331,7 @@ module.exports = function (app, ctx) {
           de.lon,
           dx.lat,
           dx.lon,
-          ssn,
+          effectiveSSN,
           currentMonth,
           currentHour,
           txPower,
@@ -396,7 +376,7 @@ module.exports = function (app, ctx) {
               midLon,
               hour,
               sfi,
-              ssn,
+              effectiveSSN,
               kIndex,
               de,
               dx,
@@ -425,12 +405,12 @@ module.exports = function (app, ctx) {
       }
 
       // Calculate MUF and LUF
-      const currentMuf = iturhfpropMuf || calculateMUF(distance, midLat, midLon, currentHour, sfi, ssn);
+      const currentMuf = iturhfpropMuf || calculateMUF(distance, midLat, midLon, currentHour, sfi, effectiveSSN);
       const currentLuf = calculateLUF(distance, midLat, midLon, currentHour, sfi, kIndex);
 
       res.json({
         model: usedITURHFProp ? 'ITU-R P.533-14' : 'Built-in estimation',
-        solarData: { sfi, ssn, kIndex },
+        solarData: { sfi, ssn: effectiveSSN, kIndex },
         muf: Math.round(currentMuf * 10) / 10,
         luf: Math.round(currentLuf * 10) / 10,
         distance: Math.round(distance),
@@ -496,7 +476,7 @@ module.exports = function (app, ctx) {
   }
 
   const PROP_HEATMAP_CACHE = {};
-  const PROP_HEATMAP_TTL = 5 * 60 * 1000; // 5 minutes
+  const PROP_HEATMAP_TTL = 15 * 60 * 1000; // 15 minutes — propagation changes slowly
   const PROP_HEATMAP_MAX_ENTRIES = 200; // Hard cap on cache entries
 
   // Periodic cleanup: purge expired heatmap cache entries every 10 minutes
@@ -531,8 +511,10 @@ module.exports = function (app, ctx) {
   );
 
   app.get('/api/propagation/heatmap', async (req, res) => {
-    const deLat = parseFloat(req.query.deLat) || 0;
-    const deLon = parseFloat(req.query.deLon) || 0;
+    // Round to whole degrees — propagation doesn't meaningfully differ within 1°,
+    // and this dramatically improves cache hit rate across users
+    const deLat = Math.round(parseFloat(req.query.deLat) || 0);
+    const deLon = Math.round(parseFloat(req.query.deLon) || 0);
     const freq = parseFloat(req.query.freq) || 14; // MHz, default 20m
     const gridSize = Math.max(5, Math.min(20, parseInt(req.query.grid) || 10)); // 5-20° grid
     const txMode = (req.query.mode || 'SSB').toUpperCase();

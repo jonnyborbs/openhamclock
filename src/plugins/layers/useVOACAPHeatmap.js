@@ -155,7 +155,9 @@ export function useLayer({ map, enabled, opacity, locator }) {
 
       setLoading(true);
       try {
-        const url = `/api/propagation/heatmap?deLat=${deLocation.lat.toFixed(1)}&deLon=${deLocation.lon.toFixed(1)}&freq=${band.freq}&grid=${gridSize}&mode=${propMode}&power=${propPower}`;
+        // Round to whole degrees — propagation doesn't differ within 1°,
+        // and identical URLs share server + browser + CDN caches
+        const url = `/api/propagation/heatmap?deLat=${Math.round(deLocation.lat)}&deLon=${Math.round(deLocation.lon)}&freq=${band.freq}&grid=${gridSize}&mode=${propMode}&power=${propPower}`;
         const res = await fetch(url);
         if (res.ok) {
           const json = await res.json();

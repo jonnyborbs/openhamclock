@@ -48,7 +48,9 @@ module.exports = function (app, ctx) {
     const cache = ctx.dxpeditionCache;
     if (!cache?.data?.dxpeditions) return null;
     const upper = (call || '').toUpperCase();
-    const dxped = cache.data.dxpeditions.find((d) => d.isActive && d.callsign?.toUpperCase() === upper);
+    // Check ALL DXpeditions (active + upcoming) — NG3K date parsing isn't
+    // always accurate, and a DXpedition being spotted means it IS active
+    const dxped = cache.data.dxpeditions.find((d) => d.callsign?.toUpperCase() === upper);
     if (!dxped || !dxped.entity) return null;
 
     // Look up the DXpedition entity in cty.dat's entity list
@@ -1679,7 +1681,7 @@ module.exports = function (app, ctx) {
             }
           }
 
-          // Check if this callsign is a known active DXpedition — use entity coordinates
+          // Check if this callsign is a known DXpedition — use entity coordinates
           if (!dxLoc) {
             const dxpedLoc = lookupDXpeditionLocation(spot.dxCall);
             if (dxpedLoc) {
@@ -1687,24 +1689,24 @@ module.exports = function (app, ctx) {
             }
           }
 
-          // Fall back to HamQTH cached location (more accurate than prefix)
-          // HamQTH uses home callsign — but for portable ops, prefix location wins
-          if (!dxLoc && hamqthLocations[baseCallMap[spot.dxCall] || spot.dxCall]) {
-            // Only use HamQTH location if there's no operating prefix override
-            // (i.e. the call is not a compound prefix/callsign like PJ2/W9WI)
-            const opPrefix = prefixCallMap[spot.dxCall];
-            const homeCall = baseCallMap[spot.dxCall];
-            if (!opPrefix || opPrefix === homeCall) {
-              dxLoc = hamqthLocations[homeCall || spot.dxCall];
-            }
-          }
-
-          // Fall back to prefix location (now includes grid-based coordinates!)
+          // Prefix/CTY.DAT location — shows where the station IS OPERATING,
+          // which is what matters for the map. Must run before HamQTH which
+          // returns the operator's HOME location (e.g. XX9W operator lives in
+          // Greece but is operating from Macau).
           if (!dxLoc) {
             dxLoc = prefixLocations[prefixCallMap[spot.dxCall] || spot.dxCall];
             if (dxLoc && dxLoc.grid) {
               dxGridSquare = dxLoc.grid;
             }
+          }
+
+          // HamQTH cached location — only used as last resort for DX station,
+          // since it returns the operator's home QTH, not the operating location.
+          // Only use for compound calls where prefix resolution already ran
+          // (e.g. PJ2/W9WI where prefix gave PJ2 location).
+          if (!dxLoc && hamqthLocations[baseCallMap[spot.dxCall] || spot.dxCall]) {
+            const homeCall = baseCallMap[spot.dxCall];
+            dxLoc = hamqthLocations[homeCall || spot.dxCall];
           }
 
           // Spotter location - try grid first, then prefix
