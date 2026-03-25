@@ -55,7 +55,7 @@ function resolveConfigPath() {
 const { dir: CONFIG_DIR, path: CONFIG_PATH } = resolveConfigPath();
 
 // Increment when DEFAULT_CONFIG structure changes (new keys, renamed keys, etc.)
-const CONFIG_VERSION = 3;
+const CONFIG_VERSION = 4;
 
 const DEFAULT_CONFIG = {
   configVersion: CONFIG_VERSION,
@@ -135,6 +135,33 @@ const DEFAULT_CONFIG = {
     bindAddress: '127.0.0.1',
     verbose: false,
   },
+  // APRS local TNC — connect to Direwolf or hardware TNC via KISS
+  aprs: {
+    enabled: false,
+    protocol: 'kiss-tcp', // kiss-tcp | kiss-serial
+    host: '127.0.0.1', // Direwolf KISS TCP host
+    port: 8001, // Direwolf KISS TCP port
+    serialPort: '', // Serial port for hardware TNC (e.g. /dev/ttyUSB0)
+    baudRate: 9600,
+    callsign: '', // Your callsign (required for TX)
+    ssid: 0,
+    path: ['WIDE1-1', 'WIDE2-1'],
+    destination: 'APOHC1', // APRS tocall
+    beaconInterval: 600, // Seconds between position beacons (0 = disabled)
+    symbol: '/-', // APRS symbol (/-  = house)
+    verbose: false,
+  },
+  // Winlink gateway discovery + Pat client integration
+  winlink: {
+    enabled: false,
+    apiKey: '', // Winlink API key from winlink.org admin
+    refreshInterval: 3600, // Gateway list refresh in seconds
+    pat: {
+      enabled: false,
+      host: '127.0.0.1',
+      port: 8080,
+    },
+  },
 };
 
 let config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
@@ -166,6 +193,12 @@ function loadConfig() {
         mshv: { ...DEFAULT_CONFIG.mshv, ...(raw.mshv || {}) },
         jtdx: { ...DEFAULT_CONFIG.jtdx, ...(raw.jtdx || {}) },
         js8call: { ...DEFAULT_CONFIG.js8call, ...(raw.js8call || {}) },
+        aprs: { ...DEFAULT_CONFIG.aprs, ...(raw.aprs || {}) },
+        winlink: {
+          ...DEFAULT_CONFIG.winlink,
+          ...(raw.winlink || {}),
+          pat: { ...DEFAULT_CONFIG.winlink.pat, ...((raw.winlink || {}).pat || {}) },
+        },
         // Coerce logging to boolean in case the stored value is a string
         logging: raw.logging !== undefined ? !!raw.logging : DEFAULT_CONFIG.logging,
       });
@@ -176,7 +209,7 @@ function loadConfig() {
         for (const key of Object.keys(DEFAULT_CONFIG)) {
           if (!(key in raw)) newKeys.push(key);
         }
-        for (const section of ['radio', 'tci', 'wsjtxRelay', 'mshv', 'jtdx', 'js8call']) {
+        for (const section of ['radio', 'tci', 'wsjtxRelay', 'mshv', 'jtdx', 'js8call', 'aprs', 'winlink']) {
           if (DEFAULT_CONFIG[section] && raw[section]) {
             for (const key of Object.keys(DEFAULT_CONFIG[section])) {
               if (!(key in raw[section])) newKeys.push(`${section}.${key}`);
