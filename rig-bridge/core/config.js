@@ -5,13 +5,60 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 
-// Portable config path (works in pkg snapshots too)
-const CONFIG_DIR = process.pkg ? path.dirname(process.execPath) : path.join(__dirname, '..');
-const CONFIG_PATH = path.join(CONFIG_DIR, 'rig-bridge-config.json');
+// Config path resolution — prefer external user directory so updates never overwrite config.
+// Fallback: alongside the executable (pkg) or in the rig-bridge directory (node).
+function resolveConfigPath() {
+  // 1. External platform-appropriate directory (survives updates)
+  let externalDir;
+  if (process.platform === 'win32') {
+    externalDir = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'openhamclock');
+  } else {
+    externalDir = path.join(os.homedir(), '.config', 'openhamclock');
+  }
+  const externalPath = path.join(externalDir, 'rig-bridge-config.json');
+
+  // If external config exists, use it
+  if (fs.existsSync(externalPath)) return { dir: externalDir, path: externalPath };
+
+  // 2. Legacy location (alongside executable or in rig-bridge dir)
+  const legacyDir = process.pkg ? path.dirname(process.execPath) : path.join(__dirname, '..');
+  const legacyPath = path.join(legacyDir, 'rig-bridge-config.json');
+
+  // If legacy config exists, migrate it to external dir
+  if (fs.existsSync(legacyPath)) {
+    try {
+      if (!fs.existsSync(externalDir)) fs.mkdirSync(externalDir, { recursive: true });
+      fs.copyFileSync(legacyPath, externalPath);
+      console.log(`[Config] Migrated config from ${legacyPath} → ${externalPath}`);
+      // Rename legacy file so it's not loaded again on downgrade
+      fs.renameSync(legacyPath, legacyPath + '.migrated');
+      return { dir: externalDir, path: externalPath };
+    } catch (e) {
+      console.warn(`[Config] Migration failed (${e.message}), using legacy path`);
+      return { dir: legacyDir, path: legacyPath };
+    }
+  }
+
+  // 3. Fresh install — create in external dir
+  try {
+    if (!fs.existsSync(externalDir)) fs.mkdirSync(externalDir, { recursive: true });
+  } catch (e) {
+    console.warn(`[Config] Cannot create ${externalDir} (${e.message}), using legacy path`);
+    return { dir: legacyDir, path: legacyPath };
+  }
+  return { dir: externalDir, path: externalPath };
+}
+
+const { dir: CONFIG_DIR, path: CONFIG_PATH } = resolveConfigPath();
+
+// Increment when DEFAULT_CONFIG structure changes (new keys, renamed keys, etc.)
+const CONFIG_VERSION = 2;
 
 const DEFAULT_CONFIG = {
+  configVersion: CONFIG_VERSION,
   port: 5555,
   bindAddress: '127.0.0.1', // Bind to localhost only; set to '0.0.0.0' for LAN access
   corsOrigins: '', // Extra allowed CORS origins (comma-separated); OHC origins always allowed
@@ -73,22 +120,25 @@ const DEFAULT_CONFIG = {
 
 let config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
 
-const CONFIG_EXAMPLE_PATH = path.join(CONFIG_DIR, 'rig-bridge-config.example.json');
-
 function loadConfig() {
   try {
-    // If config doesn't exist, try to copy it from the example
-    if (!fs.existsSync(CONFIG_PATH) && fs.existsSync(CONFIG_EXAMPLE_PATH)) {
-      fs.copyFileSync(CONFIG_EXAMPLE_PATH, CONFIG_PATH);
+    // If config doesn't exist, try to copy from the example (located in the rig-bridge dir)
+    const legacyDir = process.pkg ? path.dirname(process.execPath) : path.join(__dirname, '..');
+    const examplePath = path.join(legacyDir, 'rig-bridge-config.example.json');
+    if (!fs.existsSync(CONFIG_PATH) && fs.existsSync(examplePath)) {
+      fs.copyFileSync(examplePath, CONFIG_PATH);
       console.log(`[Config] Created ${CONFIG_PATH} from example`);
     }
 
     if (fs.existsSync(CONFIG_PATH)) {
       const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+      const savedVersion = raw.configVersion || 1;
+
       // Update the existing config object in place so references in other modules remain valid
       Object.assign(config, {
         ...DEFAULT_CONFIG,
         ...raw,
+        configVersion: CONFIG_VERSION, // Always use current version
         radio: { ...DEFAULT_CONFIG.radio, ...(raw.radio || {}) },
         tci: { ...DEFAULT_CONFIG.tci, ...(raw.tci || {}) },
         wsjtxRelay: { ...DEFAULT_CONFIG.wsjtxRelay, ...(raw.wsjtxRelay || {}) },
@@ -97,6 +147,28 @@ function loadConfig() {
         // Coerce logging to boolean in case the stored value is a string
         logging: raw.logging !== undefined ? !!raw.logging : DEFAULT_CONFIG.logging,
       });
+
+      // Log new keys added by the merge so users can see what changed
+      if (savedVersion < CONFIG_VERSION) {
+        const newKeys = [];
+        for (const key of Object.keys(DEFAULT_CONFIG)) {
+          if (!(key in raw)) newKeys.push(key);
+        }
+        for (const section of ['radio', 'tci', 'wsjtxRelay']) {
+          if (DEFAULT_CONFIG[section] && raw[section]) {
+            for (const key of Object.keys(DEFAULT_CONFIG[section])) {
+              if (!(key in raw[section])) newKeys.push(`${section}.${key}`);
+            }
+          }
+        }
+        if (newKeys.length > 0) {
+          console.log(`[Config] Schema migrated v${savedVersion} → v${CONFIG_VERSION}: added ${newKeys.join(', ')}`);
+        } else {
+          console.log(`[Config] Schema upgraded v${savedVersion} → v${CONFIG_VERSION}`);
+        }
+        saveConfig(); // Persist the upgraded config
+      }
+
       console.log(`[Config] Loaded from ${CONFIG_PATH}`);
     }
   } catch (e) {
@@ -134,4 +206,4 @@ function applyCliArgs() {
   }
 }
 
-module.exports = { config, loadConfig, saveConfig, applyCliArgs };
+module.exports = { config, loadConfig, saveConfig, applyCliArgs, CONFIG_PATH };

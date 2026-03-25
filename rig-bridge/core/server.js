@@ -23,7 +23,7 @@ const express = require('express');
 const cors = require('cors');
 const { getSerialPort, listPorts } = require('./serial-utils');
 const { state, addSseClient, removeSseClient } = require('./state');
-const { config, saveConfig } = require('./config');
+const { config, saveConfig, CONFIG_PATH } = require('./config');
 
 // ─── Security helpers ─────────────────────────────────────────────────────
 
@@ -1796,6 +1796,7 @@ function createServer(registry, version) {
       plugin: registry.activeId || 'none',
       connected: state.connected,
       pttEnabled: !!(config.radio && config.radio.pttEnabled),
+      configPath: CONFIG_PATH,
       uptime: Math.floor(process.uptime()),
     });
   });
@@ -1896,6 +1897,7 @@ function startServer(port, registry, version) {
       console.log(`  ║   ⚠ Bound to ${bindAddress.padEnd(33)}║`);
     }
     console.log('  ╚══════════════════════════════════════════════╝');
+    console.log(`  Config: ${CONFIG_PATH}`);
     console.log('');
   });
 
