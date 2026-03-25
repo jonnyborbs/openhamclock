@@ -331,15 +331,164 @@ Leave `multicastInterface` blank unless you have multiple network adapters and n
 
 ---
 
-## OpenHamClock Setup
+## Connecting to OpenHamClock
 
-Once the bridge is running and showing your frequency:
+### Scenario 1: Local Install (OHC + Rig Bridge on same machine)
 
-1. Open **OpenHamClock** → **Settings** → **Station Settings**
-2. Scroll to **Rig Control**
-3. Check **Enable Rig Control**
-4. Set Host URL: `http://localhost:5555`
-5. Click any DX spot, POTA, or SOTA to tune your radio!
+This is the simplest setup — everything runs on your computer.
+
+1. **Start Rig Bridge** (if not already running):
+   ```bash
+   cd rig-bridge && node rig-bridge.js
+   ```
+2. **Configure your radio** at http://localhost:5555 — select radio type, COM port, click Save & Connect
+3. **Open OpenHamClock** → **Settings** → **Rig Bridge** tab
+4. Check **Enable Rig Bridge**
+5. Host: `http://localhost` — Port: `5555`
+6. Copy the **API Token** from the rig-bridge setup UI and paste it into the token field
+7. Check **Click-to-tune** if you want spot clicks to change your radio frequency
+8. Click **Save**
+
+That's it — click any DX spot, POTA, SOTA, or RBN spot and your radio tunes automatically.
+
+### Scenario 2: LAN Setup (OHC on one machine, radio on another)
+
+Example: Rig Bridge runs on a Raspberry Pi in the shack, OHC runs on a laptop in the office.
+
+1. **On the Pi** (where the radio is connected):
+   - Start rig-bridge with LAN access: `node rig-bridge.js --bind 0.0.0.0`
+   - Or set `"bindAddress": "0.0.0.0"` in config
+   - Configure your radio at `http://pi-ip:5555`
+2. **On the laptop** (where OHC runs):
+   - Settings → Rig Bridge → Host: `http://pi-ip` — Port: `5555`
+   - Paste the API token from the Pi's setup UI
+   - Save
+
+### Scenario 3: Cloud Relay (OHC on openhamclock.com, radio at home)
+
+This lets you control your radio from anywhere via the cloud-hosted OpenHamClock.
+
+**Step 1: Install Rig Bridge at home**
+
+Go to https://openhamclock.com → Settings → Rig Bridge tab → click the download button for your OS (Windows/Mac/Linux). Run the installer — it downloads rig-bridge, installs dependencies, and starts it.
+
+Or install manually:
+
+```bash
+git clone --depth 1 https://github.com/accius/openhamclock.git
+cd openhamclock/rig-bridge
+npm install
+node rig-bridge.js
+```
+
+**Step 2: Configure your radio**
+
+Open http://localhost:5555 and set up your radio connection (USB, rigctld, flrig, etc.).
+
+**Step 3: Connect the Cloud Relay**
+
+Option A — One-click from OHC:
+
+1. Open https://openhamclock.com → Settings → Rig Bridge tab
+2. Enter your local rig-bridge host (`http://localhost`) and port (`5555`)
+3. Paste your API token
+4. Click **Connect Cloud Relay**
+
+Option B — Manual configuration:
+
+1. In rig-bridge setup UI → Plugins tab → enable **Cloud Relay**
+2. Set the OHC Server URL: `https://openhamclock.com`
+3. Set the Relay API Key (same as `RIG_BRIDGE_RELAY_KEY` or `WSJTX_RELAY_KEY` on the server)
+4. Set a Session ID (any unique string for your browser session)
+5. Save and restart rig-bridge
+
+**How it works:**
+
+```
+Your shack                              Cloud
+────────────                            ─────
+Radio (USB) ←→ Rig Bridge ──HTTPS──→ openhamclock.com
+  └─ WSJT-X                              └─ Your browser
+  └─ Direwolf/TNC                        └─ Click-to-tune
+  └─ Rotator                              └─ PTT
+                                          └─ WSJT-X decodes
+                                          └─ APRS packets
+```
+
+Rig Bridge pushes your rig state (frequency, mode, PTT) to the cloud server. When you click a spot or press PTT in the browser, the command is queued on the server and picked up by your local rig-bridge within 1 second.
+
+---
+
+## Plugin Manager
+
+Open the rig-bridge setup UI at http://localhost:5555 → **Plugins** tab to enable and configure plugins. No JSON editing required.
+
+### Digital Mode Plugins
+
+| Plugin           | Default Port | Description                                                   |
+| ---------------- | ------------ | ------------------------------------------------------------- |
+| **WSJT-X Relay** | 2237         | Forward decodes to cloud OHC (configured in Integrations tab) |
+| **MSHV**         | 2239         | Multi-stream digital mode software                            |
+| **JTDX**         | 2238         | Enhanced FT8/JT65 decoding                                    |
+| **JS8Call**      | 2242         | JS8 keyboard-to-keyboard messaging                            |
+
+All digital mode plugins are **bidirectional** — OHC can send replies, halt TX, set free text, and highlight callsigns in the decode window.
+
+In your digital mode software, set UDP Server to `127.0.0.1` and the port shown above.
+
+### APRS TNC Plugin
+
+Connects to a local Direwolf or hardware TNC via KISS protocol for RF-based APRS — no internet required.
+
+| Setting         | Default     | Description                                             |
+| --------------- | ----------- | ------------------------------------------------------- |
+| Protocol        | `kiss-tcp`  | `kiss-tcp` for Direwolf, `kiss-serial` for hardware TNC |
+| Host            | `127.0.0.1` | Direwolf KISS TCP host                                  |
+| Port            | `8001`      | Direwolf KISS TCP port                                  |
+| Callsign        | (required)  | Your callsign for TX                                    |
+| SSID            | `0`         | APRS SSID                                               |
+| Beacon Interval | `600`       | Seconds between position beacons (0 = disabled)         |
+
+**With Direwolf:**
+
+1. Start Direwolf with KISS enabled (default port 8001)
+2. Enable the APRS TNC plugin in rig-bridge
+3. Set your callsign
+4. APRS packets from nearby stations appear in OHC's APRS panel
+
+The APRS TNC runs alongside APRS-IS (internet) for dual-path coverage. When internet goes down, local RF keeps working.
+
+### Rotator Plugin
+
+Controls antenna rotators via Hamlib's `rotctld`.
+
+1. Start rotctld: `rotctld -m 202 -r /dev/ttyUSB1 -t 4533`
+2. Enable the Rotator plugin in rig-bridge
+3. Set host and port (default: `127.0.0.1:4533`)
+
+### Winlink Plugin
+
+Two features:
+
+- **Gateway Discovery** — shows nearby Winlink RMS gateways on the map (requires API key from winlink.org)
+- **Pat Client** — integrates with [Pat](https://getpat.io/) for composing and sending Winlink messages over RF
+
+### Cloud Relay Plugin
+
+See [Scenario 3](#scenario-3-cloud-relay-ohc-on-openhamclockcom-radio-at-home) above.
+
+---
+
+## Config Location
+
+Rig Bridge stores its configuration outside the installation directory so updates never overwrite your settings:
+
+| OS              | Config Path                                     |
+| --------------- | ----------------------------------------------- |
+| **macOS/Linux** | `~/.config/openhamclock/rig-bridge-config.json` |
+| **Windows**     | `%APPDATA%\openhamclock\rig-bridge-config.json` |
+
+On first run, if no config exists at the external path, rig-bridge creates one from the example template. If you're upgrading from an older version that stored config in the `rig-bridge/` directory, it's automatically migrated.
 
 ---
 
