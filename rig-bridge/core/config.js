@@ -55,7 +55,7 @@ function resolveConfigPath() {
 const { dir: CONFIG_DIR, path: CONFIG_PATH } = resolveConfigPath();
 
 // Increment when DEFAULT_CONFIG structure changes (new keys, renamed keys, etc.)
-const CONFIG_VERSION = 4;
+const CONFIG_VERSION = 5;
 
 const DEFAULT_CONFIG = {
   configVersion: CONFIG_VERSION,
@@ -151,6 +151,14 @@ const DEFAULT_CONFIG = {
     symbol: '/-', // APRS symbol (/-  = house)
     verbose: false,
   },
+  // Rotator control via rotctld (Hamlib)
+  rotator: {
+    enabled: false,
+    host: '127.0.0.1',
+    port: 4533,
+    pollInterval: 1000,
+    verbose: false,
+  },
   // Winlink gateway discovery + Pat client integration
   winlink: {
     enabled: false,
@@ -194,6 +202,7 @@ function loadConfig() {
         jtdx: { ...DEFAULT_CONFIG.jtdx, ...(raw.jtdx || {}) },
         js8call: { ...DEFAULT_CONFIG.js8call, ...(raw.js8call || {}) },
         aprs: { ...DEFAULT_CONFIG.aprs, ...(raw.aprs || {}) },
+        rotator: { ...DEFAULT_CONFIG.rotator, ...(raw.rotator || {}) },
         winlink: {
           ...DEFAULT_CONFIG.winlink,
           ...(raw.winlink || {}),
@@ -209,7 +218,7 @@ function loadConfig() {
         for (const key of Object.keys(DEFAULT_CONFIG)) {
           if (!(key in raw)) newKeys.push(key);
         }
-        for (const section of ['radio', 'tci', 'wsjtxRelay', 'mshv', 'jtdx', 'js8call', 'aprs', 'winlink']) {
+        for (const section of ['radio', 'tci', 'wsjtxRelay', 'mshv', 'jtdx', 'js8call', 'aprs', 'rotator', 'winlink']) {
           if (DEFAULT_CONFIG[section] && raw[section]) {
             for (const key of Object.keys(DEFAULT_CONFIG[section])) {
               if (!(key in raw[section])) newKeys.push(`${section}.${key}`);

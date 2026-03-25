@@ -1092,6 +1092,9 @@ async function main() {
   console.log('');
   console.log('╔══════════════════════════════════════════════════╗');
   console.log(`║  OpenHamClock Rig Listener v${VERSION}              ║`);
+  console.log('╠══════════════════════════════════════════════════╣');
+  console.log('║  ⚠  DEPRECATED — use Rig Bridge instead        ║');
+  console.log('║  See: rig-bridge/README.md                      ║');
   console.log('╚══════════════════════════════════════════════════╝');
   console.log('');
 

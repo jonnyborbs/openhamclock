@@ -1791,11 +1791,23 @@ function createServer(registry, version) {
   // ─── OHC-compatible API ───
   // Diagnostic endpoint — no auth required, designed for troubleshooting
   app.get('/health', (req, res) => {
+    // Collect integration plugin status
+    const integrations = {};
+    for (const [id, instance] of registry.getIntegrations()) {
+      if (typeof instance.getStatus === 'function') {
+        integrations[id] = instance.getStatus();
+      }
+    }
+
     res.json({
       auth: config.apiToken ? 'enabled' : 'disabled',
       plugin: registry.activeId || 'none',
       connected: state.connected,
+      freq: state.freq,
+      mode: state.mode,
+      ptt: state.ptt,
       pttEnabled: !!(config.radio && config.radio.pttEnabled),
+      integrations,
       configPath: CONFIG_PATH,
       uptime: Math.floor(process.uptime()),
     });

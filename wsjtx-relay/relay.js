@@ -501,6 +501,9 @@ socket.on('listening', () => {
   console.log('');
   console.log('╔══════════════════════════════════════════════════╗');
   console.log(`║  OpenHamClock WSJT-X Relay Agent v${RELAY_VERSION}         ║`);
+  console.log('╠══════════════════════════════════════════════════╣');
+  console.log('║  ⚠  For local installs, use Rig Bridge instead ║');
+  console.log('║  This standalone relay is for cloud-hosted OHC  ║');
   console.log('╚══════════════════════════════════════════════════╝');
   console.log('');
   console.log(`  🎧 Listening for WSJT-X on UDP ${addr.address}:${addr.port}`);

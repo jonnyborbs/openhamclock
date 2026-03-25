@@ -514,6 +514,11 @@ app.post('/ptt', (req, res) => {
 });
 
 app.listen(CONFIG.server.port, CONFIG.server.host, () => {
+  console.warn('');
+  console.warn('  ⚠  DEPRECATED — rig-control is replaced by Rig Bridge.');
+  console.warn('  All rigctld/flrig functionality is available in rig-bridge.');
+  console.warn('  See: rig-bridge/README.md');
+  console.warn('');
   console.log(`[HTTP] Rig Daemon listening on port ${CONFIG.server.port}`);
   console.log(`[HTTP] CORS enabled for all origins`);
   console.log(`[HTTP] Connects to ${CONFIG.radio.type} at ${CONFIG.radio.host}:${CONFIG.radio.rigPort}`);
