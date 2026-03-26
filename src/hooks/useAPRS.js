@@ -47,7 +47,10 @@ export const useAPRS = (options = {}) => {
         const data = await res.json();
         setStations(data.stations || []);
         setConnected(data.connected || false);
-        setAprsEnabled(data.enabled || false);
+        // Panel is "enabled" when APRS-IS is configured OR when the local TNC
+        // has delivered at least one station — so RF-only setups work without
+        // needing APRS_ENABLED=true in .env.
+        setAprsEnabled(data.enabled || data.tncActive || false);
         setLastUpdate(new Date());
         setLoading(false);
       }

@@ -442,9 +442,9 @@ module.exports = function (app, ctx) {
     });
   }
 
-  // Periodic cleanup of old stations
+  // Periodic cleanup of old stations (runs regardless of APRS_ENABLED so that
+  // RF-only stations injected via /api/aprs/local are also aged out correctly).
   setInterval(() => {
-    if (!APRS_ENABLED) return;
     const cutoff = Date.now() - APRS_MAX_AGE_MINUTES * 60000;
     for (const [key, val] of aprsStations) {
       if (val.timestamp < cutoff) aprsStations.delete(key);
@@ -480,9 +480,13 @@ module.exports = function (app, ctx) {
         });
       }
     }
+    // tncActive: true whenever at least one station from the local TNC is present in the
+    // cache. This lets the UI display RF data even when APRS_ENABLED (APRS-IS) is off.
+    const tncActive = stations.some((s) => s.source === 'local-tnc');
     res.json({
       connected: aprsConnected,
       enabled: APRS_ENABLED,
+      tncActive,
       count: stations.length,
       stations: stations.sort((a, b) => b.timestamp - a.timestamp),
     });

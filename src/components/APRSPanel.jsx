@@ -68,18 +68,23 @@ const APRSPanel = ({ aprsData, showOnMap, onToggleMap, onSpotClick, onHoverSpot 
         <div style={{ fontSize: '24px', marginBottom: '10px' }}>📍</div>
         <div style={{ fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px' }}>APRS Not Enabled</div>
         <div>
-          Add{' '}
+          To receive internet (APRS-IS) spots, add{' '}
           <code style={{ background: 'var(--bg-tertiary)', padding: '2px 6px', borderRadius: '3px' }}>
             APRS_ENABLED=true
           </code>{' '}
           to your .env file and restart the server.
+        </div>
+        <div style={{ marginTop: '8px' }}>
+          To receive local RF spots only, enable the{' '}
+          <code style={{ background: 'var(--bg-tertiary)', padding: '2px 6px', borderRadius: '3px' }}>aprs-tnc</code>{' '}
+          plugin in rig-bridge — no .env change required.
         </div>
         <div style={{ marginTop: '10px', fontSize: '11px' }}>
           Optional: Set{' '}
           <code style={{ background: 'var(--bg-tertiary)', padding: '2px 6px', borderRadius: '3px' }}>
             APRS_FILTER=r/{'{lat}'}/{'{lon}'}/500
           </code>{' '}
-          to limit to 500km radius around your station.
+          to limit APRS-IS to 500km radius around your station.
         </div>
       </div>
     );
