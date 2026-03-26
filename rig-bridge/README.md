@@ -415,7 +415,7 @@ Radio (USB) ←→ Rig Bridge ──HTTPS──→ openhamclock.com
                                           └─ APRS packets
 ```
 
-Rig Bridge pushes your rig state (frequency, mode, PTT) to the cloud server. When you click a spot or press PTT in the browser, the command is queued on the server and picked up by your local rig-bridge within 1 second.
+Rig Bridge pushes your rig state (frequency, mode, PTT) to the cloud server. When you click a spot or press PTT in the browser, the command is queued on the server and delivered to your local rig-bridge within approximately one network round-trip via long-polling — typically under 100 ms on a good connection. The browser UI updates optimistically before the confirmation arrives, so PTT and frequency feel immediate.
 
 ---
 
@@ -425,12 +425,12 @@ Open the rig-bridge setup UI at http://localhost:5555 → **Plugins** tab to ena
 
 ### Digital Mode Plugins
 
-| Plugin           | Default Port | Description                                                   |
-| ---------------- | ------------ | ------------------------------------------------------------- |
-| **WSJT-X Relay** | 2237         | Forward decodes to cloud OHC (configured in Integrations tab) |
-| **MSHV**         | 2239         | Multi-stream digital mode software                            |
-| **JTDX**         | 2238         | Enhanced FT8/JT65 decoding                                    |
-| **JS8Call**      | 2242         | JS8 keyboard-to-keyboard messaging                            |
+| Plugin           | Default Port | Description                                           |
+| ---------------- | ------------ | ----------------------------------------------------- |
+| **WSJT-X Relay** | 2237         | Forward FT8/FT4 decodes to OHC; bidirectional replies |
+| **MSHV**         | 2239         | Multi-stream digital mode software                    |
+| **JTDX**         | 2238         | Enhanced FT8/JT65 decoding                            |
+| **JS8Call**      | 2242         | JS8 keyboard-to-keyboard messaging                    |
 
 All digital mode plugins are **bidirectional** — OHC can send replies, halt TX, set free text, and highlight callsigns in the decode window.
 
@@ -475,7 +475,32 @@ Two features:
 
 ### Cloud Relay Plugin
 
-See [Scenario 3](#scenario-3-cloud-relay-ohc-on-openhamclockcom-radio-at-home) above.
+Bridges a locally-running rig-bridge to a cloud-hosted OpenHamClock instance so cloud users get the same rig control as local users — click-to-tune, PTT, WSJT-X decodes, APRS packets.
+
+See [Scenario 3](#scenario-3-cloud-relay-ohc-on-openhamclockcom-radio-at-home) for setup instructions.
+
+**How latency is minimised:**
+
+| Path                  | Mechanism                                              | Typical latency |
+| --------------------- | ------------------------------------------------------ | --------------- |
+| Rig state → browser   | Event-driven push + SSE fan-out                        | < 100 ms        |
+| Browser command → rig | Long-poll (server wakes rig-bridge on command arrival) | ~RTT (< 100 ms) |
+
+The rig-bridge holds a persistent long-poll connection to the server. The moment you click PTT or a DX spot, the server wakes that connection and delivers the command — no fixed poll tick to wait for.
+
+**Config reference:**
+
+| Field          | Description                                     | Default |
+| -------------- | ----------------------------------------------- | ------- |
+| `enabled`      | Activate the relay on startup                   | `false` |
+| `url`          | Cloud OHC server URL                            | —       |
+| `apiKey`       | Relay authentication key (from your OHC server) | —       |
+| `session`      | Browser session ID for per-user isolation       | —       |
+| `pushInterval` | Fallback push interval for batched data (ms)    | `2000`  |
+| `relayRig`     | Relay rig state (freq, mode, PTT)               | `true`  |
+| `relayWsjtx`   | Relay WSJT-X decodes                            | `true`  |
+| `relayAprs`    | Relay APRS packets from local TNC               | `false` |
+| `verbose`      | Log all relay activity to the console           | `false` |
 
 ---
 
@@ -512,23 +537,27 @@ Executables are output to the `dist/` folder.
 
 ## Troubleshooting
 
-| Problem                       | Solution                                                                                                                                                    |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| No COM ports found            | Install USB driver (Silicon Labs CP210x for Yaesu, FTDI for some Kenwood)                                                                                   |
-| Port opens but no data        | Check baud rate matches radio's CAT Rate setting                                                                                                            |
-| Icom not responding           | Verify CI-V address matches your radio model                                                                                                                |
-| CORS errors in browser        | The bridge allows all origins by default                                                                                                                    |
-| Port already in use           | Close flrig/rigctld if running — you don't need them anymore                                                                                                |
-| PTT not responsive            | Enable **Hardware Flow (RTS/CTS)** (especially for FT-991A/FT-710)                                                                                          |
-| macOS Comms Failure           | The bridge automatically applies a `stty` fix for CP210x drivers.                                                                                           |
-| TCI: Connection refused       | Enable TCI in your SDR app (Thetis → Setup → CAT Control → Enable TCI Server)                                                                               |
-| TCI: No frequency updates     | Check `trx` / `vfo` index in config match the active transceiver in your SDR app                                                                            |
-| TCI: Remote SDR               | Set `tci.host` to the IP of the machine running the SDR application                                                                                         |
-| SmartSDR: Connection refused  | Confirm the radio is powered on and reachable; default API port is 4992                                                                                     |
-| SmartSDR: No slice updates    | Check `sliceIndex` matches the active slice in SmartSDR                                                                                                     |
-| RTL-SDR: Connection refused   | Start `rtl_tcp` first: `rtl_tcp -a 127.0.0.1 -p 1234`; check no other app holds the dongle                                                                  |
-| RTL-SDR: Frequency won't tune | Verify the frequency is within your dongle's supported range (typically 24 MHz–1.7 GHz for R820T)                                                           |
-| Multicast: no packets         | Verify `multicastGroup` matches what WSJT-X sends to; check OS firewall allows multicast UDP; set `multicastInterface` to the correct NIC IP if multi-homed |
+| Problem                                  | Solution                                                                                                                                                    |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No COM ports found                       | Install USB driver (Silicon Labs CP210x for Yaesu, FTDI for some Kenwood)                                                                                   |
+| Port opens but no data                   | Check baud rate matches radio's CAT Rate setting                                                                                                            |
+| Icom not responding                      | Verify CI-V address matches your radio model                                                                                                                |
+| CORS errors in browser                   | The bridge allows all origins by default                                                                                                                    |
+| Port already in use                      | Close flrig/rigctld if running — you don't need them anymore                                                                                                |
+| PTT not responsive                       | Enable **Hardware Flow (RTS/CTS)** (especially for FT-991A/FT-710)                                                                                          |
+| macOS Comms Failure                      | The bridge automatically applies a `stty` fix for CP210x drivers.                                                                                           |
+| TCI: Connection refused                  | Enable TCI in your SDR app (Thetis → Setup → CAT Control → Enable TCI Server)                                                                               |
+| TCI: No frequency updates                | Check `trx` / `vfo` index in config match the active transceiver in your SDR app                                                                            |
+| TCI: Remote SDR                          | Set `tci.host` to the IP of the machine running the SDR application                                                                                         |
+| SmartSDR: Connection refused             | Confirm the radio is powered on and reachable; default API port is 4992                                                                                     |
+| SmartSDR: No slice updates               | Check `sliceIndex` matches the active slice in SmartSDR                                                                                                     |
+| RTL-SDR: Connection refused              | Start `rtl_tcp` first: `rtl_tcp -a 127.0.0.1 -p 1234`; check no other app holds the dongle                                                                  |
+| RTL-SDR: Frequency won't tune            | Verify the frequency is within your dongle's supported range (typically 24 MHz–1.7 GHz for R820T)                                                           |
+| Multicast: no packets                    | Verify `multicastGroup` matches what WSJT-X sends to; check OS firewall allows multicast UDP; set `multicastInterface` to the correct NIC IP if multi-homed |
+| Cloud Relay: auth failed (401/403)       | Check that `apiKey` in rig-bridge matches `RIG_BRIDGE_RELAY_KEY` on the OHC server                                                                          |
+| Cloud Relay: state not updating          | Verify `url` points to the correct OHC server and that the server is reachable from your home network                                                       |
+| Cloud Relay: PTT/tune lag                | Ensure rig-bridge version ≥ 2.0 — older versions used a 250 ms poll instead of long-poll                                                                    |
+| Cloud Relay: connection drops frequently | Some proxies close idle HTTP connections after 30–60 s; rig-bridge reconnects automatically                                                                 |
 
 ---
 
@@ -558,10 +587,14 @@ rig-bridge/
 │
 ├── core/
 │   ├── config.js          # Config load/save, defaults, CLI args
-│   ├── state.js           # Shared rig state + SSE broadcast
+│   ├── state.js           # Shared rig state + SSE broadcast + change listeners
 │   ├── server.js          # Express HTTP server + all API routes
 │   ├── plugin-registry.js # Plugin lifecycle manager + dispatcher
 │   └── serial-utils.js    # Shared serial port helpers
+│
+├── lib/
+│   ├── message-log.js     # Persistent message log (WSJT-X, JS8Call, etc.)
+│   └── kiss-protocol.js   # KISS frame encode/decode for APRS TNC
 │
 └── plugins/
     ├── usb/
@@ -575,7 +608,14 @@ rig-bridge/
     ├── rigctld.js         # rigctld TCP plugin
     ├── flrig.js           # flrig XML-RPC plugin
     ├── mock.js            # Simulated radio for testing (no hardware needed)
-    └── wsjtx-relay.js     # WSJT-X UDP listener → OpenHamClock relay
+    ├── wsjtx-relay.js     # WSJT-X UDP listener → OpenHamClock relay
+    ├── mshv.js            # MSHV UDP listener (multi-stream digital modes)
+    ├── jtdx.js            # JTDX UDP listener (FT8/JT65 enhanced decoding)
+    ├── js8call.js         # JS8Call UDP listener (JS8 keyboard messaging)
+    ├── aprs-tnc.js        # APRS KISS TNC plugin (Direwolf / hardware TNC)
+    ├── rotator.js         # Antenna rotator via rotctld (Hamlib)
+    ├── winlink-gateway.js # Winlink RMS gateway discovery + Pat client
+    └── cloud-relay.js     # Cloud relay — bridges local rig-bridge to cloud OHC
 ```
 
 ---
@@ -591,7 +631,17 @@ module.exports = {
   category: 'rig', // 'rig' | 'integration' | 'rotator' | 'logger' | 'other'
   configKey: 'radio', // Which config section this plugin reads
 
-  create(config, { updateState, state }) {
+  create(config, services) {
+    // Available services:
+    //   updateState(prop, value) — update shared rig state and broadcast via SSE
+    //   state                   — read-only view of current rig state
+    //   onStateChange(fn)       — subscribe to any rig state change (immediate callback)
+    //   removeStateChangeListener(fn) — unsubscribe
+    //   pluginBus               — EventEmitter for inter-plugin events
+    //                             emits: 'decode' (WSJT-X), 'aprs' (APRS packets)
+    //   messageLog              — persistent log for decoded messages
+    const { updateState, state, onStateChange, removeStateChangeListener, pluginBus } = services;
+
     return {
       connect() {
         /* open connection */

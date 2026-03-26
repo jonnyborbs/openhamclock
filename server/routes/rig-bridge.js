@@ -30,6 +30,29 @@ module.exports = function (app, ctx) {
   const MAX_RELAY_SESSIONS = 50;
   const RELAY_SESSION_TTL = 3600000; // 1 hour
 
+  // SSE clients waiting for live state pushes — keyed by sessionId
+  const relayStreamClients = new Map(); // sessionId → Set<res>
+
+  // Long-poll waiters for command delivery — keyed by sessionId.
+  // When a browser POSTs a command, any waiting rig-bridge poll is resolved
+  // immediately instead of waiting up to 250 ms for the next poll tick.
+  const relayCommandWaiters = new Map(); // sessionId → Set<{ resolve, timer }>
+
+  function notifyCommandWaiters(sessionId) {
+    const waiters = relayCommandWaiters.get(sessionId);
+    if (!waiters || waiters.size === 0) return;
+    const session = relaySessions.get(sessionId);
+    if (!session) return;
+    const commands = [...session.commands];
+    session.commands = [];
+    session.lastPoll = Date.now();
+    for (const waiter of waiters) {
+      clearTimeout(waiter.timer);
+      waiter.resolve(commands);
+    }
+    relayCommandWaiters.delete(sessionId);
+  }
+
   function getRelaySession(sessionId) {
     if (!relaySessions.has(sessionId)) {
       if (relaySessions.size >= MAX_RELAY_SESSIONS) {
@@ -56,12 +79,33 @@ module.exports = function (app, ctx) {
     return relaySessions.get(sessionId);
   }
 
-  // Cleanup expired sessions periodically
+  // Cleanup expired sessions and their waiters periodically
   setInterval(() => {
     const cutoff = Date.now() - RELAY_SESSION_TTL;
     for (const [k, v] of relaySessions) {
       if (v.lastPush < cutoff && v.lastPoll < cutoff) {
         relaySessions.delete(k);
+        // Resolve any lingering command waiters so they don't hold open connections
+        const waiters = relayCommandWaiters.get(k);
+        if (waiters) {
+          for (const w of waiters) {
+            clearTimeout(w.timer);
+            w.resolve([]);
+          }
+          relayCommandWaiters.delete(k);
+        }
+        // Close any orphaned SSE stream clients for this session
+        const sseClients = relayStreamClients.get(k);
+        if (sseClients) {
+          for (const client of sseClients) {
+            try {
+              client.end();
+            } catch (e) {
+              // Client already gone — ignore
+            }
+          }
+          relayStreamClients.delete(k);
+        }
       }
     }
   }, 300000); // Every 5 minutes
@@ -80,158 +124,313 @@ module.exports = function (app, ctx) {
 
   // ─── Cloud Relay: Credentials (browser fetches to configure rig-bridge) ─
   app.get('/api/rig-bridge/relay/credentials', (req, res) => {
-    if (!RIG_BRIDGE_RELAY_KEY) {
-      return res.status(503).json({ error: 'Cloud relay not configured — set RIG_BRIDGE_RELAY_KEY in .env' });
+    try {
+      if (!RIG_BRIDGE_RELAY_KEY) {
+        return res.json({ error: 'Cloud relay not configured', configured: false });
+      }
+      const sessionId = req.query.session || crypto.randomBytes(8).toString('hex');
+      res.json({
+        relayKey: RIG_BRIDGE_RELAY_KEY,
+        session: sessionId,
+        serverUrl: `${req.protocol}://${req.get('host')}`,
+      });
+    } catch (err) {
+      logWarn(`[RigBridge] relay/credentials error: ${err.message}`);
+      if (!res.headersSent) res.json({ error: 'Internal error', configured: false });
     }
-    // Generate a session ID for this browser tab
-    const sessionId = req.query.session || crypto.randomBytes(8).toString('hex');
-    res.json({
-      relayKey: RIG_BRIDGE_RELAY_KEY,
-      session: sessionId,
-      serverUrl: `${req.protocol}://${req.get('host')}`,
-    });
   });
 
   // ─── Cloud Relay: State Push (rig-bridge → server) ────────────────────
   app.post('/api/rig-bridge/relay/state', requireRelayAuth, (req, res) => {
-    const sessionId = req.headers['x-relay-session'] || req.body.session;
-    if (!sessionId) return res.status(400).json({ error: 'Missing session ID' });
+    try {
+      const sessionId = req.headers['x-relay-session'] || req.body.session;
+      if (!sessionId) return res.status(400).json({ error: 'Missing session ID' });
 
-    const session = getRelaySession(sessionId);
-    session.state = {
-      connected: req.body.connected ?? session.state.connected,
-      freq: req.body.freq ?? session.state.freq,
-      mode: req.body.mode ?? session.state.mode,
-      ptt: req.body.ptt ?? session.state.ptt,
-      width: req.body.width ?? session.state.width,
-      timestamp: Date.now(),
-    };
-    session.lastPush = Date.now();
+      const session = getRelaySession(sessionId);
+      session.state = {
+        connected: req.body.connected ?? session.state.connected,
+        freq: req.body.freq ?? session.state.freq,
+        mode: req.body.mode ?? session.state.mode,
+        ptt: req.body.ptt ?? session.state.ptt,
+        width: req.body.width ?? session.state.width,
+        timestamp: Date.now(),
+      };
+      session.lastPush = Date.now();
 
-    // Store any batched decodes
-    if (Array.isArray(req.body.decodes) && req.body.decodes.length > 0) {
-      if (!session.decodes) session.decodes = [];
-      session.decodes.push(...req.body.decodes);
-      if (session.decodes.length > 500) session.decodes = session.decodes.slice(-500);
+      // Fan out live state to any SSE clients watching this session
+      const sseClients = relayStreamClients.get(sessionId);
+      if (sseClients && sseClients.size > 0) {
+        const msg = `data: ${JSON.stringify({ type: 'state', ...session.state, relayActive: true })}\n\n`;
+        for (const client of sseClients) {
+          try {
+            client.write(msg);
+          } catch (e) {
+            sseClients.delete(client);
+          }
+        }
+      }
+
+      // Store any batched decodes
+      if (Array.isArray(req.body.decodes) && req.body.decodes.length > 0) {
+        if (!session.decodes) session.decodes = [];
+        session.decodes.push(...req.body.decodes);
+        if (session.decodes.length > 500) session.decodes = session.decodes.slice(-500);
+      }
+
+      // Store and forward APRS packets to the APRS station cache
+      if (Array.isArray(req.body.aprsPackets) && req.body.aprsPackets.length > 0) {
+        if (!session.aprsPackets) session.aprsPackets = [];
+        session.aprsPackets.push(...req.body.aprsPackets);
+        if (session.aprsPackets.length > 500) session.aprsPackets = session.aprsPackets.slice(-500);
+
+        try {
+          ctx
+            .fetch(`http://localhost:${ctx.PORT}/api/aprs/local`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ packets: req.body.aprsPackets }),
+            })
+            .catch(() => {});
+        } catch (e) {}
+      }
+
+      res.json({ ok: true });
+    } catch (err) {
+      logWarn(`[RigBridge] relay/state push error: ${err.message}`);
+      if (!res.headersSent) res.json({ ok: false, error: 'Internal error' });
     }
-
-    // Store and forward APRS packets to the APRS station cache
-    if (Array.isArray(req.body.aprsPackets) && req.body.aprsPackets.length > 0) {
-      if (!session.aprsPackets) session.aprsPackets = [];
-      session.aprsPackets.push(...req.body.aprsPackets);
-      if (session.aprsPackets.length > 500) session.aprsPackets = session.aprsPackets.slice(-500);
-
-      // Forward to /api/aprs/local so packets merge into the APRS station cache
-      try {
-        ctx
-          .fetch(`http://localhost:${ctx.PORT}/api/aprs/local`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ packets: req.body.aprsPackets }),
-          })
-          .catch(() => {});
-      } catch (e) {}
-    }
-
-    res.json({ ok: true });
   });
 
   // ─── Cloud Relay: State Poll (browser → server) ───────────────────────
   app.get('/api/rig-bridge/relay/state', (req, res) => {
-    const sessionId = req.query.session;
-    if (!sessionId || !relaySessions.has(sessionId)) {
-      return res.json({ connected: false, freq: 0, mode: '', ptt: false, relayActive: false });
+    try {
+      const sessionId = req.query.session;
+      if (!sessionId || !relaySessions.has(sessionId)) {
+        return res.json({ connected: false, freq: 0, mode: '', ptt: false, relayActive: false });
+      }
+      const session = relaySessions.get(sessionId);
+      const relayActive = Date.now() - session.lastPush < 30000;
+      res.json({ ...session.state, relayActive });
+    } catch (err) {
+      logWarn(`[RigBridge] relay/state poll error: ${err.message}`);
+      if (!res.headersSent) res.json({ connected: false, freq: 0, mode: '', ptt: false, relayActive: false });
     }
-    const session = relaySessions.get(sessionId);
-    const relayActive = Date.now() - session.lastPush < 30000; // 30s timeout — generous for network jitter
-    res.json({ ...session.state, relayActive });
+  });
+
+  // ─── Cloud Relay: SSE Stream (browser → server, live state push) ──────
+  // Browser connects here instead of polling. State updates are pushed as
+  // soon as rig-bridge delivers them via POST /relay/state.
+  app.get('/api/rig-bridge/relay/stream', (req, res) => {
+    try {
+      const sessionId = req.query.session;
+      if (!sessionId) {
+        return res.json({ error: 'Missing session ID', relayActive: false });
+      }
+
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+      res.flushHeaders();
+
+      // Send current known state immediately so the browser doesn't wait for
+      // the first push from rig-bridge
+      const initState = relaySessions.has(sessionId)
+        ? (() => {
+            const s = relaySessions.get(sessionId);
+            return { type: 'state', ...s.state, relayActive: Date.now() - s.lastPush < 30000 };
+          })()
+        : { type: 'state', connected: false, freq: 0, mode: '', ptt: false, relayActive: false };
+      try {
+        res.write(`data: ${JSON.stringify(initState)}\n\n`);
+      } catch (e) {
+        return; // Client already disconnected
+      }
+
+      // Register this client
+      if (!relayStreamClients.has(sessionId)) {
+        relayStreamClients.set(sessionId, new Set());
+      }
+      relayStreamClients.get(sessionId).add(res);
+
+      // Heartbeat every 25s to prevent proxy/load-balancer timeouts
+      const heartbeat = setInterval(() => {
+        try {
+          res.write(': heartbeat\n\n');
+        } catch (e) {
+          clearInterval(heartbeat);
+        }
+      }, 25000);
+
+      req.on('close', () => {
+        clearInterval(heartbeat);
+        const clients = relayStreamClients.get(sessionId);
+        if (clients) {
+          clients.delete(res);
+          if (clients.size === 0) relayStreamClients.delete(sessionId);
+        }
+      });
+    } catch (err) {
+      logWarn(`[RigBridge] relay/stream error: ${err.message}`);
+      if (!res.headersSent) res.json({ error: 'Internal error', relayActive: false });
+    }
   });
 
   // ─── Cloud Relay: Decodes Poll (browser → server) ─────────────────────
   app.get('/api/rig-bridge/relay/decodes', (req, res) => {
-    const sessionId = req.query.session;
-    const since = parseInt(req.query.since) || 0;
-    if (!sessionId || !relaySessions.has(sessionId)) {
-      return res.json({ decodes: [] });
+    try {
+      const sessionId = req.query.session;
+      const since = parseInt(req.query.since) || 0;
+      if (!sessionId || !relaySessions.has(sessionId)) {
+        return res.json({ decodes: [] });
+      }
+      const session = relaySessions.get(sessionId);
+      const decodes = (session.decodes || []).filter((d) => (d.timestamp || 0) > since);
+      res.json({ count: decodes.length, decodes });
+    } catch (err) {
+      logWarn(`[RigBridge] relay/decodes error: ${err.message}`);
+      if (!res.headersSent) res.json({ decodes: [] });
     }
-    const session = relaySessions.get(sessionId);
-    const decodes = (session.decodes || []).filter((d) => (d.timestamp || 0) > since);
-    res.json({ count: decodes.length, decodes });
   });
 
   // ─── Cloud Relay: APRS Packets Poll (browser → server) ─────────────────
   app.get('/api/rig-bridge/relay/aprs', (req, res) => {
-    const sessionId = req.query.session;
-    const since = parseInt(req.query.since) || 0;
-    if (!sessionId || !relaySessions.has(sessionId)) {
-      return res.json({ packets: [] });
+    try {
+      const sessionId = req.query.session;
+      const since = parseInt(req.query.since) || 0;
+      if (!sessionId || !relaySessions.has(sessionId)) {
+        return res.json({ packets: [] });
+      }
+      const session = relaySessions.get(sessionId);
+      const packets = (session.aprsPackets || []).filter((p) => (p.timestamp || 0) > since);
+      res.json({ count: packets.length, packets });
+    } catch (err) {
+      logWarn(`[RigBridge] relay/aprs error: ${err.message}`);
+      if (!res.headersSent) res.json({ packets: [] });
     }
-    const session = relaySessions.get(sessionId);
-    const packets = (session.aprsPackets || []).filter((p) => (p.timestamp || 0) > since);
-    res.json({ count: packets.length, packets });
   });
 
   // ─── Cloud Relay: Command Push (browser → server, for rig-bridge to pick up) ─
   app.post('/api/rig-bridge/relay/command', (req, res) => {
-    const sessionId = req.query.session || req.body.session;
-    if (!sessionId || !relaySessions.has(sessionId)) {
-      return res.status(404).json({ error: 'No active relay session' });
+    try {
+      const sessionId = req.query.session || req.body.session;
+      if (!sessionId || !relaySessions.has(sessionId)) {
+        return res.status(404).json({ error: 'No active relay session' });
+      }
+      const { type, payload } = req.body;
+      if (!type) return res.status(400).json({ error: 'Missing command type' });
+
+      const session = relaySessions.get(sessionId);
+      session.commands.push({ type, payload, timestamp: Date.now() });
+
+      if (session.commands.length > 50) {
+        session.commands = session.commands.slice(-50);
+      }
+
+      // Wake any long-polling rig-bridge connection — delivers command immediately
+      // instead of waiting for the next poll tick (up to pollInterval ms).
+      notifyCommandWaiters(sessionId);
+
+      res.json({ ok: true, queued: session.commands.length });
+    } catch (err) {
+      logWarn(`[RigBridge] relay/command error: ${err.message}`);
+      if (!res.headersSent) res.json({ ok: false, error: 'Internal error' });
     }
-    const { type, payload } = req.body;
-    if (!type) return res.status(400).json({ error: 'Missing command type' });
-
-    const session = relaySessions.get(sessionId);
-    session.commands.push({ type, payload, timestamp: Date.now() });
-
-    // Cap command queue
-    if (session.commands.length > 50) {
-      session.commands = session.commands.slice(-50);
-    }
-
-    res.json({ ok: true, queued: session.commands.length });
   });
 
   // ─── Cloud Relay: Command Poll (rig-bridge → server) ──────────────────
+  // Supports long-polling: pass ?wait=<ms> (max 30000) to hold the connection
+  // open until a command is queued or the timeout expires. rig-bridge uses
+  // this to receive commands within ~network RTT instead of up to pollInterval.
   app.get('/api/rig-bridge/relay/commands', requireRelayAuth, (req, res) => {
-    const sessionId = req.query.session;
-    if (!sessionId || !relaySessions.has(sessionId)) {
-      return res.json({ commands: [] });
+    try {
+      const sessionId = req.query.session;
+      if (!sessionId || !relaySessions.has(sessionId)) {
+        return res.json({ commands: [] });
+      }
+      const session = relaySessions.get(sessionId);
+
+      // Commands already queued — return immediately (no hold needed)
+      if (session.commands.length > 0) {
+        const commands = [...session.commands];
+        session.commands = [];
+        session.lastPoll = Date.now();
+        return res.json({ commands });
+      }
+
+      // Long-poll: hold until a command arrives or timeout fires.
+      // Cap at 30 s to stay within typical proxy/load-balancer idle timeouts.
+      const waitMs = Math.min(parseInt(req.query.wait) || 0, 30000);
+      if (!waitMs) {
+        return res.json({ commands: [] });
+      }
+
+      if (!relayCommandWaiters.has(sessionId)) {
+        relayCommandWaiters.set(sessionId, new Set());
+      }
+      const waiterSet = relayCommandWaiters.get(sessionId);
+      let resolved = false;
+
+      const waiter = {
+        resolve(commands) {
+          if (resolved) return;
+          resolved = true;
+          try {
+            res.json({ commands });
+          } catch (e) {
+            // Client disconnected before we could respond — harmless
+          }
+        },
+      };
+
+      waiter.timer = setTimeout(() => {
+        waiterSet.delete(waiter);
+        if (waiterSet.size === 0) relayCommandWaiters.delete(sessionId);
+        waiter.resolve([]);
+      }, waitMs);
+
+      waiterSet.add(waiter);
+
+      req.on('close', () => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(waiter.timer);
+          waiterSet.delete(waiter);
+          if (waiterSet.size === 0) relayCommandWaiters.delete(sessionId);
+        }
+      });
+    } catch (err) {
+      logWarn(`[RigBridge] relay/commands error: ${err.message}`);
+      if (!res.headersSent) res.json({ commands: [] });
     }
-    const session = relaySessions.get(sessionId);
-    const commands = [...session.commands];
-    session.commands = []; // Drain the queue
-    session.lastPoll = Date.now();
-    res.json({ commands });
   });
 
   // ─── Cloud Relay: Configure ─────────────────────────────────────────
-  // Returns credentials for the browser to push directly to the user's
-  // local rig-bridge. The server can't reach localhost:5555 when cloud-hosted,
-  // but the browser CAN because it's on the user's machine.
   app.post('/api/rig-bridge/relay/configure', (req, res) => {
-    if (!RIG_BRIDGE_RELAY_KEY) {
-      return res.status(503).json({ error: 'Cloud relay not configured — set RIG_BRIDGE_RELAY_KEY in .env' });
-    }
-
-    const sessionId = crypto.randomBytes(8).toString('hex');
-    const serverUrl = `${req.protocol}://${req.get('host')}`;
-
-    // Return the config payload — the browser will push it to the local rig-bridge
-    res.json({
-      ok: true,
-      session: sessionId,
-      serverUrl,
-      relayKey: RIG_BRIDGE_RELAY_KEY,
-      // The browser should POST this to rigBridgeUrl/api/config:
-      configPayload: {
-        cloudRelay: {
-          enabled: true,
-          url: serverUrl,
-          apiKey: RIG_BRIDGE_RELAY_KEY,
-          session: sessionId,
+    try {
+      if (!RIG_BRIDGE_RELAY_KEY) {
+        return res.json({ ok: false, error: 'Cloud relay not configured — set RIG_BRIDGE_RELAY_KEY in .env' });
+      }
+      const sessionId = crypto.randomBytes(8).toString('hex');
+      const serverUrl = `${req.protocol}://${req.get('host')}`;
+      res.json({
+        ok: true,
+        session: sessionId,
+        serverUrl,
+        relayKey: RIG_BRIDGE_RELAY_KEY,
+        configPayload: {
+          cloudRelay: {
+            enabled: true,
+            url: serverUrl,
+            apiKey: RIG_BRIDGE_RELAY_KEY,
+            session: sessionId,
+          },
         },
-      },
-    });
+      });
+    } catch (err) {
+      logWarn(`[RigBridge] relay/configure error: ${err.message}`);
+      if (!res.headersSent) res.json({ ok: false, error: 'Internal error' });
+    }
   });
 
   // ─── Downloads: Platform-specific installer scripts ────────────────────

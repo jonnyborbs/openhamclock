@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { getModeFromFreq, mapModeToRig } from '../utils/bandPlan.js';
 
 // Default config
@@ -39,6 +39,14 @@ export const RigProvider = ({ children, rigConfig }) => {
 
   const [error, setError] = useState(null);
   const [rigBridgeStatus, setRigBridgeStatus] = useState(null); // health check result
+
+  // Optimistic rollback for cloud relay mode:
+  // confirmedRelayState holds the last freq/mode values confirmed by the server
+  // via SSE. optimisticTimers holds setTimeout handles that revert a pending
+  // optimistic update if no SSE confirmation arrives within OPTIMISTIC_TIMEOUT.
+  const confirmedRelayState = useRef({ freq: 0, mode: '' });
+  const optimisticTimers = useRef({});
+  const OPTIMISTIC_TIMEOUT = 3000;
 
   // Construct URL from config or default
   const rigUrl = buildRigUrl(rigConfig);
@@ -82,43 +90,113 @@ export const RigProvider = ({ children, rigConfig }) => {
       return;
     }
 
-    // ── Cloud Relay Mode: poll server-side relay state ──
+    // ── Cloud Relay Mode: SSE stream from server ──
     if (isCloudRelay) {
-      let pollInterval = null;
+      let eventSource = null;
+      let retryTimeout = null;
+      let retryDelay = 3000;
+      const MAX_RETRY_DELAY = 60000;
       let active = true;
+      // Fallback poll — only fires if SSE is down for >10s
+      let fallbackInterval = null;
 
-      const pollRelayState = async () => {
-        if (!active) return;
-        try {
-          const res = await fetch(`/api/rig-bridge/relay/state?session=${encodeURIComponent(cloudRelaySession)}`);
-          if (res.ok) {
-            const data = await res.json();
-            setRigState((prev) => ({
-              ...prev,
-              connected: data.relayActive && data.connected,
-              freq: data.freq || prev.freq,
-              mode: data.mode || prev.mode,
-              ptt: data.ptt ?? prev.ptt,
-              width: data.width || prev.width,
-              lastUpdate: Date.now(),
-            }));
-            if (data.relayActive) {
-              setError(null);
-            } else {
-              setError('not-reachable');
-            }
-          }
-        } catch (e) {
-          // Server not reachable
+      const applyRelayState = (data) => {
+        // Track the last confirmed values from the server — used for rollback
+        if (data.freq) confirmedRelayState.current.freq = data.freq;
+        if (data.mode) confirmedRelayState.current.mode = data.mode;
+
+        // Cancel any pending rollback timers — confirmation arrived in time
+        if (data.freq && optimisticTimers.current.freq) {
+          clearTimeout(optimisticTimers.current.freq);
+          delete optimisticTimers.current.freq;
         }
+        if (data.mode && optimisticTimers.current.mode) {
+          clearTimeout(optimisticTimers.current.mode);
+          delete optimisticTimers.current.mode;
+        }
+
+        setRigState((prev) => ({
+          ...prev,
+          connected: data.relayActive && data.connected,
+          freq: data.freq || prev.freq,
+          mode: data.mode || prev.mode,
+          ptt: data.ptt ?? prev.ptt,
+          width: data.width || prev.width,
+          lastUpdate: Date.now(),
+        }));
+        setError(data.relayActive ? null : 'not-reachable');
       };
 
-      pollRelayState();
-      pollInterval = setInterval(pollRelayState, 1000); // Poll every 1s for responsive updates
+      const connectSSE = () => {
+        if (!active) return;
+        eventSource = new EventSource(`/api/rig-bridge/relay/stream?session=${encodeURIComponent(cloudRelaySession)}`);
+
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'state') applyRelayState(data);
+          } catch (e) {
+            console.error('[RigContext] Failed to parse relay SSE message', e);
+          }
+        };
+
+        eventSource.onopen = () => {
+          retryDelay = 3000;
+          // Cancel fallback poll — SSE is live
+          if (fallbackInterval) {
+            clearInterval(fallbackInterval);
+            fallbackInterval = null;
+          }
+        };
+
+        eventSource.onerror = () => {
+          eventSource.close();
+          // Start a fallback poll so updates aren't completely lost while SSE reconnects.
+          // The poll stops itself after repeated failures (server unreachable) so it
+          // doesn't spam the browser console — SSE retry will recover when the server
+          // comes back.
+          if (!fallbackInterval && active) {
+            let fallbackFailures = 0;
+            fallbackInterval = setInterval(async () => {
+              if (!active) return;
+              try {
+                const res = await fetch(`/api/rig-bridge/relay/state?session=${encodeURIComponent(cloudRelaySession)}`);
+                if (res.ok) {
+                  fallbackFailures = 0;
+                  applyRelayState({ relayActive: true, ...(await res.json()) });
+                } else {
+                  // Non-2xx: server is up but erroring — count as failure
+                  fallbackFailures++;
+                }
+              } catch (e) {
+                // Network error — server unreachable
+                fallbackFailures++;
+              }
+              // After 3 failures, stop the fallback poll to avoid console spam.
+              // The SSE retry loop will reconnect when the server is back.
+              if (fallbackFailures >= 3 && fallbackInterval) {
+                clearInterval(fallbackInterval);
+                fallbackInterval = null;
+              }
+            }, 5000);
+          }
+          if (active) {
+            retryTimeout = setTimeout(connectSSE, retryDelay);
+            retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY);
+          }
+        };
+      };
+
+      connectSSE();
 
       return () => {
         active = false;
-        if (pollInterval) clearInterval(pollInterval);
+        if (eventSource) eventSource.close();
+        if (retryTimeout) clearTimeout(retryTimeout);
+        if (fallbackInterval) clearInterval(fallbackInterval);
+        // Cancel any pending rollback timers
+        Object.values(optimisticTimers.current).forEach(clearTimeout);
+        optimisticTimers.current = {};
       };
     }
 
@@ -215,6 +293,16 @@ export const RigProvider = ({ children, rigConfig }) => {
     async (freq) => {
       if (!rigConfig?.enabled) return;
       if (isCloudRelay) {
+        // Optimistic update — reflect the change immediately before the relay round-trip
+        setRigState((prev) => ({ ...prev, freq, lastUpdate: Date.now() }));
+        // Schedule rollback: if SSE doesn't confirm within OPTIMISTIC_TIMEOUT,
+        // revert to the last value the server reported (avoids stuck stale display).
+        if (optimisticTimers.current.freq) clearTimeout(optimisticTimers.current.freq);
+        optimisticTimers.current.freq = setTimeout(() => {
+          delete optimisticTimers.current.freq;
+          const fallback = confirmedRelayState.current.freq;
+          if (fallback) setRigState((prev) => ({ ...prev, freq: fallback }));
+        }, OPTIMISTIC_TIMEOUT);
         sendCommand('setFreq', { freq, tune: rigConfig.tuneEnabled });
         return;
       }
@@ -245,6 +333,15 @@ export const RigProvider = ({ children, rigConfig }) => {
     async (mode) => {
       if (!rigConfig?.enabled) return;
       if (isCloudRelay) {
+        // Optimistic update — reflect the change immediately before the relay round-trip
+        setRigState((prev) => ({ ...prev, mode, lastUpdate: Date.now() }));
+        // Schedule rollback: if SSE doesn't confirm within OPTIMISTIC_TIMEOUT, revert.
+        if (optimisticTimers.current.mode) clearTimeout(optimisticTimers.current.mode);
+        optimisticTimers.current.mode = setTimeout(() => {
+          delete optimisticTimers.current.mode;
+          const fallback = confirmedRelayState.current.mode;
+          if (fallback) setRigState((prev) => ({ ...prev, mode: fallback }));
+        }, OPTIMISTIC_TIMEOUT);
         sendCommand('setMode', { mode });
         return;
       }

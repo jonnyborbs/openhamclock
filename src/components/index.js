@@ -37,3 +37,5 @@ export { ImagePanel } from './ImagePanel.jsx';
 export { default as RotatorPanel } from './RotatorPanel.jsx';
 export { default as RotatorMapOverlay } from './RotatorMapOverlay.jsx';
 export { DXLocalTime } from './DXLocalTime.jsx';
+export { default as DigitalModesPanel } from './DigitalModesPanel.jsx';
+export { default as WinlinkPanel } from './WinlinkPanel.jsx';

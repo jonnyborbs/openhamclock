@@ -27,7 +27,8 @@ export default function useRotator({ endpointUrl, pollMs = 2000, staleMs = 5000,
   const [lastError, setLastError] = useState(null);
 
   const timerRef = useRef(null);
-  const noneUntilRef = useRef(0); // when server says source==='none', pause polling until this time
+  const noneUntilRef = useRef(0); // pause polling until this timestamp (back-off / source=none)
+  const backoffRef = useRef(2000); // current error back-off delay in ms; resets on success
   const pollRef = useRef(null);
 
   const ageMs = useMemo(() => {
@@ -58,6 +59,7 @@ export default function useRotator({ endpointUrl, pollMs = 2000, staleMs = 5000,
 
   const reconnect = useCallback(() => {
     noneUntilRef.current = 0;
+    backoffRef.current = 2000;
     setLastError(null);
     pollRef.current?.();
   }, []);
@@ -98,7 +100,14 @@ export default function useRotator({ endpointUrl, pollMs = 2000, staleMs = 5000,
 
       try {
         const res = await fetch(endpointUrl, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          // Server returned an error — exponential back-off to avoid console spam.
+          // 404/503 = endpoint not available; 500 = server error; all treated the same.
+          setLastError('Unable to reach rotator service');
+          noneUntilRef.current = Date.now() + backoffRef.current;
+          backoffRef.current = Math.min(backoffRef.current * 2, 30_000);
+          return;
+        }
 
         const data = await res.json();
         if (typeof data?.live === 'boolean') setLive(data.live);
@@ -111,26 +120,27 @@ export default function useRotator({ endpointUrl, pollMs = 2000, staleMs = 5000,
           setAzimuth(null);
           setLastGoodAzimuth(null);
 
+          // No rotator configured — check again in 30 s (not an error, so no back-off escalation)
           noneUntilRef.current = Date.now() + 30_000;
           return;
         }
 
         if (data?.live === false) {
           // Provider configured, but not currently connected/running
-          setAvailable(true); // provider exists
+          setAvailable(true);
           setSource(String(data?.source ?? 'unknown'));
           setLastError(data?.error ? String(data.error) : null);
 
-          // Mark as disconnected immediately
           setLastUpdate(0);
           setAzimuth(null);
           setLastGoodAzimuth(null);
 
-          // Retry soon (no need to wait 30s here)
           noneUntilRef.current = Date.now() + 2000;
           return;
         }
 
+        // Successful read — reset back-off for next error sequence
+        backoffRef.current = 2000;
         setAvailable(true);
 
         const a = Number(data?.azimuth);
@@ -148,7 +158,10 @@ export default function useRotator({ endpointUrl, pollMs = 2000, staleMs = 5000,
 
         setLastError(null);
       } catch {
+        // Network error (server unreachable) — exponential back-off to avoid console spam
         setLastError('Unable to reach rotator service');
+        noneUntilRef.current = Date.now() + backoffRef.current;
+        backoffRef.current = Math.min(backoffRef.current * 2, 30_000);
       }
     }
 

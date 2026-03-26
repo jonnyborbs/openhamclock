@@ -30,6 +30,8 @@ import {
   IDTimerPanel,
   KeybindingsPanel,
   DXLocalTime,
+  DigitalModesPanel,
+  WinlinkPanel,
 } from './components';
 import MeshtasticPanel from './components/MeshtasticPanel.jsx';
 
@@ -436,6 +438,8 @@ export const DockableApp = ({
       'id-timer': { name: 'ID Timer', icon: '📢' },
       keybindings: { name: 'Keyboard Shortcuts', icon: '⌨️' },
       meshtastic: { name: 'Meshtastic', icon: '📡' },
+      'digital-modes': { name: 'Digital Modes', icon: '📻', group: 'Rig Bridge' },
+      winlink: { name: 'Winlink', icon: '📬', group: 'Rig Bridge' },
     };
   }, [isLocalInstall]);
 
@@ -972,6 +976,14 @@ export const DockableApp = ({
 
         case 'meshtastic':
           content = <MeshtasticPanel />;
+          break;
+
+        case 'digital-modes':
+          content = <DigitalModesPanel />;
+          break;
+
+        case 'winlink':
+          content = <WinlinkPanel />;
           break;
 
         default:

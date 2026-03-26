@@ -1,0 +1,636 @@
+/**
+ * WinlinkPanel Component
+ * Winlink gateway discovery, Pat client inbox/outbox, and compose.
+ * Interfaces with the winlink-gateway rig-bridge plugin.
+ */
+import { useState, useMemo, useCallback } from 'react';
+import { useWinlink } from '../hooks/useWinlink';
+
+const WinlinkPanel = () => {
+  const {
+    status,
+    inbox,
+    outbox,
+    gateways,
+    loading,
+    mailLoading,
+    refreshMail,
+    searchGateways,
+    compose,
+    connectGateway,
+  } = useWinlink();
+
+  const [tab, setTab] = useState('inbox'); // inbox | outbox | gateways | compose
+  const [search, setSearch] = useState('');
+  const [gwGrid, setGwGrid] = useState('');
+  const [gwRange, setGwRange] = useState('500');
+  const [gwMode, setGwMode] = useState('');
+  const [gwLoading, setGwLoading] = useState(false);
+  const [composeForm, setComposeForm] = useState({ to: '', cc: '', subject: '', body: '' });
+  const [composing, setComposing] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+  const [expandedMsg, setExpandedMsg] = useState(null);
+  const [connecting, setConnecting] = useState(null);
+
+  const showFeedback = useCallback((message, isError = false) => {
+    setFeedback({ message, isError });
+    setTimeout(() => setFeedback(null), 4000);
+  }, []);
+
+  const handleSearch = useCallback(async () => {
+    setGwLoading(true);
+    await searchGateways(gwGrid || undefined, gwRange || undefined, gwMode || undefined);
+    setGwLoading(false);
+  }, [searchGateways, gwGrid, gwRange, gwMode]);
+
+  const handleCompose = useCallback(async () => {
+    if (!composeForm.to.trim() || !composeForm.subject.trim()) {
+      showFeedback('To and Subject are required', true);
+      return;
+    }
+    setComposing(true);
+    const result = await compose(composeForm);
+    setComposing(false);
+    if (result.error) {
+      showFeedback(result.error, true);
+    } else {
+      showFeedback('Message queued');
+      setComposeForm({ to: '', cc: '', subject: '', body: '' });
+      setTab('outbox');
+    }
+  }, [compose, composeForm, showFeedback]);
+
+  const handleConnect = useCallback(
+    async (callsign) => {
+      setConnecting(callsign);
+      const result = await connectGateway(callsign, 'telnet');
+      setConnecting(null);
+      if (result.error) showFeedback(result.error, true);
+      else showFeedback(`Connected to ${callsign}`);
+    },
+    [connectGateway, showFeedback],
+  );
+
+  const filteredInbox = useMemo(() => {
+    if (!search.trim()) return inbox;
+    const q = search.toUpperCase();
+    return inbox.filter((m) => (m.subject || '').toUpperCase().includes(q) || (m.from || '').toUpperCase().includes(q));
+  }, [inbox, search]);
+
+  const filteredOutbox = useMemo(() => {
+    if (!search.trim()) return outbox;
+    const q = search.toUpperCase();
+    return outbox.filter(
+      (m) => (m.subject || '').toUpperCase().includes(q) || (m.to || []).some((t) => t.toUpperCase().includes(q)),
+    );
+  }, [outbox, search]);
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '--';
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return dateStr;
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ padding: '20px', color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center' }}>
+        Loading...
+      </div>
+    );
+  }
+
+  if (!status.enabled) {
+    return (
+      <div
+        className="panel"
+        style={{ padding: '20px', color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center' }}
+      >
+        <div style={{ fontSize: '24px', marginBottom: '10px' }}>📬</div>
+        <div style={{ fontWeight: '600', color: 'var(--text-primary)', marginBottom: '8px' }}>Winlink Not Enabled</div>
+        <div>Enable the Winlink plugin in your rig-bridge config.</div>
+        <div style={{ marginTop: '10px', fontSize: '11px' }}>
+          Set{' '}
+          <code style={{ background: 'var(--bg-tertiary)', padding: '2px 6px', borderRadius: '3px' }}>
+            winlink.enabled: true
+          </code>{' '}
+          and optionally configure{' '}
+          <code style={{ background: 'var(--bg-tertiary)', padding: '2px 6px', borderRadius: '3px' }}>
+            winlink.apiKey
+          </code>{' '}
+          for gateway discovery.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontSize: '12px' }}>
+      {/* Header */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '6px 8px',
+          borderBottom: '1px solid var(--border-color)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '14px' }}>📬</span>
+          <span style={{ fontWeight: '700', color: 'var(--text-primary)' }}>Winlink</span>
+          <span
+            style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: status.running ? '#22c55e' : '#ef4444',
+              display: 'inline-block',
+            }}
+          />
+        </div>
+        <div style={{ display: 'flex', gap: '4px', alignItems: 'center', fontSize: '10px' }}>
+          {status.gatewayDiscovery && <span style={{ color: 'var(--text-muted)' }}>{status.gatewayCount} GW</span>}
+          {status.patEnabled && (
+            <span
+              style={{
+                padding: '2px 6px',
+                borderRadius: '3px',
+                background: status.patReachable ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+                color: status.patReachable ? '#22c55e' : '#ef4444',
+                fontSize: '10px',
+              }}
+            >
+              Pat {status.patReachable ? 'OK' : 'Down'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Feedback */}
+      {feedback && (
+        <div
+          style={{
+            padding: '4px 8px',
+            fontSize: '11px',
+            background: feedback.isError ? 'rgba(239,68,68,0.15)' : 'rgba(34,197,94,0.15)',
+            color: feedback.isError ? '#ef4444' : '#22c55e',
+            borderBottom: '1px solid var(--border-color)',
+          }}
+        >
+          {feedback.message}
+        </div>
+      )}
+
+      {/* Tab bar */}
+      <div
+        style={{
+          display: 'flex',
+          gap: '4px',
+          padding: '4px 8px',
+          borderBottom: '1px solid var(--border-color)',
+          background: 'var(--bg-secondary)',
+        }}
+      >
+        {[
+          { key: 'inbox', label: `Inbox (${inbox.length})`, show: status.patEnabled },
+          { key: 'outbox', label: `Outbox (${outbox.length})`, show: status.patEnabled },
+          { key: 'gateways', label: 'Gateways', show: status.gatewayDiscovery },
+          { key: 'compose', label: 'Compose', show: status.patEnabled },
+        ]
+          .filter((t) => t.show)
+          .map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              style={{
+                padding: '3px 8px',
+                fontSize: '10px',
+                borderRadius: '3px',
+                border: tab === t.key ? '1px solid var(--accent-cyan)' : '1px solid var(--border-color)',
+                background: tab === t.key ? 'var(--accent-cyan)' : 'transparent',
+                color: tab === t.key ? '#000' : 'var(--text-muted)',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                fontWeight: tab === t.key ? '600' : '400',
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+      </div>
+
+      {/* Search (inbox/outbox) */}
+      {(tab === 'inbox' || tab === 'outbox') && (
+        <div style={{ padding: '4px 8px', borderBottom: '1px solid var(--border-color)' }}>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search messages..."
+            style={{
+              width: '100%',
+              padding: '5px 8px',
+              fontSize: '11px',
+              background: 'var(--bg-tertiary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '4px',
+              color: 'var(--text-primary)',
+              fontFamily: 'inherit',
+              boxSizing: 'border-box',
+            }}
+          />
+        </div>
+      )}
+
+      {/* Content */}
+      <div style={{ flex: 1, overflow: 'auto', padding: '4px' }}>
+        {/* Inbox */}
+        {tab === 'inbox' && (
+          <>
+            {mailLoading && inbox.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>Loading mail...</div>
+            ) : filteredInbox.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>
+                {inbox.length === 0 ? 'Inbox empty' : 'No messages match'}
+              </div>
+            ) : (
+              filteredInbox.map((msg, i) => (
+                <div
+                  key={msg.mid || i}
+                  onClick={() => setExpandedMsg(expandedMsg === msg.mid ? null : msg.mid)}
+                  style={{
+                    padding: '6px 8px',
+                    borderRadius: '3px',
+                    marginBottom: '2px',
+                    background: i % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'transparent',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontWeight: '600', color: 'var(--text-primary)', fontSize: '11px' }}>
+                      {msg.subject || '(no subject)'}
+                    </div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', flexShrink: 0, marginLeft: '8px' }}>
+                      {formatDate(msg.date)}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '10px', color: 'var(--accent-cyan)' }}>From: {msg.from || 'Unknown'}</div>
+                  {expandedMsg === msg.mid && msg.body && (
+                    <div
+                      style={{
+                        marginTop: '6px',
+                        padding: '6px 8px',
+                        background: 'var(--bg-tertiary)',
+                        borderRadius: '3px',
+                        fontSize: '11px',
+                        color: 'var(--text-secondary)',
+                        whiteSpace: 'pre-wrap',
+                        fontFamily: 'JetBrains Mono, monospace',
+                        maxHeight: '200px',
+                        overflow: 'auto',
+                      }}
+                    >
+                      {msg.body}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </>
+        )}
+
+        {/* Outbox */}
+        {tab === 'outbox' && (
+          <>
+            {filteredOutbox.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>
+                {outbox.length === 0 ? 'Outbox empty' : 'No messages match'}
+              </div>
+            ) : (
+              filteredOutbox.map((msg, i) => (
+                <div
+                  key={msg.mid || i}
+                  style={{
+                    padding: '6px 8px',
+                    borderRadius: '3px',
+                    marginBottom: '2px',
+                    background: i % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'transparent',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontWeight: '600', color: 'var(--text-primary)', fontSize: '11px' }}>
+                      {msg.subject || '(no subject)'}
+                    </div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', flexShrink: 0, marginLeft: '8px' }}>
+                      {formatDate(msg.date)}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '10px', color: 'var(--accent-amber)' }}>
+                    To: {Array.isArray(msg.to) ? msg.to.join(', ') : msg.to || '--'}
+                  </div>
+                </div>
+              ))
+            )}
+          </>
+        )}
+
+        {/* Gateways */}
+        {tab === 'gateways' && (
+          <>
+            {/* Search controls */}
+            <div
+              style={{
+                padding: '6px 4px',
+                marginBottom: '4px',
+                borderBottom: '1px solid var(--border-color)',
+              }}
+            >
+              <div style={{ display: 'flex', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                <input
+                  value={gwGrid}
+                  onChange={(e) => setGwGrid(e.target.value.toUpperCase())}
+                  placeholder="Grid (e.g. FN20)"
+                  style={{
+                    width: '80px',
+                    padding: '4px 6px',
+                    fontSize: '11px',
+                    background: 'var(--bg-primary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '3px',
+                    color: 'var(--text-primary)',
+                    fontFamily: 'JetBrains Mono, monospace',
+                  }}
+                />
+                <input
+                  value={gwRange}
+                  onChange={(e) => setGwRange(e.target.value)}
+                  placeholder="Range km"
+                  style={{
+                    width: '60px',
+                    padding: '4px 6px',
+                    fontSize: '11px',
+                    background: 'var(--bg-primary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '3px',
+                    color: 'var(--text-primary)',
+                    fontFamily: 'inherit',
+                  }}
+                />
+                <select
+                  value={gwMode}
+                  onChange={(e) => setGwMode(e.target.value)}
+                  style={{
+                    padding: '4px',
+                    fontSize: '11px',
+                    background: 'var(--bg-primary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '3px',
+                    color: 'var(--text-primary)',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  <option value="">All modes</option>
+                  <option value="Packet">Packet</option>
+                  <option value="Winmor">Winmor</option>
+                  <option value="ARDOP">ARDOP</option>
+                  <option value="VARA">VARA</option>
+                  <option value="VARA FM">VARA FM</option>
+                  <option value="VARA HF">VARA HF</option>
+                </select>
+                <button
+                  onClick={handleSearch}
+                  disabled={gwLoading}
+                  style={{
+                    padding: '4px 10px',
+                    fontSize: '11px',
+                    background: 'var(--accent-cyan)',
+                    border: 'none',
+                    borderRadius: '3px',
+                    color: '#000',
+                    cursor: gwLoading ? 'wait' : 'pointer',
+                    fontFamily: 'inherit',
+                    fontWeight: '600',
+                  }}
+                >
+                  {gwLoading ? 'Searching...' : 'Search'}
+                </button>
+              </div>
+              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{gateways.length} gateways found</div>
+            </div>
+
+            {/* Gateway list */}
+            {gateways.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>
+                Search for gateways by grid square
+              </div>
+            ) : (
+              gateways.slice(0, 100).map((gw, i) => {
+                const callsign = gw.Callsign || gw.callsign || '--';
+                const freq = gw.Frequency || gw.frequency;
+                const mode = gw.Mode || gw.ServiceCode || '';
+                const distance = gw.Distance || gw.distance;
+
+                return (
+                  <div
+                    key={`${callsign}-${i}`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '5px 6px',
+                      borderRadius: '3px',
+                      marginBottom: '2px',
+                      background: i % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'transparent',
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span
+                          style={{
+                            fontWeight: '700',
+                            color: 'var(--text-primary)',
+                            fontFamily: 'JetBrains Mono, monospace',
+                          }}
+                        >
+                          {callsign}
+                        </span>
+                        {mode && (
+                          <span
+                            style={{
+                              padding: '1px 4px',
+                              borderRadius: '2px',
+                              background: 'var(--bg-tertiary)',
+                              color: 'var(--accent-amber)',
+                              fontSize: '9px',
+                            }}
+                          >
+                            {mode}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                        {freq ? `${(freq / 1e6).toFixed(3)} MHz` : ''}
+                        {distance ? ` - ${distance} km` : ''}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleConnect(callsign)}
+                      disabled={connecting === callsign}
+                      style={{
+                        padding: '3px 8px',
+                        fontSize: '10px',
+                        background: 'var(--accent-cyan)',
+                        border: 'none',
+                        borderRadius: '3px',
+                        color: '#000',
+                        cursor: connecting === callsign ? 'wait' : 'pointer',
+                        fontFamily: 'inherit',
+                        fontWeight: '600',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {connecting === callsign ? '...' : 'Connect'}
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </>
+        )}
+
+        {/* Compose */}
+        {tab === 'compose' && (
+          <div style={{ padding: '4px' }}>
+            <div style={{ marginBottom: '8px' }}>
+              <label style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '2px' }}>
+                To
+              </label>
+              <input
+                value={composeForm.to}
+                onChange={(e) => setComposeForm((p) => ({ ...p, to: e.target.value }))}
+                placeholder="CALLSIGN"
+                style={{
+                  width: '100%',
+                  padding: '5px 8px',
+                  fontSize: '11px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '3px',
+                  color: 'var(--text-primary)',
+                  fontFamily: 'JetBrains Mono, monospace',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+            <div style={{ marginBottom: '8px' }}>
+              <label style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '2px' }}>
+                CC (optional)
+              </label>
+              <input
+                value={composeForm.cc}
+                onChange={(e) => setComposeForm((p) => ({ ...p, cc: e.target.value }))}
+                placeholder="CALLSIGN"
+                style={{
+                  width: '100%',
+                  padding: '5px 8px',
+                  fontSize: '11px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '3px',
+                  color: 'var(--text-primary)',
+                  fontFamily: 'JetBrains Mono, monospace',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+            <div style={{ marginBottom: '8px' }}>
+              <label style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '2px' }}>
+                Subject
+              </label>
+              <input
+                value={composeForm.subject}
+                onChange={(e) => setComposeForm((p) => ({ ...p, subject: e.target.value }))}
+                placeholder="Message subject"
+                style={{
+                  width: '100%',
+                  padding: '5px 8px',
+                  fontSize: '11px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '3px',
+                  color: 'var(--text-primary)',
+                  fontFamily: 'inherit',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+            <div style={{ marginBottom: '8px' }}>
+              <label style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '2px' }}>
+                Body
+              </label>
+              <textarea
+                value={composeForm.body}
+                onChange={(e) => setComposeForm((p) => ({ ...p, body: e.target.value }))}
+                placeholder="Message body..."
+                rows={6}
+                style={{
+                  width: '100%',
+                  padding: '5px 8px',
+                  fontSize: '11px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '3px',
+                  color: 'var(--text-primary)',
+                  fontFamily: 'inherit',
+                  boxSizing: 'border-box',
+                  resize: 'vertical',
+                }}
+              />
+            </div>
+            <button
+              onClick={handleCompose}
+              disabled={composing || !composeForm.to.trim() || !composeForm.subject.trim()}
+              style={{
+                padding: '6px 16px',
+                fontSize: '12px',
+                background:
+                  composeForm.to.trim() && composeForm.subject.trim() ? 'var(--accent-cyan)' : 'var(--bg-tertiary)',
+                border: 'none',
+                borderRadius: '4px',
+                color: composeForm.to.trim() && composeForm.subject.trim() ? '#000' : 'var(--text-muted)',
+                cursor: composeForm.to.trim() && composeForm.subject.trim() ? 'pointer' : 'default',
+                fontFamily: 'inherit',
+                fontWeight: '600',
+              }}
+            >
+              {composing ? 'Sending...' : 'Send Message'}
+            </button>
+          </div>
+        )}
+
+        {/* No features available */}
+        {!status.patEnabled && !status.gatewayDiscovery && (
+          <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>
+            <div style={{ marginBottom: '8px' }}>Winlink plugin is running but no features are configured.</div>
+            <div style={{ fontSize: '11px' }}>
+              Set{' '}
+              <code style={{ background: 'var(--bg-tertiary)', padding: '2px 4px', borderRadius: '3px' }}>
+                winlink.apiKey
+              </code>{' '}
+              for gateway discovery or{' '}
+              <code style={{ background: 'var(--bg-tertiary)', padding: '2px 4px', borderRadius: '3px' }}>
+                winlink.pat.enabled: true
+              </code>{' '}
+              for messaging.
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default WinlinkPanel;
