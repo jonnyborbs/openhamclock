@@ -48,6 +48,7 @@ module.exports = function (app, ctx) {
         state: { connected: false, freq: 0, mode: '', ptt: false },
         commands: [],
         decodes: [],
+        aprsPackets: [],
         lastPush: Date.now(),
         lastPoll: 0,
       });
@@ -111,10 +112,25 @@ module.exports = function (app, ctx) {
     if (Array.isArray(req.body.decodes) && req.body.decodes.length > 0) {
       if (!session.decodes) session.decodes = [];
       session.decodes.push(...req.body.decodes);
-      // Cap decode buffer (ring buffer — keep newest)
-      if (session.decodes.length > 500) {
-        session.decodes = session.decodes.slice(-500);
-      }
+      if (session.decodes.length > 500) session.decodes = session.decodes.slice(-500);
+    }
+
+    // Store and forward APRS packets to the APRS station cache
+    if (Array.isArray(req.body.aprsPackets) && req.body.aprsPackets.length > 0) {
+      if (!session.aprsPackets) session.aprsPackets = [];
+      session.aprsPackets.push(...req.body.aprsPackets);
+      if (session.aprsPackets.length > 500) session.aprsPackets = session.aprsPackets.slice(-500);
+
+      // Forward to /api/aprs/local so packets merge into the APRS station cache
+      try {
+        ctx
+          .fetch(`http://localhost:${ctx.PORT}/api/aprs/local`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ packets: req.body.aprsPackets }),
+          })
+          .catch(() => {});
+      } catch (e) {}
     }
 
     res.json({ ok: true });
@@ -127,7 +143,7 @@ module.exports = function (app, ctx) {
       return res.json({ connected: false, freq: 0, mode: '', ptt: false, relayActive: false });
     }
     const session = relaySessions.get(sessionId);
-    const relayActive = Date.now() - session.lastPush < 15000;
+    const relayActive = Date.now() - session.lastPush < 30000; // 30s timeout — generous for network jitter
     res.json({ ...session.state, relayActive });
   });
 
@@ -141,6 +157,18 @@ module.exports = function (app, ctx) {
     const session = relaySessions.get(sessionId);
     const decodes = (session.decodes || []).filter((d) => (d.timestamp || 0) > since);
     res.json({ count: decodes.length, decodes });
+  });
+
+  // ─── Cloud Relay: APRS Packets Poll (browser → server) ─────────────────
+  app.get('/api/rig-bridge/relay/aprs', (req, res) => {
+    const sessionId = req.query.session;
+    const since = parseInt(req.query.since) || 0;
+    if (!sessionId || !relaySessions.has(sessionId)) {
+      return res.json({ packets: [] });
+    }
+    const session = relaySessions.get(sessionId);
+    const packets = (session.aprsPackets || []).filter((p) => (p.timestamp || 0) > since);
+    res.json({ count: packets.length, packets });
   });
 
   // ─── Cloud Relay: Command Push (browser → server, for rig-bridge to pick up) ─

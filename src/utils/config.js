@@ -107,12 +107,12 @@ export const loadConfig = () => {
       callsign: serverConfig.callsign && serverConfig.callsign !== 'N0CALL' ? serverConfig.callsign : config.callsign,
       locator: serverConfig.locator || config.locator,
       location: {
-        lat: serverConfig.latitude || config.location.lat,
-        lon: serverConfig.longitude || config.location.lon,
+        lat: serverConfig.latitude ?? config.location.lat,
+        lon: serverConfig.longitude ?? config.location.lon,
       },
       defaultDX: {
-        lat: serverConfig.dxLatitude || config.defaultDX.lat,
-        lon: serverConfig.dxLongitude || config.defaultDX.lon,
+        lat: serverConfig.dxLatitude ?? config.defaultDX.lat,
+        lon: serverConfig.dxLongitude ?? config.defaultDX.lon,
       },
       units: serverConfig.units || config.units,
       allUnits: serverConfig.allUnits || config.allUnits,
@@ -339,7 +339,7 @@ export const applyTheme = (theme) => {
 export const MAP_STYLES = {
   dark: {
     name: 'Dark',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?language={lang}',
     attribution:
       '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
   },
@@ -365,7 +365,7 @@ export const MAP_STYLES = {
   },
   streets: {
     name: 'Streets',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?language={lang}',
     attribution:
       '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
   },
@@ -381,7 +381,7 @@ export const MAP_STYLES = {
   },
   hybrid: {
     name: 'Hybrid',
-    url: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+    url: 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&hl={lang}',
     attribution: '&copy; Google',
   },
   gray: {

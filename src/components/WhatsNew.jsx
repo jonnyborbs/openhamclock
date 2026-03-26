@@ -29,6 +29,54 @@ const ANNOUNCEMENT = {
 
 const CHANGELOG = [
   {
+    version: '26.2.1',
+    date: '2026-03-25',
+    heading:
+      'Rig Bridge unification with 22 plugins (WSJT-X, MSHV, JTDX, JS8Call, APRS TNC, Winlink, Rotator), Cloud Relay for remote rig control, EmComm full platform (net operations, messaging, telemetry), RBN spotter mode, propagation fix, and locale-aware map labels.',
+    features: [
+      {
+        icon: '📻',
+        title: 'Rig Bridge — Centralized Hardware Hub',
+        desc: 'Rig Bridge is now the single system for all external hardware and digital mode integration. 22 plugins: 8 radio (Yaesu, Kenwood, Icom USB + rigctld, flrig, TCI, SmartSDR, RTL-TCP), 4 digital mode (WSJT-X, MSHV, JTDX, JS8Call — all bidirectional), APRS TNC (KISS/Direwolf), Winlink gateway, rotator (rotctld), cloud relay, and mock. Plugin Manager UI at localhost:5555 lets you enable/disable and configure plugins without editing JSON. Dedicated Rig Bridge tab in OHC Settings.',
+      },
+      {
+        icon: '☁️',
+        title: 'Cloud Relay — Control Your Radio from Anywhere',
+        desc: 'Run Rig Bridge at home, use OpenHamClock from the cloud. The Cloud Relay plugin pushes rig state (frequency, mode, PTT) and WSJT-X decodes to your cloud OHC instance over HTTPS. Commands (click-to-tune, PTT) are queued on the server and picked up by your local rig-bridge within 200ms. One-click setup from Settings → Rig Bridge → Connect Cloud Relay. Download installers for Windows/Mac/Linux.',
+      },
+      {
+        icon: '🎵',
+        title: 'Bidirectional Digital Mode Control',
+        desc: 'WSJT-X, MSHV, JTDX, and JS8Call plugins are fully bidirectional — OHC can send replies to decoded stations, halt TX, set free text, and highlight callsigns in the decode window. Shared protocol library with WSJTXWriter serializer. Each app runs on its own UDP port so they can operate simultaneously.',
+      },
+      {
+        icon: '🚨',
+        title: 'EmComm — Full Bidirectional Operations Platform',
+        desc: 'The EmComm layout is no longer display-only. Phase 2: Local APRS via Direwolf/hardware TNC (KISS protocol), 30+ APRS symbol icons, RF/Internet source selector. Phase 3: Net check-in/check-out via APRS messages to EMCOMM, operator status board with live roster. Phase 4: Click-to-message with 67-char limit and RF send. Phase 5: Message logging with CSV/ICS-213 export. Phase 6: APRS telemetry parsing (T# frames with PARM/UNIT/EQNS calibration). All works over RF alone — no internet required.',
+      },
+      {
+        icon: '📡',
+        title: 'RBN Spotter Mode — What Does a Skimmer Hear?',
+        desc: 'The RBN overlay now supports a second query mode: "What does a skimmer hear?" Enter a skimmer callsign (e.g. KD2OGR) to see all stations it\'s receiving, with markers at DX locations and paths from the skimmer. Toggle between "Who hears me?" and spotter mode via the Mode dropdown in the RBN panel.',
+      },
+      {
+        icon: '📊',
+        title: 'Propagation Bars/Chart Consistency Fix',
+        desc: 'Fixed a mismatch where the propagation bars and 24-hour chart could show different reliability values for the same band. When the 24-hour ITURHFProp fetch failed but the single-hour fetch succeeded, bars used ITURHFProp data while the chart used built-in calculations. Both now use the same source for the current hour.',
+      },
+      {
+        icon: '🗺️',
+        title: 'Locale-Aware Map Labels',
+        desc: "Map labels on CARTO and Google tile layers now match your OHC language setting instead of following the browser's Accept-Language header. German users see German labels, Japanese users see Japanese — no more random CJK labels for European users.",
+      },
+      {
+        icon: '🔧',
+        title: 'Rig Bridge CORS Fix — Click-to-Tune Works Again',
+        desc: 'Fixed the root cause of click-to-tune and PTT failures reported in issues #707 and #834. The rig-bridge CORS whitelist was missing common OHC ports (3001, 8080, 8443). CORS rejections are now logged to the rig-bridge console so the issue is immediately visible. Auth rejections and no-plugin errors also surface clearly in the Rig Control panel.',
+      },
+    ],
+  },
+  {
     version: '26.1.3',
     date: '2026-03-23',
     heading:

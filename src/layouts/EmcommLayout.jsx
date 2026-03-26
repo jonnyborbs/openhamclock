@@ -29,6 +29,62 @@ const SYMBOL_LABELS = {
   '\\y': 'Skywarn',
 };
 
+// APRS symbol to icon mapping for station type display
+const SYMBOL_ICONS = {
+  // Emergency / infrastructure
+  '/o': '🏛️',
+  '\\z': '🏥',
+  '\\!': '🚨',
+  '/+': '✚',
+  '\\a': '📡',
+  '\\y': '🌪️',
+  Eo: '🏛️',
+  So: '🏥',
+  // Mobile / portable
+  '/>': '🚗',
+  '/[': '🧑',
+  '/b': '🚲',
+  '/R': '🚐',
+  '/u': '🚌',
+  '/j': '🏎️',
+  '/v': '🚐',
+  '/k': '🚚',
+  '/Y': '⛵',
+  '/X': '🚁',
+  '/^': '✈️',
+  '\\>': '🚗',
+  '\\v': '🚐',
+  // Fixed stations
+  '/-': '🏠',
+  '/a': '🏥',
+  '/r': '📡',
+  '/I': '📻',
+  '/&': '◆',
+  '\\-': '🏠',
+  '\\r': '📡',
+  // Weather
+  '/_': '🌤️',
+  '/W': '🌡️',
+  '\\W': '🌡️',
+  // Digipeaters / infrastructure
+  '/#': '⬡',
+  '/D': '🔁',
+};
+
+function getStationIcon(symbol) {
+  if (!symbol) return '📍';
+  return SYMBOL_ICONS[symbol] || '📍';
+}
+
+function getStationType(symbol) {
+  if (!symbol) return 'unknown';
+  const mobile = new Set(['/>', '\\>', '/[', '/b', '/R', '/u', '/j', '/v', '/k', '/Y', '/X', '/^', '\\v']);
+  if (mobile.has(symbol)) return 'mobile';
+  const fixed = new Set(['/-', '\\-', '/o', '\\z', '/a', '/r', '\\r', '/I', '/#', '/D', 'Eo', 'So']);
+  if (fixed.has(symbol)) return 'fixed';
+  return 'unknown';
+}
+
 const TOKEN_META = {
   Beds: { label: 'Beds', icon: '🛏️', color: '#22d3ee' },
   Water: { label: 'Water', icon: '💧', color: '#3b82f6' },
@@ -85,6 +141,12 @@ export default function EmcommLayout(props) {
   const { t } = useTranslation();
   const [seconds, setSeconds] = useState(() => String(new Date().getUTCSeconds()).padStart(2, '0'));
   const [expandedAlert, setExpandedAlert] = useState(null);
+  // APRS source filter: 'all' | 'internet' | 'rf'
+  const [aprsSource, setAprsSource] = useState('all');
+  // Net operations
+  const [netRoster, setNetRoster] = useState([]);
+  const [messageTarget, setMessageTarget] = useState(null); // callsign to message
+  const [messageText, setMessageText] = useState('');
   const mapInstanceRef = useRef(null);
   const overlayLayersRef = useRef([]);
 
@@ -96,8 +158,31 @@ export default function EmcommLayout(props) {
     return () => clearInterval(timer);
   }, []);
 
+  // Poll net roster
+  useEffect(() => {
+    const fetchRoster = async () => {
+      try {
+        const res = await fetch('/api/aprs/net');
+        if (res.ok) {
+          const data = await res.json();
+          setNetRoster(data.roster || []);
+        }
+      } catch (e) {}
+    };
+    fetchRoster();
+    const timer = setInterval(fetchRoster, 10000);
+    return () => clearInterval(timer);
+  }, []);
+
   const { alerts = [], shelters = [], disasters = [], loading } = emcommData || {};
-  const aprsStations = aprsData?.stations || [];
+  const allAprsStations = aprsData?.stations || [];
+
+  // Apply APRS source filter
+  const aprsStations = useMemo(() => {
+    if (aprsSource === 'rf') return allAprsStations.filter((s) => s.source === 'local-tnc');
+    if (aprsSource === 'internet') return allAprsStations.filter((s) => s.source !== 'local-tnc');
+    return allAprsStations;
+  }, [allAprsStations, aprsSource]);
 
   // Filter APRS stations to emergency symbols
   const emcommStations = useMemo(() => {
@@ -106,7 +191,7 @@ export default function EmcommLayout(props) {
 
   // Calculate distance from DE for shelters
   const sheltersWithDistance = useMemo(() => {
-    if (!config.location?.lat || !config.location?.lon) return shelters;
+    if (config.location?.lat == null || config.location?.lon == null) return shelters;
     return shelters
       .map((s) => ({
         ...s,
@@ -117,7 +202,7 @@ export default function EmcommLayout(props) {
 
   // Calculate distance for emcomm APRS stations
   const emcommStationsWithDistance = useMemo(() => {
-    if (!config.location?.lat || !config.location?.lon) return emcommStations;
+    if (config.location?.lat == null || config.location?.lon == null) return emcommStations;
     return emcommStations
       .map((s) => ({
         ...s,
@@ -154,7 +239,7 @@ export default function EmcommLayout(props) {
     overlayLayersRef.current = [];
 
     const de = config.location;
-    if (!de?.lat || !de?.lon) return;
+    if (de?.lat == null || de?.lon == null) return;
 
     // Range rings at 50, 100, 200 km
     [50, 100, 200].forEach((km) => {
@@ -208,7 +293,7 @@ export default function EmcommLayout(props) {
 
     // Shelter markers
     shelters.forEach((shelter) => {
-      if (!shelter.lat || !shelter.lon) return;
+      if (shelter.lat == null || shelter.lon == null) return;
       const color = SHELTER_STATUS_COLORS[shelter.status] || '#6b7280';
       const marker = L.circleMarker([shelter.lat, shelter.lon], {
         radius: 8,
@@ -229,7 +314,7 @@ export default function EmcommLayout(props) {
 
     // EmComm APRS station markers with token popups
     emcommStationsWithDistance.forEach((station) => {
-      if (!station.lat || !station.lon) return;
+      if (station.lat == null || station.lon == null) return;
       const marker = L.circleMarker([station.lat, station.lon], {
         radius: 6,
         color: '#22d3ee',
@@ -237,8 +322,11 @@ export default function EmcommLayout(props) {
         fillOpacity: 0.5,
         weight: 2,
       });
-      let popupHtml = `<b style="color:#22d3ee">${esc(station.ssid || station.call)}</b>`;
-      popupHtml += `<br><span style="color:#888">${esc(SYMBOL_LABELS[station.symbol] || 'EmComm')}</span>`;
+      const stationIcon = getStationIcon(station.symbol);
+      const stationType = getStationType(station.symbol);
+      const sourceTag = station.source === 'local-tnc' ? ' <span style="color:#22c55e;font-size:10px">RF</span>' : '';
+      let popupHtml = `<b style="color:#22d3ee">${stationIcon} ${esc(station.ssid || station.call)}</b>${sourceTag}`;
+      popupHtml += `<br><span style="color:#888">${esc(SYMBOL_LABELS[station.symbol] || 'EmComm')} (${stationType})</span>`;
       if (station.tokens && station.tokens.length > 0) {
         popupHtml += '<br><div style="margin-top:4px">';
         station.tokens.forEach((t) => {
@@ -550,7 +638,30 @@ export default function EmcommLayout(props) {
           </PanelSection>
 
           {/* EmComm Stations Panel (APRS) */}
-          <PanelSection title="EmComm Stations" count={emcommStationsWithDistance.length} color="#22d3ee">
+          <PanelSection
+            title="EmComm Stations"
+            count={emcommStationsWithDistance.length}
+            color="#22d3ee"
+            extra={
+              <select
+                value={aprsSource}
+                onChange={(e) => setAprsSource(e.target.value)}
+                style={{
+                  background: '#1a1f2e',
+                  border: '1px solid #2a3040',
+                  borderRadius: '3px',
+                  color: '#888',
+                  fontSize: '9px',
+                  padding: '1px 4px',
+                  marginLeft: '6px',
+                }}
+              >
+                <option value="all">All Sources</option>
+                <option value="rf">RF Only</option>
+                <option value="internet">Internet Only</option>
+              </select>
+            }
+          >
             {emcommStationsWithDistance.length === 0 ? (
               <EmptyState text="No emergency APRS stations heard" />
             ) : (
@@ -571,10 +682,16 @@ export default function EmcommLayout(props) {
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div>
+                        <span style={{ marginRight: '4px' }}>{getStationIcon(s.symbol)}</span>
                         <span style={{ color: '#22d3ee', fontWeight: 600 }}>{s.ssid || s.call}</span>
                         <span style={{ color: '#888', marginLeft: '6px', fontSize: '10px' }}>
                           {SYMBOL_LABELS[s.symbol] || 'EmComm'}
                         </span>
+                        {s.source === 'local-tnc' && (
+                          <span style={{ color: '#22c55e', marginLeft: '4px', fontSize: '9px', fontWeight: 700 }}>
+                            RF
+                          </span>
+                        )}
                       </div>
                       <div style={{ color: '#888', fontSize: '10px', textAlign: 'right' }}>
                         {s.distance != null && (
@@ -598,6 +715,148 @@ export default function EmcommLayout(props) {
               })
             )}
           </PanelSection>
+
+          {/* Net Operations Panel */}
+          <PanelSection title="Net Roster" count={netRoster.length} color="#a855f7">
+            {netRoster.length === 0 ? (
+              <EmptyState text="No operators checked in. Send 'CQ NETNAME status' to EMCOMM via APRS to check in." />
+            ) : (
+              netRoster.map((op) => {
+                const ageStr = op.age < 1 ? 'now' : op.age < 60 ? `${op.age}m` : `${Math.floor(op.age / 60)}h`;
+                return (
+                  <div
+                    key={op.call}
+                    style={{
+                      padding: '5px 8px',
+                      fontSize: '11px',
+                      borderLeft: `2px solid ${op.stale ? '#f59e0b' : '#22c55e'}`,
+                      background: '#0d1117',
+                      borderRadius: '4px',
+                      marginBottom: '3px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <span style={{ color: op.stale ? '#f59e0b' : '#22c55e', fontWeight: 600 }}>{op.call}</span>
+                        <span style={{ color: '#888', marginLeft: '6px', fontSize: '10px' }}>{op.netName}</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <span style={{ color: '#888', fontSize: '10px' }}>{ageStr}</span>
+                        <button
+                          onClick={() => setMessageTarget(op.call)}
+                          style={{
+                            background: 'none',
+                            border: '1px solid #333',
+                            borderRadius: '3px',
+                            color: '#888',
+                            fontSize: '9px',
+                            padding: '1px 4px',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          MSG
+                        </button>
+                      </div>
+                    </div>
+                    {op.status && op.status !== 'Checked in' && (
+                      <div style={{ color: '#aaa', fontSize: '10px', marginTop: '2px' }}>{op.status}</div>
+                    )}
+                    {op.tokens && op.tokens.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginTop: '3px' }}>
+                        {op.tokens.map((tk, i) => (
+                          <TokenPill key={`${tk.key}-${i}`} token={tk} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </PanelSection>
+
+          {/* Message Compose */}
+          {messageTarget && (
+            <div
+              style={{
+                background: '#111620',
+                border: '1px solid #2a3040',
+                borderRadius: '6px',
+                padding: '10px',
+                marginTop: '8px',
+              }}
+            >
+              <div
+                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}
+              >
+                <span style={{ color: '#22d3ee', fontWeight: 600, fontSize: '12px' }}>Message to {messageTarget}</span>
+                <button
+                  onClick={() => {
+                    setMessageTarget(null);
+                    setMessageText('');
+                  }}
+                  style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '14px' }}
+                >
+                  ✕
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <input
+                  type="text"
+                  value={messageText}
+                  onChange={(e) => setMessageText(e.target.value.slice(0, 67))}
+                  placeholder="Type message (67 char max)"
+                  maxLength={67}
+                  style={{
+                    flex: 1,
+                    padding: '6px 8px',
+                    background: '#0a0e14',
+                    border: '1px solid #2a3040',
+                    borderRadius: '4px',
+                    color: '#c4c9d4',
+                    fontSize: '12px',
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && messageText.trim()) {
+                      fetch('/api/aprs/message', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ to: messageTarget, message: messageText.trim() }),
+                      }).catch(() => {});
+                      setMessageText('');
+                      setMessageTarget(null);
+                    }
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    if (!messageText.trim()) return;
+                    fetch('/api/aprs/message', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ to: messageTarget, message: messageText.trim() }),
+                    }).catch(() => {});
+                    setMessageText('');
+                    setMessageTarget(null);
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    background: '#22d3ee',
+                    border: 'none',
+                    borderRadius: '4px',
+                    color: '#000',
+                    fontWeight: 600,
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Send
+                </button>
+              </div>
+              <div style={{ fontSize: '9px', color: '#888', marginTop: '4px' }}>
+                {messageText.length}/67 chars — sent via APRS (requires local TNC)
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -743,7 +1002,7 @@ function ResourceSummary({ stations }) {
 }
 
 /** Collapsible panel section wrapper */
-function PanelSection({ title, count, color, children }) {
+function PanelSection({ title, count, color, extra, children }) {
   const [collapsed, setCollapsed] = useState(false);
   return (
     <div style={{ background: '#0d0d0d', borderRadius: '6px', overflow: 'hidden' }}>
@@ -771,6 +1030,7 @@ function PanelSection({ title, count, color, children }) {
           >
             {title}
           </span>
+          {extra && <span onClick={(e) => e.stopPropagation()}>{extra}</span>}
         </div>
         {count > 0 && (
           <span

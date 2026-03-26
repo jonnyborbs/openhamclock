@@ -53,12 +53,14 @@ const descriptor = {
     const serverUrl = (cfg.url || '').replace(/\/$/, '');
     const apiKey = cfg.apiKey || '';
     const session = cfg.session || '';
-    const pushInterval = cfg.pushInterval || 2000;
+    const pushInterval = cfg.pushInterval || 2000; // Fallback interval for data batches
     const pollInterval = cfg.pollInterval || 1000;
-    const { state, pluginBus } = services;
+    const { state, pluginBus, onStateChange, removeStateChangeListener } = services;
 
     let pushTimer = null;
     let pollTimer = null;
+    let immediatePushTimer = null;
+    let stateChangeHandler = null;
     let serverReachable = false;
     let totalPushed = 0;
     let totalCommands = 0;
@@ -66,6 +68,7 @@ const descriptor = {
     let consecutiveErrors = 0;
     let lastState = {};
     let pendingDecodes = []; // Batched decodes to push
+    let pendingAprs = []; // Batched APRS packets to push
 
     function makeRequest(urlStr, method, body, callback) {
       let parsed;
@@ -120,21 +123,25 @@ const descriptor = {
       };
 
       const hasDecodes = pendingDecodes.length > 0;
+      const hasAprs = pendingAprs.length > 0;
       const stateChanged =
         currentState.freq !== lastState.freq ||
         currentState.mode !== lastState.mode ||
         currentState.ptt !== lastState.ptt ||
         currentState.connected !== lastState.connected;
 
-      // Only push if state changed or there are decodes to send
-      if (!stateChanged && !hasDecodes) return;
+      // Only push if state changed or there's data to send
+      if (!stateChanged && !hasDecodes && !hasAprs) return;
       lastState = { ...currentState };
 
-      // Include batched decodes in the push
+      // Include batched data in the push
       const payload = { ...currentState };
       if (hasDecodes) {
-        payload.decodes = pendingDecodes.splice(0, 50); // Send up to 50 at a time
+        payload.decodes = pendingDecodes.splice(0, 50);
         totalDecodes += payload.decodes.length;
+      }
+      if (hasAprs) {
+        payload.aprsPackets = pendingAprs.splice(0, 50);
       }
 
       makeRequest(`${serverUrl}/api/rig-bridge/relay/state`, 'POST', payload, (err, status) => {
@@ -259,6 +266,17 @@ const descriptor = {
         }
       });
 
+      // Push immediately on any state change (freq, mode, PTT) with 100ms debounce
+      if (typeof onStateChange === 'function') {
+        stateChangeHandler = () => {
+          if (immediatePushTimer) clearTimeout(immediatePushTimer);
+          immediatePushTimer = setTimeout(pushState, 100);
+        };
+        onStateChange(stateChangeHandler);
+        console.log('[CloudRelay] Subscribed to immediate state changes');
+      }
+
+      // Fallback interval for batched data (decodes, APRS) even if state hasn't changed
       pushTimer = setInterval(pushState, pushInterval);
       pollTimer = setInterval(pollCommands, pollInterval);
 
@@ -277,7 +295,11 @@ const descriptor = {
           // Cap pending queue
           if (pendingDecodes.length > 200) pendingDecodes.splice(0, pendingDecodes.length - 200);
         });
-        console.log('[CloudRelay] Subscribed to plugin bus (decodes, status, QSOs)');
+        pluginBus.on('aprs', (packet) => {
+          pendingAprs.push(packet);
+          if (pendingAprs.length > 200) pendingAprs.splice(0, pendingAprs.length - 200);
+        });
+        console.log('[CloudRelay] Subscribed to plugin bus (decodes, APRS, status, QSOs)');
       }
     }
 
@@ -289,6 +311,13 @@ const descriptor = {
       if (pollTimer) {
         clearInterval(pollTimer);
         pollTimer = null;
+      }
+      if (immediatePushTimer) {
+        clearTimeout(immediatePushTimer);
+        immediatePushTimer = null;
+      }
+      if (stateChangeHandler && typeof removeStateChangeListener === 'function') {
+        removeStateChangeListener(stateChangeHandler);
       }
       _currentInstance = null;
       console.log(`[CloudRelay] Stopped (pushed: ${totalPushed}, commands: ${totalCommands})`);

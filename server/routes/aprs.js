@@ -21,6 +21,11 @@ module.exports = function (app, ctx) {
 
   // In-memory station cache: callsign → { call, lat, lon, symbol, comment, speed, course, altitude, timestamp, raw }
   const aprsStations = new Map();
+  // APRS message store for EmComm (messages, bulletins, shelter reports)
+  const aprsMessages = [];
+  const APRS_MAX_MESSAGES = 200;
+  // Net operations: operator roster keyed by callsign
+  const netRoster = new Map(); // callsign → { call, status, netName, checkinTime, lastHeard, location, resources }
   let aprsSocket = null;
   let aprsReconnectTimer = null;
   let aprsConnected = false;
@@ -72,6 +77,163 @@ module.exports = function (app, ctx) {
     }
     const cleanComment = comment.replace(regex, '').trim();
     return { tokens, cleanComment };
+  }
+
+  // Parse APRS telemetry frames
+  // T#seq,val1,val2,val3,val4,val5,bits — analog values + digital status
+  // PARM/UNIT/EQNS messages define parameter names, units, and equations
+  const telemetryDefs = new Map(); // callsign → { params, units, eqns }
+  const telemetryData = new Map(); // callsign → { values[], bits, seq, timestamp }
+
+  function parseAprsTelemetry(line) {
+    try {
+      const headerEnd = line.indexOf(':');
+      if (headerEnd < 0) return null;
+
+      const header = line.substring(0, headerEnd);
+      const payload = line.substring(headerEnd + 1);
+      const callsign = header.split('>')[0].split('-')[0].trim();
+
+      // T# telemetry data frame
+      if (payload.startsWith('T#')) {
+        const parts = payload.substring(2).split(',');
+        if (parts.length < 6) return null;
+        const seq = parts[0];
+        const values = parts.slice(1, 6).map((v) => parseFloat(v) || 0);
+        const bits = parts[5] ? parts[5].replace(/[^01]/g, '') : '';
+
+        const def = telemetryDefs.get(callsign) || {};
+        const entry = {
+          call: callsign,
+          seq,
+          values,
+          bits,
+          timestamp: Date.now(),
+          params: def.params || ['A1', 'A2', 'A3', 'A4', 'A5'],
+          units: def.units || ['', '', '', '', ''],
+        };
+
+        // Apply equations if defined: val = a*x^2 + b*x + c
+        if (def.eqns) {
+          entry.computed = values.map((v, i) => {
+            const e = def.eqns[i];
+            if (!e) return v;
+            return e[0] * v * v + e[1] * v + e[2];
+          });
+        }
+
+        telemetryData.set(callsign, entry);
+        return { type: 'data', ...entry };
+      }
+
+      // PARM — parameter names
+      if (payload.startsWith(':') && payload.includes(':PARM.')) {
+        const parms = payload.split(':PARM.')[1];
+        if (parms) {
+          const def = telemetryDefs.get(callsign) || {};
+          def.params = parms.split(',').map((s) => s.trim());
+          telemetryDefs.set(callsign, def);
+          return { type: 'parm', call: callsign, params: def.params };
+        }
+      }
+
+      // UNIT — parameter units
+      if (payload.startsWith(':') && payload.includes(':UNIT.')) {
+        const units = payload.split(':UNIT.')[1];
+        if (units) {
+          const def = telemetryDefs.get(callsign) || {};
+          def.units = units.split(',').map((s) => s.trim());
+          telemetryDefs.set(callsign, def);
+          return { type: 'unit', call: callsign, units: def.units };
+        }
+      }
+
+      // EQNS — coefficient equations (a,b,c for each of 5 channels)
+      if (payload.startsWith(':') && payload.includes(':EQNS.')) {
+        const eqns = payload.split(':EQNS.')[1];
+        if (eqns) {
+          const coeffs = eqns.split(',').map((s) => parseFloat(s) || 0);
+          const def = telemetryDefs.get(callsign) || {};
+          def.eqns = [];
+          for (let i = 0; i < 5; i++) {
+            def.eqns.push([coeffs[i * 3] || 0, coeffs[i * 3 + 1] || 1, coeffs[i * 3 + 2] || 0]);
+          }
+          telemetryDefs.set(callsign, def);
+          return { type: 'eqns', call: callsign, eqns: def.eqns };
+        }
+      }
+
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Parse APRS message packets (addressed messages + bulletins)
+  // Format: :ADDRESSEE:message text{msgid
+  // Bulletins: :BLN1     :bulletin text
+  function parseAprsMessage(line) {
+    try {
+      const headerEnd = line.indexOf(':');
+      if (headerEnd < 0) return null;
+
+      const header = line.substring(0, headerEnd);
+      const payload = line.substring(headerEnd + 1);
+      const from = header.split('>')[0].trim();
+
+      // APRS message format: :ADDRESSEE:message{id
+      if (payload.charAt(0) !== ':') return null;
+      const addrEnd = payload.indexOf(':', 1);
+      if (addrEnd < 0) return null;
+
+      const to = payload.substring(1, addrEnd).trim();
+      const body = payload.substring(addrEnd + 1);
+
+      // Extract message ID if present
+      const idMatch = body.match(/\{(\w+)$/);
+      const msgId = idMatch ? idMatch[1] : null;
+      const text = idMatch ? body.substring(0, body.lastIndexOf('{')).trim() : body.trim();
+
+      // Skip acks/rejs
+      if (text.startsWith('ack') || text.startsWith('rej')) return null;
+
+      const isBulletin = to.startsWith('BLN');
+      const { tokens, cleanComment } = parseResourceTokens(text);
+
+      // Detect shelter-related content
+      const isShelterReport =
+        /shelter|evacuate|refuge|beds|capacity|open|closed|accepting/i.test(text) ||
+        tokens.some((t) => ['Beds', 'Capacity', 'Shelter', 'Evacuees'].includes(t.key));
+
+      // Detect net check-in/check-out commands (messages to EMCOMM)
+      let netCommand = null;
+      if (to.toUpperCase() === 'EMCOMM' || to.toUpperCase().startsWith('EMCOMM')) {
+        const upper = text.toUpperCase().trim();
+        const cqMatch = upper.match(/^CQ\s+(\S+)\s*(.*)/);
+        const uMatch = upper.match(/^U\s+(\S+)/);
+        if (cqMatch) {
+          netCommand = { action: 'checkin', netName: cqMatch[1], status: cqMatch[2] || '' };
+        } else if (uMatch) {
+          netCommand = { action: 'checkout', netName: uMatch[1] };
+        }
+      }
+
+      return {
+        type: isBulletin ? 'bulletin' : 'message',
+        from,
+        to,
+        text,
+        cleanText: cleanComment,
+        tokens,
+        msgId,
+        isShelterReport,
+        netCommand,
+        timestamp: Date.now(),
+        raw: line,
+      };
+    } catch (e) {
+      return null;
+    }
   }
 
   // Parse a raw APRS packet into a position object (or null if not a position packet)
@@ -210,6 +372,46 @@ module.exports = function (app, ctx) {
               }
             }
           }
+        } else {
+          // Try parsing as telemetry
+          const telem = parseAprsTelemetry(trimmed);
+          if (telem && telem.type === 'data') {
+            logDebug(
+              `[APRS] Telemetry from ${telem.call}: ${telem.params.map((p, i) => `${p}=${telem.computed?.[i] ?? telem.values[i]}`).join(', ')}`,
+            );
+          }
+
+          // Try parsing as a message (addressed message or bulletin)
+          const msg = parseAprsMessage(trimmed);
+          if (msg) {
+            aprsMessages.push(msg);
+            if (aprsMessages.length > APRS_MAX_MESSAGES) aprsMessages.shift();
+            if (msg.isShelterReport) {
+              logDebug(`[APRS] Shelter report from ${msg.from}: ${msg.text}`);
+            }
+            // Handle net check-in/check-out
+            if (msg.netCommand) {
+              const { action, netName, status } = msg.netCommand;
+              if (action === 'checkin') {
+                const station = aprsStations.get(msg.from.split('-')[0]) || {};
+                netRoster.set(msg.from, {
+                  call: msg.from,
+                  netName,
+                  status: status || 'Checked in',
+                  checkinTime: Date.now(),
+                  lastHeard: Date.now(),
+                  lat: station.lat ?? null,
+                  lon: station.lon ?? null,
+                  tokens: station.tokens || [],
+                  source: station.source || null,
+                });
+                logInfo(`[APRS Net] ${msg.from} checked into ${netName}: ${status || '(no status)'}`);
+              } else if (action === 'checkout') {
+                netRoster.delete(msg.from);
+                logInfo(`[APRS Net] ${msg.from} checked out of ${netName}`);
+              }
+            }
+          }
         }
       }
     });
@@ -277,5 +479,177 @@ module.exports = function (app, ctx) {
       count: stations.length,
       stations: stations.sort((a, b) => b.timestamp - a.timestamp),
     });
+  });
+
+  // REST endpoint: GET /api/aprs/messages — APRS messages and bulletins
+  app.get('/api/aprs/messages', (req, res) => {
+    const since = parseInt(req.query.since) || 0;
+    const shelterOnly = req.query.shelter === 'true';
+    let msgs = aprsMessages.filter((m) => m.timestamp > since);
+    if (shelterOnly) msgs = msgs.filter((m) => m.isShelterReport);
+    res.json({
+      count: msgs.length,
+      messages: msgs,
+    });
+  });
+
+  // REST endpoint: GET /api/aprs/shelters — shelter reports extracted from APRS
+  app.get('/api/aprs/shelters', (req, res) => {
+    const shelterReports = aprsMessages
+      .filter((m) => m.isShelterReport)
+      .map((m) => ({
+        from: m.from,
+        text: m.cleanText || m.text,
+        tokens: m.tokens,
+        timestamp: m.timestamp,
+        type: m.type,
+      }));
+    res.json({
+      count: shelterReports.length,
+      shelters: shelterReports,
+    });
+  });
+
+  // REST endpoint: GET /api/aprs/net — net operations roster
+  app.get('/api/aprs/net', (req, res) => {
+    // Update lastHeard from station cache for each roster entry
+    const roster = [];
+    for (const [call, entry] of netRoster) {
+      const station = aprsStations.get(call.split('-')[0]);
+      if (station) {
+        entry.lastHeard = station.timestamp;
+        entry.lat = station.lat;
+        entry.lon = station.lon;
+        entry.tokens = station.tokens || [];
+      }
+      const age = Math.floor((Date.now() - entry.lastHeard) / 60000);
+      roster.push({
+        ...entry,
+        age,
+        stale: age > 10,
+      });
+    }
+    roster.sort((a, b) => a.age - b.age);
+    res.json({ count: roster.length, roster });
+  });
+
+  // REST endpoint: POST /api/aprs/net/checkin — manual check-in (for operators without APRS TX)
+  app.post('/api/aprs/net/checkin', (req, res) => {
+    const { callsign, netName, status } = req.body;
+    if (!callsign || !netName) return res.status(400).json({ error: 'Missing callsign or netName' });
+
+    const station = aprsStations.get(callsign.split('-')[0].toUpperCase());
+    netRoster.set(callsign.toUpperCase(), {
+      call: callsign.toUpperCase(),
+      netName,
+      status: status || 'Checked in',
+      checkinTime: Date.now(),
+      lastHeard: Date.now(),
+      lat: station?.lat ?? null,
+      lon: station?.lon ?? null,
+      tokens: station?.tokens || [],
+      source: 'manual',
+    });
+    res.json({ ok: true });
+  });
+
+  // REST endpoint: POST /api/aprs/net/checkout — manual check-out
+  app.post('/api/aprs/net/checkout', (req, res) => {
+    const { callsign } = req.body;
+    if (!callsign) return res.status(400).json({ error: 'Missing callsign' });
+    netRoster.delete(callsign.toUpperCase());
+    res.json({ ok: true });
+  });
+
+  // REST endpoint: GET /api/aprs/telemetry — telemetry data from all stations
+  app.get('/api/aprs/telemetry', (req, res) => {
+    const callsign = req.query.callsign;
+    if (callsign) {
+      const data = telemetryData.get(callsign.toUpperCase());
+      return res.json(data || { error: 'No telemetry for this callsign' });
+    }
+    const all = [];
+    for (const [, entry] of telemetryData) {
+      all.push(entry);
+    }
+    res.json({ count: all.length, telemetry: all });
+  });
+
+  // REST endpoint: POST /api/aprs/message — send APRS message via rig-bridge
+  app.post('/api/aprs/message', async (req, res) => {
+    const { to, message } = req.body;
+    if (!to || !message) return res.status(400).json({ error: 'Missing to or message' });
+    if (message.length > 67) return res.status(400).json({ error: 'Message exceeds 67 char APRS limit' });
+
+    // Try to send via rig-bridge APRS TNC plugin
+    try {
+      const rigHost = CONFIG.rigControl?.host || 'http://localhost';
+      const rigPort = CONFIG.rigControl?.port || 5555;
+      const response = await ctx.fetch(`${rigHost}:${rigPort}/aprs/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to, message }),
+      });
+      if (response.ok) {
+        return res.json({ ok: true, via: 'rig-bridge' });
+      }
+      const err = await response.text();
+      return res.status(response.status).json({ error: `Rig Bridge: ${err}` });
+    } catch (e) {
+      return res.status(503).json({ error: 'APRS TNC not available — enable APRS TNC plugin in rig-bridge' });
+    }
+  });
+
+  // REST endpoint: POST /api/aprs/local — inject local TNC packets (from cloud relay)
+  // Accepts raw APRS info strings and parses them into station objects.
+  app.post('/api/aprs/local', (req, res) => {
+    const packets = req.body.packets;
+    if (!Array.isArray(packets)) {
+      return res.status(400).json({ error: 'Missing packets array' });
+    }
+
+    let added = 0;
+    for (const pkt of packets) {
+      if (!pkt.source || !pkt.info) continue;
+
+      // Reconstruct a raw APRS line so parseAprsPacket can handle it
+      const rawLine = `${pkt.source}>${pkt.destination || 'APRS'}:${pkt.info}`;
+      const station = parseAprsPacket(rawLine);
+      if (!station) {
+        // Try as message
+        const msg = parseAprsMessage(rawLine);
+        if (msg) {
+          msg.source = 'local-tnc';
+          aprsMessages.push(msg);
+          if (aprsMessages.length > APRS_MAX_MESSAGES) aprsMessages.shift();
+        }
+        continue;
+      }
+
+      station.source = 'local-tnc'; // Tag so UI can distinguish RF from internet
+      station.timestamp = pkt.timestamp || Date.now();
+
+      const key = station.call;
+      const existing = aprsStations.get(key);
+      if (!existing || station.timestamp > existing.timestamp) {
+        if (!existing && aprsStations.size >= APRS_MAX_STATIONS) {
+          // Evict oldest
+          let oldestKey = null;
+          let oldestTime = Infinity;
+          for (const [k, v] of aprsStations) {
+            if (v.timestamp < oldestTime) {
+              oldestTime = v.timestamp;
+              oldestKey = k;
+            }
+          }
+          if (oldestKey) aprsStations.delete(oldestKey);
+        }
+        aprsStations.set(key, station);
+        added++;
+      }
+    }
+
+    logDebug(`[APRS] Ingested ${added} local TNC packets (${packets.length} received)`);
+    res.json({ ok: true, added });
   });
 };

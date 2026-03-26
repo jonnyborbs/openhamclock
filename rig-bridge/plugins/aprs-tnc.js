@@ -103,8 +103,9 @@ const descriptor = {
     });
   },
 
-  create(config) {
+  create(config, services) {
     const cfg = config.aprs || {};
+    const bus = services?.pluginBus;
     const protocol = cfg.protocol || 'kiss-tcp';
     const callsign = (cfg.callsign || 'N0CALL').toUpperCase();
     const ssid = cfg.ssid || 0;
@@ -171,6 +172,17 @@ const descriptor = {
         packetsRx++;
         if (cfg.verbose) {
           console.log(`[APRS-TNC] RX: ${packet.source}>${packet.destination}: ${packet.info}`);
+        }
+
+        // Emit on shared bus for cloud relay
+        if (bus) {
+          bus.emit('aprs', {
+            source: packet.source,
+            destination: packet.destination,
+            digipeaters: packet.digipeaters,
+            info: packet.info,
+            timestamp: Date.now(),
+          });
         }
 
         // Notify SSE listeners

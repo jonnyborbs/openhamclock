@@ -7,7 +7,8 @@
  * so that ALL plugin layers (satellites, lightning, aurora, etc.) work.
  * Leaflet handles pan/zoom; canvas syncs to Leaflet's view state.
  */
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getBandColor, getBandFromFreq } from '../utils/callsign.js';
 import { calculateGridSquare } from '../utils/geo.js';
 import { MAP_STYLES } from '../utils/config.js';
@@ -161,8 +162,8 @@ export default function AzimuthalMap({
     return !!key && selectedMapBands.has(key);
   };
 
-  const lat0 = deLocation?.lat || 0;
-  const lon0 = deLocation?.lon || 0;
+  const lat0 = deLocation?.lat ?? 0;
+  const lon0 = deLocation?.lon ?? 0;
 
   // Load GeoJSON once
   useEffect(() => {
@@ -258,6 +259,8 @@ export default function AzimuthalMap({
   }, [lat0, lon0, size.w > 0 ? 1 : 0, leafletReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Resolve tile URL template for current style
+  const { i18n } = useTranslation();
+  const mapLang = i18n.language?.split('-')[0] || 'en';
   const useTiles =
     tileStyle &&
     tileStyle !== 'plain' &&
@@ -271,7 +274,7 @@ export default function AzimuthalMap({
           const ds = date.toISOString().split('T')[0];
           return `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${ds}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`;
         })()
-      : MAP_STYLES[tileStyle].url
+      : MAP_STYLES[tileStyle].url.replace('{lang}', mapLang)
     : null;
 
   // Init / destroy / update reprojector

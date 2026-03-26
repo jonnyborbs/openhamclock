@@ -370,11 +370,15 @@ module.exports = function (app, ctx) {
           logDebug('[Propagation] ITURHFProp hourly unavailable, using single-hour + built-in for 24h chart');
           iturhfpropMuf = singleHour.muf;
 
-          // Use single-hour data for current bands
+          // Use single-hour data for current bands AND inject into predictions
+          // so the chart's current-hour cell matches the bars
           currentBands = bands
             .map((band, idx) => {
               const ituBand = singleHour.bands?.[band];
               const rel = ituBand ? adjustReliability(Math.round(ituBand.reliability), signalMarginDb) : 0;
+              // Pre-seed the predictions array with the ITURHFProp value for current hour
+              if (!predictions[band]) predictions[band] = [];
+              predictions[band][currentHour] = { hour: currentHour, reliability: rel, snr: calculateSNR(rel) };
               return {
                 band,
                 freq: bandFreqs[idx],
@@ -396,8 +400,14 @@ module.exports = function (app, ctx) {
 
         bands.forEach((band, idx) => {
           const freq = bandFreqs[idx];
+          const existing = predictions[band] || [];
           predictions[band] = [];
           for (let hour = 0; hour < 24; hour++) {
+            // Preserve ITURHFProp single-hour value if pre-seeded (keeps bars/chart in sync)
+            if (existing[hour]) {
+              predictions[band].push(existing[hour]);
+              continue;
+            }
             const reliability = calculateEnhancedReliability(
               freq,
               distance,

@@ -139,7 +139,8 @@ export const WorldMap = ({
   onRotatorTurnRequest,
   onMapReady,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const mapLang = i18n.language?.split('-')[0] || 'en'; // e.g. 'de', 'ja', 'en'
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const tileLayerRef = useRef(null);
@@ -624,7 +625,7 @@ export const WorldMap = ({
     nightPane.id = 'night-lights-pane';
 
     // Initial tile layer (Base Day Map)
-    tileLayerRef.current = L.tileLayer(MAP_STYLES[mapStyle].url, {
+    tileLayerRef.current = L.tileLayer(MAP_STYLES[mapStyle].url.replace('{lang}', mapLang), {
       attribution: MAP_STYLES[mapStyle].attribution,
       noWrap: false,
       crossOrigin: 'anonymous',
@@ -817,7 +818,7 @@ export const WorldMap = ({
     map.removeLayer(tileLayerRef.current);
 
     // Determine the URL: Use the dynamic GIBS generator if 'MODIS' is selected
-    let url = MAP_STYLES[mapStyle].url;
+    let url = MAP_STYLES[mapStyle].url.replace('{lang}', mapLang);
     if (mapStyle === 'MODIS') {
       url = getGibsUrl(gibsOffset);
     }
