@@ -1925,6 +1925,7 @@ export const WorldMap = ({
           plugin={layerDef}
           enabled={pluginLayerStates[layerDef.id]?.enabled ?? layerDef.defaultEnabled}
           opacity={pluginLayerStates[layerDef.id]?.opacity ?? layerDef.defaultOpacity}
+          onDXChange={onDXChange}
           mapBandFilter={mapBandFilter}
           config={pluginLayerStates[layerDef.id]?.config ?? layerDef.config}
           map={isAzimuthal ? azimuthalMapRef.current : mapInstanceRef.current}

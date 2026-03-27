@@ -30,13 +30,26 @@ const bandFromAnyFrequency = (freq) => {
   return normalizeBandKey(getBandFromFreq(n));
 };
 
-export function useLayer({ enabled = false, opacity = 0.7, map = null, mapBandFilter }) {
+const findLatestLocatedQso = (qsos) => {
+  for (let i = qsos.length - 1; i >= 0; i -= 1) {
+    const qso = qsos[i];
+    const lat = parseFloat(qso?.lat);
+    const lon = parseFloat(qso?.lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      return { qso, lat, lon };
+    }
+  }
+  return null;
+};
+
+export function useLayer({ enabled = false, opacity = 0.7, map = null, onDXChange, mapBandFilter }) {
   const [qsos, setQsos] = useState([]);
   const [deLocation, setDeLocation] = useState(null);
   const markersRef = useRef([]);
   const linesRef = useRef([]);
   const pollRef = useRef(null);
   const configLoadedRef = useRef(false);
+  const lastHandledTargetKeyRef = useRef(null);
 
   useEffect(() => {
     if (!enabled || configLoadedRef.current) return;
@@ -79,6 +92,31 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null, mapBandFi
       }
     };
   }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled) {
+      lastHandledTargetKeyRef.current = null;
+    }
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled || typeof onDXChange !== 'function') return;
+
+    const latestLocated = findLatestLocatedQso(qsos);
+    if (!latestLocated) return;
+
+    const { qso: latestLocatedQso, lat, lon } = latestLocated;
+    const targetKey =
+      latestLocatedQso.id ||
+      `${latestLocatedQso.timestamp || ''}:${latestLocatedQso.dxCall || ''}:${lat.toFixed(4)}:${lon.toFixed(4)}`;
+
+    if (lastHandledTargetKeyRef.current === targetKey) return;
+
+    // Remember handled QSOs even while DX is locked so unlocking later
+    // does not retroactively replay an older contest contact.
+    lastHandledTargetKeyRef.current = targetKey;
+    onDXChange({ lat, lon });
+  }, [enabled, qsos, onDXChange]);
 
   useEffect(() => {
     if (!map || typeof L === 'undefined') return;
