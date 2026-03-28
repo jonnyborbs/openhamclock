@@ -52,7 +52,8 @@ export function useWSJTX(enabled = true) {
   const lastTimestamp = useRef(0);
   const fullFetchCounter = useRef(0);
   const backoffUntil = useRef(0); // Rate-limit backoff timestamp
-  const hasDataFlowing = useRef(false); // True when relay/UDP is active
+  const hasDataFlowing = useRef(false); // True when relay/UDP is active (HTTP path)
+  const isLocalMode = useRef(false); // True once SSE data arrives from rig-bridge directly
 
   // ── DX Target tracking ──
   // When the operator selects a callsign in WSJT-X (Std Msgs), the server
@@ -148,12 +149,15 @@ export function useWSJTX(enabled = true) {
     if (enabled) fetchFull();
   }, [enabled, fetchFull]);
 
-  // Polling - adaptive: fast (2s) when data flows, slow (30s) when idle
+  // Polling - adaptive: fast (2s) when data flows, slow (30s) when idle.
+  // Stops entirely once local/direct SSE mode is detected (isLocalMode).
   useEffect(() => {
     if (!enabled) return;
 
     let timer;
     const tick = () => {
+      // SSE from rig-bridge is the data source — no need to poll the server.
+      if (isLocalMode.current) return;
       const interval = hasDataFlowing.current ? POLL_FAST : POLL_SLOW;
       fullFetchCounter.current++;
       if (fullFetchCounter.current >= 8) {
@@ -184,6 +188,13 @@ export function useWSJTX(enabled = true) {
     const handler = (e) => {
       const msg = e.detail;
 
+      // Mark local mode on the very first SSE message — polling loop will stop.
+      if (!isLocalMode.current) {
+        isLocalMode.current = true;
+        setLoading(false);
+        setError(null);
+      }
+
       if (msg.type === 'plugin-init') {
         // Seed from ring-buffer replay
         if (Array.isArray(msg.decodes) && msg.decodes.length > 0) {
@@ -199,13 +210,11 @@ export function useWSJTX(enabled = true) {
             const merged = [...fresh, ...prev.decodes].slice(-500);
             return { ...prev, decodes: merged, enabled: true };
           });
-          hasDataFlowing.current = true;
         }
         return;
       }
 
       if (msg.event === 'decode') {
-        hasDataFlowing.current = true;
         setData((prev) => {
           const d = msg.data;
           const existingIds = new Set(prev.decodes.map((x) => x.id));
@@ -237,6 +246,11 @@ export function useWSJTX(enabled = true) {
             },
           },
         }));
+      } else if (msg.event === 'qso') {
+        setData((prev) => {
+          const updated = [msg.data, ...prev.qsos].slice(-200);
+          return { ...prev, qsos: updated, stats: { ...prev.stats, totalQsos: updated.length } };
+        });
       }
     };
     window.addEventListener('rig-plugin-data', handler);

@@ -30,6 +30,7 @@ const net = require('net');
 const http = require('http');
 const https = require('https');
 const { URL } = require('url');
+const { parseAprsPacket } = require('../lib/aprs-parser');
 const {
   decodeKissFrame,
   encodeKissFrame,
@@ -207,12 +208,26 @@ const descriptor = {
           console.log(`[APRS-TNC] RX: ${packet.source}>${packet.destination}: ${packet.info}`);
         }
 
+        // Parse position fields here so the SSE path delivers a fully-formed
+        // station object and the browser needs no server round-trip.
+        // Raw source/destination/info are kept so the cloud-relay path can
+        // still forward them to /api/aprs/local for server-side processing.
+        const rawLine = `${packet.source}>${packet.destination}:${packet.info}`;
+        const parsed = parseAprsPacket(rawLine);
         const aprsPacket = {
-          source: packet.source,
+          // Raw fields — required by cloud relay to re-parse on the server
+          source: packet.source, // full callsign incl. SSID
           destination: packet.destination,
           digipeaters: packet.digipeaters,
           info: packet.info,
           timestamp: Date.now(),
+          // Parsed position fields (call, ssid, lat, lon, symbol, comment, …)
+          // Spread last so raw 'source' above is not overwritten (parsed has
+          // 'call'/'ssid', not 'source').
+          ...(parsed ?? {}),
+          // Explicit tag so the frontend can identify RF packets without
+          // a server round-trip ('source' is the callsign, not origin type).
+          stationSource: 'local-tnc',
         };
 
         // Emit on shared bus — picked up by cloud-relay plugin and by the
