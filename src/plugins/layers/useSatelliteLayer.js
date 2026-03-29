@@ -247,8 +247,9 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
           const speedUnitsStr = isMetric ? 'km/h' : 'mph';
           const km_to_miles_factor = 0.621371;
 
-          let speed = isMetric ? Math.round(sat.speedKmH) : Math.round(sat.speedKmH * km_to_miles_factor);
+          let speed = isMetric ? Math.round(sat.speedKmH || 0) : Math.round((sat.speedKmH || 0) * km_to_miles_factor);
           let speedStr = `${speed.toLocaleString()} ${speedUnitsStr}`;
+          speedStr = `${sat.speedKmH ? speedStr : 'N/A'}`;
 
           let altitude = isMetric ? Math.round(sat.alt) : Math.round(sat.alt * km_to_miles_factor);
           let altitudeStr = `${altitude.toLocaleString()} ${distanceUnitsStr}`;
