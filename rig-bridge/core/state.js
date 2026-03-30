@@ -3,6 +3,21 @@
  * state.js — Shared rig state store and SSE broadcast
  */
 
+// Ring-buffer of recent plugin decodes (FT8/FT4/MSHV/JTDX/JS8Call).
+// Sent to browsers on SSE connect so they see recent data immediately
+// without waiting for the next decode cycle.
+const DECODE_RING_MAX = 100;
+const decodeRingBuffer = [];
+
+function addToDecodeRingBuffer(decode) {
+  decodeRingBuffer.push(decode);
+  if (decodeRingBuffer.length > DECODE_RING_MAX) decodeRingBuffer.shift();
+}
+
+function getDecodeRingBuffer() {
+  return decodeRingBuffer.slice();
+}
+
 const state = {
   connected: false,
   freq: 0,
@@ -50,12 +65,19 @@ function removeSseClient(id) {
   sseClients = sseClients.filter((c) => c.id !== id);
 }
 
+function getSseClientCount() {
+  return sseClients.length;
+}
+
 module.exports = {
   state,
   broadcast,
   updateState,
   addSseClient,
   removeSseClient,
+  getSseClientCount,
   onStateChange,
   removeStateChangeListener,
+  addToDecodeRingBuffer,
+  getDecodeRingBuffer,
 };

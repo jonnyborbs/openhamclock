@@ -233,19 +233,34 @@ You should see:
 
 ## WSJT-X Relay
 
-The WSJT-X Relay is an **integration plugin** (not a radio plugin) that listens for WSJT-X UDP packets on the local machine and forwards decoded messages to an OpenHamClock server in real-time. This lets OpenHamClock display your FT8/FT4 decodes as DX spots without any manual intervention.
+The WSJT-X Relay is an **integration plugin** (not a radio plugin) that listens for WSJT-X UDP packets on the local machine and delivers decoded messages to OpenHamClock in real-time. It supports two delivery modes:
+
+| Mode                       | How it works                                                                                | Use case                        |
+| -------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------- |
+| **📶 SSE only** (default)  | Decodes flow over the existing `/stream` SSE connection to the browser — no server involved | Local install, LAN, self-hosted |
+| **☁️ Relay to OHC server** | Batches decodes and POSTs them to an OpenHamClock server; browser polls the server          | Cloud relay / remote access     |
+
+Switch between modes in **http://localhost:5555 → Integrations → WSJT-X → Delivery mode**. In SSE-only mode no server credentials are needed.
 
 > **⚠️ Startup order matters when running on the same machine as OpenHamClock**
 >
 > Both rig-bridge and a locally-running OpenHamClock instance listen on the same UDP port (default **2237**) for WSJT-X packets. Only one process can hold the port at a time.
 >
-> **Always start rig-bridge first.** It will bind UDP 2237 and relay decoded messages to OHC via HTTP. If OpenHamClock starts first and claims the port, rig-bridge will log `UDP port already in use` and receive nothing — the relay will be silently inactive.
+> **Always start rig-bridge first.** It will bind UDP 2237. If OpenHamClock starts first and claims the port, rig-bridge will log `UDP port already in use` and receive nothing.
 >
 > If you see that warning in the rig-bridge console log, stop OpenHamClock, restart rig-bridge, then start OpenHamClock again.
 
-### Getting your relay credentials
+### SSE-only mode (local/LAN)
 
-The relay requires two values from your OpenHamClock server: a **relay key** and a **session ID**. There are two ways to set them up:
+This is the default. Enable the plugin and set your UDP port — that's it. Decodes, status updates and logged QSOs flow directly to any browser connected to `/stream`. No relay key, no session ID, no server URL required.
+
+In WSJT-X: **File → Settings → Reporting → UDP Server → `127.0.0.1:2237`**
+
+When the browser connects to `/stream` it immediately receives a `plugin-init` message containing the list of running plugins and a replay of the last 100 decodes, so the panel is populated instantly without waiting for the next FT8 cycle.
+
+### Relay-to-server mode (cloud)
+
+Enable relay mode when using a cloud-hosted OpenHamClock or any setup where the browser cannot reach rig-bridge directly.
 
 #### Option A — Auto-configure from OpenHamClock (recommended)
 
@@ -253,24 +268,24 @@ The relay requires two values from your OpenHamClock server: a **relay key** and
 2. Make sure Rig Control is enabled and the rig-bridge Host URL/Port are filled in
 3. Scroll to the **WSJT-X Relay** sub-section
 4. Note your **Session ID** (copy it with the 📋 button)
-5. Click **Configure Relay on Rig Bridge** — OpenHamClock fetches the relay key from its own server and pushes both credentials directly to rig-bridge in one step
+5. Click **Configure Relay on Rig Bridge** — OpenHamClock fetches the relay key from its own server and pushes credentials + enables relay mode directly to rig-bridge in one step
 
-#### Option B — Fetch from rig-bridge setup UI
+#### Option B — Configure from the rig-bridge setup UI
 
 1. Open **http://localhost:5555** → **Integrations** tab
-2. Enable the WSJT-X Relay checkbox and enter the OpenHamClock Server URL
-3. Click **🔗 Fetch credentials** — rig-bridge retrieves the relay key automatically
-4. Copy your **Session ID** from OpenHamClock → Settings → Station → Rig Control → WSJT-X Relay and paste it into the Session ID field
-5. Click **Save Integrations**
+2. Enable the WSJT-X checkbox
+3. Select **☁️ Relay to OHC server**
+4. Enter the OpenHamClock Server URL and click **🔗 Fetch credentials**
+5. Copy your **Session ID** from OpenHamClock → Settings → Station → Rig Control → WSJT-X Relay and paste it into the Session ID field
+6. Click **Save Integrations**
 
 #### Option C — Manual config
-
-Edit `rig-bridge-config.json` directly:
 
 ```json
 {
   "wsjtxRelay": {
     "enabled": true,
+    "relayToServer": true,
     "url": "https://openhamclock.com",
     "key": "your-relay-key",
     "session": "your-session-id",
@@ -286,25 +301,19 @@ Edit `rig-bridge-config.json` directly:
 
 ### Config reference
 
-| Field                | Description                                             | Default                    |
-| -------------------- | ------------------------------------------------------- | -------------------------- |
-| `enabled`            | Activate the relay on startup                           | `false`                    |
-| `url`                | OpenHamClock server URL                                 | `https://openhamclock.com` |
-| `key`                | Relay authentication key (from your OHC server)         | —                          |
-| `session`            | Browser session ID for per-user isolation               | —                          |
-| `udpPort`            | UDP port WSJT-X is sending to                           | `2237`                     |
-| `batchInterval`      | How often decoded messages are sent (ms)                | `2000`                     |
-| `verbose`            | Log every decoded message to the console                | `false`                    |
-| `multicast`          | Join a UDP multicast group to receive WSJT-X packets    | `false`                    |
-| `multicastGroup`     | Multicast group IP address to join                      | `224.0.0.1`                |
-| `multicastInterface` | Local NIC IP for multi-homed systems; `""` = OS default | `""`                       |
-
-### In WSJT-X
-
-Make sure WSJT-X is configured to send UDP packets to `localhost` on the same port as `udpPort` (default `2237`):
-**File → Settings → Reporting → UDP Server → `127.0.0.1:2237`**
-
-The relay runs alongside your radio plugin — you can use direct USB or TCI at the same time.
+| Field                | Description                                                     | Default     |
+| -------------------- | --------------------------------------------------------------- | ----------- |
+| `enabled`            | Activate the plugin on startup                                  | `false`     |
+| `relayToServer`      | `true` = also POST batches to OHC server; `false` = SSE-only    | `false`     |
+| `url`                | OpenHamClock server URL (relay mode only)                       | —           |
+| `key`                | Relay authentication key from your OHC server (relay mode only) | —           |
+| `session`            | Browser session ID for per-user isolation (relay mode only)     | —           |
+| `udpPort`            | UDP port WSJT-X is sending to                                   | `2237`      |
+| `batchInterval`      | How often batches are POSTed to the server in relay mode (ms)   | `2000`      |
+| `verbose`            | Log every decoded message to the console                        | `false`     |
+| `multicast`          | Join a UDP multicast group to receive WSJT-X packets            | `false`     |
+| `multicastGroup`     | Multicast group IP address to join                              | `224.0.0.1` |
+| `multicastInterface` | Local NIC IP for multi-homed systems; `""` = OS default         | `""`        |
 
 ### Multicast Mode
 
@@ -313,7 +322,7 @@ By default the relay uses **unicast** — WSJT-X sends packets directly to `127.
 If you want multiple applications on the same machine or LAN to receive WSJT-X packets simultaneously, enable multicast:
 
 1. In WSJT-X: **File → Settings → Reporting → UDP Server** — set the address to `224.0.0.1`
-2. In `rig-bridge-config.json` (or via the setup UI at `http://localhost:5555`):
+2. In the rig-bridge setup UI, enable **Enable Multicast** and set the group address, or in `rig-bridge-config.json`:
 
 ```json
 {
@@ -433,6 +442,8 @@ Open the rig-bridge setup UI at http://localhost:5555 → **Plugins** tab to ena
 | **JS8Call**      | 2242         | JS8 keyboard-to-keyboard messaging                    |
 
 All digital mode plugins are **bidirectional** — OHC can send replies, halt TX, set free text, and highlight callsigns in the decode window.
+
+Decodes are delivered to the browser over the `/stream` SSE connection in real-time. When a new browser tab connects, the last 100 decodes are replayed immediately via the `plugin-init` message so the panel is populated without waiting for the next FT8/FT4 cycle. No server round-trip is needed in local or LAN mode.
 
 In your digital mode software, set UDP Server to `127.0.0.1` and the port shown above.
 
@@ -565,17 +576,18 @@ Executables are output to the `dist/` folder.
 
 Fully backward compatible with the original rig-daemon API:
 
-| Method | Endpoint      | Description                               |
-| ------ | ------------- | ----------------------------------------- |
-| GET    | `/status`     | Current freq, mode, PTT, connected status |
-| GET    | `/stream`     | SSE stream of real-time updates           |
-| POST   | `/freq`       | Set frequency: `{ "freq": 14074000 }`     |
-| POST   | `/mode`       | Set mode: `{ "mode": "USB" }`             |
-| POST   | `/ptt`        | Set PTT: `{ "ptt": true }`                |
-| GET    | `/api/ports`  | List available serial ports               |
-| GET    | `/api/config` | Get current configuration                 |
-| POST   | `/api/config` | Update configuration & reconnect          |
-| POST   | `/api/test`   | Test a serial port connection             |
+| Method | Endpoint      | Description                                            |
+| ------ | ------------- | ------------------------------------------------------ |
+| GET    | `/status`     | Current freq, mode, PTT, connected status              |
+| GET    | `/stream`     | SSE stream of real-time updates + plugin decode events |
+| POST   | `/freq`       | Set frequency: `{ "freq": 14074000 }`                  |
+| POST   | `/mode`       | Set mode: `{ "mode": "USB" }`                          |
+| POST   | `/ptt`        | Set PTT: `{ "ptt": true }`                             |
+| GET    | `/api/ports`  | List available serial ports                            |
+| GET    | `/api/config` | Get current configuration                              |
+| POST   | `/api/config` | Update configuration & reconnect                       |
+| POST   | `/api/test`   | Test a serial port connection                          |
+| GET    | `/api/status` | Lightweight health check: `{ sseClients, uptime }`     |
 
 ---
 
@@ -594,7 +606,9 @@ rig-bridge/
 │
 ├── lib/
 │   ├── message-log.js     # Persistent message log (WSJT-X, JS8Call, etc.)
-│   └── kiss-protocol.js   # KISS frame encode/decode for APRS TNC
+│   ├── kiss-protocol.js   # KISS frame encode/decode for APRS TNC
+│   ├── wsjtx-protocol.js  # WSJT-X UDP binary protocol parser/encoder
+│   └── aprs-parser.js     # APRS packet decoder (position, weather, objects, etc.)
 │
 └── plugins/
     ├── usb/
@@ -638,7 +652,10 @@ module.exports = {
     //   onStateChange(fn)       — subscribe to any rig state change (immediate callback)
     //   removeStateChangeListener(fn) — unsubscribe
     //   pluginBus               — EventEmitter for inter-plugin events
-    //                             emits: 'decode' (WSJT-X), 'aprs' (APRS packets)
+    //                             emits: 'decode'  (WSJT-X/MSHV/JTDX/JS8Call decodes)
+    //                                    'status'  (plugin connection status changes)
+    //                                    'qso'     (logged QSO records)
+    //                                    'aprs'    (parsed APRS packets from TNC)
     //   messageLog              — persistent log for decoded messages
     const { updateState, state, onStateChange, removeStateChangeListener, pluginBus } = services;
 

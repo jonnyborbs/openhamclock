@@ -934,7 +934,8 @@ export const DockableApp = ({
               showOnMap={mapLayersEff.showAPRS}
               onToggleMap={toggleAPRSEff}
               onHoverSpot={setHoveredSpot}
-              onSpotClick={handleSpotClick}
+              deLocation={config.location}
+              units={config.allUnits?.dist}
             />
           );
           break;

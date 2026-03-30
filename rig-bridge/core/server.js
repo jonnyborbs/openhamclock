@@ -22,7 +22,7 @@
 const express = require('express');
 const cors = require('cors');
 const { getSerialPort, listPorts } = require('./serial-utils');
-const { state, addSseClient, removeSseClient } = require('./state');
+const { state, addSseClient, removeSseClient, getDecodeRingBuffer, getSseClientCount } = require('./state');
 const { config, saveConfig, CONFIG_PATH } = require('./config');
 
 // ─── Security helpers ─────────────────────────────────────────────────────
@@ -758,46 +758,40 @@ function buildSetupHtml(version, firstRunToken = null) {
       <div class="card">
         <div class="card-title">📡 WSJT-X Relay</div>
         <p class="help-text" style="margin-bottom:14px; color:#6b7280;">
-          Captures WSJT-X UDP packets on your machine and forwards decoded messages
-          to an OpenHamClock server in real time. In WSJT-X: Settings → Reporting → UDP Server: 127.0.0.1 port 2237.
+          Captures WSJT-X UDP packets on your machine and delivers decoded messages
+          to OpenHamClock. In WSJT-X: Settings → Reporting → UDP Server: 127.0.0.1 port 2237.
         </p>
 
         <div class="checkbox-row">
           <input type="checkbox" id="wsjtxEnabled" onchange="toggleWsjtxOpts()">
-          <span>Enable WSJT-X Relay</span>
+          <span>Enable WSJT-X</span>
         </div>
 
         <div id="wsjtxOpts" style="display:none;">
-          <label>OpenHamClock Server URL</label>
-          <div style="display:flex; gap:6px; align-items:center; margin-bottom:4px;">
-            <input type="text" id="wsjtxUrl" placeholder="https://openhamclock.com" style="flex:1; margin-bottom:0;">
-            <button class="btn btn-secondary" onclick="fetchWsjtxCredentials()" id="fetchCredsBtn" style="width:auto; padding:6px 12px; font-size:12px; white-space:nowrap;">🔗 Fetch credentials</button>
-          </div>
-          <div id="fetchCredsStatus" class="help-text" style="margin-bottom:10px;"></div>
 
-          <label>Relay Key</label>
-          <input type="text" id="wsjtxKey" placeholder="Your relay authentication key">
-
-          <label>Session ID</label>
-          <input type="text" id="wsjtxSession" placeholder="Your browser session ID">
-          <div class="help-text">
-            The session ID links your relayed decodes to your OpenHamClock dashboard.
-            Find it in OpenHamClock → Settings → Station → Rig Control → WSJT-X Relay,
-            or click <strong>Fetch credentials</strong> above to fill both fields automatically.
+          <!-- Mode selector -->
+          <div style="margin:12px 0; padding:10px 12px; background:#1a1f2e; border:1px solid #2d3548; border-radius:6px;">
+            <div style="font-size:12px; font-weight:600; color:#c4c9d4; margin-bottom:8px;">Delivery mode</div>
+            <div class="checkbox-row" style="margin-bottom:6px;">
+              <input type="radio" id="wsjtxModeSSE" name="wsjtxMode" value="sse" onchange="toggleWsjtxMode()" checked>
+              <span style="font-size:13px;">📶 SSE only <span style="color:#6b7280; font-size:11px;">— decodes flow via the local /stream connection (local &amp; LAN use)</span></span>
+            </div>
+            <div class="checkbox-row">
+              <input type="radio" id="wsjtxModeRelay" name="wsjtxMode" value="relay" onchange="toggleWsjtxMode()">
+              <span style="font-size:13px;">☁️ Relay to OHC server <span style="color:#6b7280; font-size:11px;">— also POST batches to an OpenHamClock server (cloud relay / remote access)</span></span>
+            </div>
           </div>
 
-          <div class="row">
+          <!-- UDP port (always visible when enabled) -->
+          <div class="row" style="margin-bottom:0;">
             <div>
               <label>UDP Port</label>
               <input type="number" id="wsjtxPort" value="2237" min="1024" max="65535">
             </div>
-            <div>
-              <label>Batch Interval (ms)</label>
-              <input type="number" id="wsjtxInterval" value="2000" min="500" max="30000">
-            </div>
           </div>
 
-          <div class="checkbox-row">
+          <!-- Multicast (always visible when enabled) -->
+          <div class="checkbox-row" style="margin-top:10px;">
             <input type="checkbox" id="wsjtxMulticast" onchange="toggleWsjtxMulticastOpts()">
             <span>Enable Multicast</span>
           </div>
@@ -819,7 +813,31 @@ function buildSetupHtml(version, firstRunToken = null) {
             </div>
           </div>
 
-          <div style="font-size:12px; color:#6b7280; margin-bottom:14px;">
+          <!-- Server relay fields — only shown in relay mode -->
+          <div id="wsjtxServerOpts" style="display:none; margin-top:4px; padding:10px 12px; background:#1a1f2e; border:1px solid #2d3548; border-radius:6px;">
+            <label>OpenHamClock Server URL</label>
+            <div style="display:flex; gap:6px; align-items:center; margin-bottom:4px;">
+              <input type="text" id="wsjtxUrl" placeholder="https://openhamclock.com" style="flex:1; margin-bottom:0;">
+              <button class="btn btn-secondary" onclick="fetchWsjtxCredentials()" id="fetchCredsBtn" style="width:auto; padding:6px 12px; font-size:12px; white-space:nowrap;">🔗 Fetch credentials</button>
+            </div>
+            <div id="fetchCredsStatus" class="help-text" style="margin-bottom:10px;"></div>
+
+            <label>Relay Key</label>
+            <input type="text" id="wsjtxKey" placeholder="Your relay authentication key">
+
+            <label>Session ID</label>
+            <input type="text" id="wsjtxSession" placeholder="Your browser session ID">
+            <div class="help-text">
+              The session ID links your relayed decodes to your OpenHamClock dashboard.
+              Find it in OpenHamClock → Settings → Station → Rig Control → WSJT-X Relay,
+              or click <strong>Fetch credentials</strong> above to fill both fields automatically.
+            </div>
+
+            <label>Batch Interval (ms)</label>
+            <input type="number" id="wsjtxInterval" value="2000" min="500" max="30000">
+          </div>
+
+          <div style="font-size:12px; color:#6b7280; margin-top:10px; margin-bottom:4px;">
             Status: <span id="wsjtxStatusText" style="color:#c4c9d4;">—</span>
           </div>
         </div>
@@ -1045,13 +1063,23 @@ function buildSetupHtml(version, firstRunToken = null) {
       document.getElementById('wsjtxMulticast').checked = !!w.multicast;
       document.getElementById('wsjtxMulticastGroup').value = w.multicastGroup || '224.0.0.1';
       document.getElementById('wsjtxMulticastInterface').value = w.multicastInterface || '';
+      // Set delivery mode radio
+      const relayMode = !!w.relayToServer;
+      document.getElementById('wsjtxModeSSE').checked = !relayMode;
+      document.getElementById('wsjtxModeRelay').checked = relayMode;
       toggleWsjtxOpts();
+      toggleWsjtxMode();
       toggleWsjtxMulticastOpts();
     }
 
     function toggleWsjtxOpts() {
       const enabled = document.getElementById('wsjtxEnabled').checked;
       document.getElementById('wsjtxOpts').style.display = enabled ? 'block' : 'none';
+    }
+
+    function toggleWsjtxMode() {
+      const relay = document.getElementById('wsjtxModeRelay').checked;
+      document.getElementById('wsjtxServerOpts').style.display = relay ? 'block' : 'none';
     }
 
     async function fetchWsjtxCredentials() {
@@ -1093,8 +1121,10 @@ function buildSetupHtml(version, firstRunToken = null) {
     }
 
     async function saveIntegrations() {
+      const relayMode = document.getElementById('wsjtxModeRelay').checked;
       const wsjtxRelay = {
         enabled: document.getElementById('wsjtxEnabled').checked,
+        relayToServer: relayMode,
         url: document.getElementById('wsjtxUrl').value.trim(),
         key: document.getElementById('wsjtxKey').value.trim(),
         session: document.getElementById('wsjtxSession').value.trim(),
@@ -2009,6 +2039,13 @@ function createServer(registry, version) {
   });
 
   // Diagnostic endpoint — no auth required, designed for troubleshooting
+  app.get('/api/status', (req, res) => {
+    res.json({
+      sseClients: getSseClientCount(),
+      uptime: Math.floor(process.uptime()),
+    });
+  });
+
   app.get('/health', (req, res) => {
     // Collect integration plugin status
     const integrations = {};
@@ -2060,6 +2097,18 @@ function createServer(registry, version) {
       ptt: state.ptt,
     };
     res.write(`data: ${JSON.stringify(initialData)}\n\n`);
+
+    // Send plugin-init so the browser immediately sees which integrations are
+    // running and gets a replay of recent decodes (no waiting for next FT8 cycle).
+    const recentDecodes = getDecodeRingBuffer();
+    const runningPlugins = Array.from(registry.getIntegrations().keys());
+    res.write(
+      `data: ${JSON.stringify({
+        type: 'plugin-init',
+        plugins: runningPlugins,
+        decodes: recentDecodes,
+      })}\n\n`,
+    );
 
     const clientId = Date.now() + Math.random();
     addSseClient(clientId, res);

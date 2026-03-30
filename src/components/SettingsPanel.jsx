@@ -90,7 +90,6 @@ export const SettingsPanel = ({
   const [wsjtxMulticastAddress, setWsjtxMulticastAddress] = useState(
     config?.wsjtxRelayMulticast.address || '224.0.0.1',
   );
-
   // Local-only integration flags
   const [n3fjpEnabled, setN3fjpEnabled] = useState(() => {
     try {
@@ -477,6 +476,7 @@ export const SettingsPanel = ({
             key: relayKey,
             session: wsjtxSessionId || '',
             enabled: true,
+            relayToServer: true,
           },
         }),
       });
@@ -4788,8 +4788,8 @@ export const SettingsPanel = ({
                 {/* Cloud Relay Setup */}
                 <div
                   style={{
-                    background: 'rgba(34, 197, 94, 0.08)',
-                    border: '1px solid rgba(34, 197, 94, 0.2)',
+                    background: cloudRelaySession ? 'rgba(34, 197, 94, 0.12)' : 'rgba(34, 197, 94, 0.08)',
+                    border: cloudRelaySession ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid rgba(34, 197, 94, 0.2)',
                     borderRadius: '6px',
                     padding: '12px',
                     marginBottom: '16px',
@@ -4806,71 +4806,142 @@ export const SettingsPanel = ({
                   >
                     Cloud Relay
                   </div>
-                  <div
-                    style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '10px', lineHeight: 1.4 }}
-                  >
-                    Running OpenHamClock in the cloud? The Cloud Relay connects your local rig-bridge to this server,
-                    enabling click-to-tune, PTT, WSJT-X decodes, and APRS from anywhere.
-                  </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        const credRes = await fetch('/api/rig-bridge/relay/configure', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({}),
-                        });
-                        const credData = await credRes.json();
-                        if (!credRes.ok) {
-                          alert(`Error: ${credData.error}`);
-                          return;
-                        }
+                  {cloudRelaySession ? (
+                    <>
+                      <div
+                        style={{
+                          fontSize: '11px',
+                          color: '#22c55e',
+                          marginBottom: '10px',
+                          lineHeight: 1.4,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                        }}
+                      >
+                        <span style={{ fontSize: '10px' }}>&#9679;</span>
+                        Active &mdash; session{' '}
+                        <span style={{ fontFamily: 'monospace', opacity: 0.8 }}>
+                          {cloudRelaySession.slice(0, 8)}&hellip;
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const rigPortValue = String(rigPort ?? '').trim();
+                          let nextRigPort = 5555;
+                          if (rigPortValue === '0') {
+                            nextRigPort = 0;
+                          } else {
+                            const p = parseInt(rigPortValue, 10);
+                            if (Number.isFinite(p) && p > 0) nextRigPort = p;
+                          }
+                          setCloudRelaySession('');
+                          onSave({
+                            ...config,
+                            rigControl: {
+                              ...config.rigControl,
+                              enabled: rigEnabled,
+                              host: rigHost,
+                              port: nextRigPort,
+                              tuneEnabled,
+                              autoMode,
+                              apiToken: rigApiToken.trim(),
+                              cloudRelaySession: '',
+                            },
+                          });
+                        }}
+                        style={{
+                          padding: '8px 16px',
+                          borderRadius: '4px',
+                          fontSize: '12px',
+                          fontWeight: '600',
+                          background: 'rgba(239, 68, 68, 0.15)',
+                          border: '1px solid rgba(239, 68, 68, 0.3)',
+                          color: '#ef4444',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Disconnect Cloud Relay
+                      </button>
+                      <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '6px', opacity: 0.7 }}>
+                        Switches to direct connection. Disable the Cloud Relay plugin in rig-bridge too.
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div
+                        style={{
+                          fontSize: '11px',
+                          color: 'var(--text-secondary)',
+                          marginBottom: '10px',
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        Running OpenHamClock in the cloud? The Cloud Relay connects your local rig-bridge to this
+                        server, enabling click-to-tune, PTT, WSJT-X decodes, and APRS from anywhere.
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const credRes = await fetch('/api/rig-bridge/relay/configure', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({}),
+                            });
+                            const credData = await credRes.json();
+                            if (!credRes.ok) {
+                              alert(`Error: ${credData.error}`);
+                              return;
+                            }
 
-                        setCloudRelaySession(credData.session);
+                            setCloudRelaySession(credData.session);
 
-                        // Copy config to clipboard for easy paste into rig-bridge
-                        const configText = JSON.stringify(credData.configPayload, null, 2);
-                        try {
-                          await navigator.clipboard.writeText(configText);
-                        } catch (e) {}
+                            // Copy config to clipboard for easy paste into rig-bridge
+                            const configText = JSON.stringify(credData.configPayload, null, 2);
+                            try {
+                              await navigator.clipboard.writeText(configText);
+                            } catch (e) {}
 
-                        alert(
-                          `Cloud Relay credentials generated!\n\n` +
-                            `Session: ${credData.session}\n` +
-                            `Server: ${credData.serverUrl}\n\n` +
-                            `Next steps:\n` +
-                            `1. Open Rig Bridge setup UI at http://localhost:5555\n` +
-                            `2. Go to the Plugins tab\n` +
-                            `3. Enable "Cloud Relay"\n` +
-                            `4. Paste these settings:\n` +
-                            `   Server URL: ${credData.serverUrl}\n` +
-                            `   API Key: ${credData.relayKey}\n` +
-                            `   Session: ${credData.session}\n` +
-                            `5. Restart rig-bridge\n` +
-                            `6. Click Save below in OHC settings\n\n` +
-                            `(Config copied to clipboard)`,
-                        );
-                      } catch (e) {
-                        alert(`Failed to get relay credentials: ${e.message}`);
-                      }
-                    }}
-                    style={{
-                      padding: '8px 16px',
-                      borderRadius: '4px',
-                      fontSize: '12px',
-                      fontWeight: '600',
-                      background: 'rgba(34, 197, 94, 0.15)',
-                      border: '1px solid rgba(34, 197, 94, 0.3)',
-                      color: '#22c55e',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Connect Cloud Relay
-                  </button>
-                  <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '6px', opacity: 0.7 }}>
-                    Requires rig-bridge running locally and RIG_BRIDGE_RELAY_KEY set on this server.
-                  </div>
+                            alert(
+                              `Cloud Relay credentials generated!\n\n` +
+                                `Session: ${credData.session}\n` +
+                                `Server: ${credData.serverUrl}\n\n` +
+                                `Next steps:\n` +
+                                `1. Open Rig Bridge setup UI at http://localhost:5555\n` +
+                                `2. Go to the Plugins tab\n` +
+                                `3. Enable "Cloud Relay"\n` +
+                                `4. Paste these settings:\n` +
+                                `   Server URL: ${credData.serverUrl}\n` +
+                                `   API Key: ${credData.relayKey}\n` +
+                                `   Session: ${credData.session}\n` +
+                                `5. Restart rig-bridge\n` +
+                                `6. Click Save below in OHC settings\n\n` +
+                                `(Config copied to clipboard)`,
+                            );
+                          } catch (e) {
+                            alert(`Failed to get relay credentials: ${e.message}`);
+                          }
+                        }}
+                        style={{
+                          padding: '8px 16px',
+                          borderRadius: '4px',
+                          fontSize: '12px',
+                          fontWeight: '600',
+                          background: 'rgba(34, 197, 94, 0.15)',
+                          border: '1px solid rgba(34, 197, 94, 0.3)',
+                          color: '#22c55e',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Connect Cloud Relay
+                      </button>
+                      <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '6px', opacity: 0.7 }}>
+                        Requires rig-bridge running locally and RIG_BRIDGE_RELAY_KEY set on this server.
+                      </div>
+                    </>
+                  )}
                 </div>
               </>
             )}

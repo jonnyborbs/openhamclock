@@ -55,7 +55,7 @@ function resolveConfigPath() {
 const { dir: CONFIG_DIR, path: CONFIG_PATH } = resolveConfigPath();
 
 // Increment when DEFAULT_CONFIG structure changes (new keys, renamed keys, etc.)
-const CONFIG_VERSION = 7;
+const CONFIG_VERSION = 8;
 
 const DEFAULT_CONFIG = {
   configVersion: CONFIG_VERSION,
@@ -103,6 +103,7 @@ const DEFAULT_CONFIG = {
   },
   wsjtxRelay: {
     enabled: false,
+    relayToServer: false, // false = SSE-only (local/LAN); true = also POST decodes to OHC server (cloud relay)
     url: '', // OpenHamClock server URL (e.g. https://openhamclock.com)
     key: '', // Relay authentication key
     session: '', // Browser session ID for per-user isolation

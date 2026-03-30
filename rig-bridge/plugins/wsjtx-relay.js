@@ -151,6 +151,8 @@ const descriptor = {
     let totalDecodes = 0;
     let totalRelayed = 0;
     let serverReachable = false;
+    // Resolved at connect() time: true only when relayToServer AND url/key/session are all set
+    let willRelay = false;
 
     // Track the remote WSJT-X address for bidirectional communication
     let remoteAddress = null;
@@ -286,23 +288,28 @@ const descriptor = {
     }
 
     function connect() {
-      if (!cfg.url || !cfg.key || !cfg.session) {
-        console.error('[WsjtxRelay] Cannot start: url, key, and session are required');
-        return;
+      // Determine whether server relay is active for this session.
+      // relayToServer requires url + key + session to all be set.
+      willRelay = !!(cfg.relayToServer && cfg.url && cfg.key && cfg.session);
+
+      if (cfg.relayToServer && !willRelay) {
+        console.warn('[WsjtxRelay] relayToServer=true but url/key/session incomplete — running in SSE-only mode');
       }
 
-      // Validate relay URL — protocol only; host restrictions are unnecessary because
-      // the relay authenticates to the target via key + session, and the config API
-      // is protected by the rig-bridge API token.
-      try {
-        const parsed = new URL(cfg.url);
-        if (!['http:', 'https:'].includes(parsed.protocol)) {
-          console.error(`[WsjtxRelay] Blocked: only http/https URLs allowed (got ${parsed.protocol})`);
-          return;
+      if (willRelay) {
+        // Validate relay URL — protocol only; host restrictions are unnecessary because
+        // the relay authenticates to the target via key + session, and the config API
+        // is protected by the rig-bridge API token.
+        try {
+          const parsed = new URL(cfg.url);
+          if (!['http:', 'https:'].includes(parsed.protocol)) {
+            console.error(`[WsjtxRelay] Blocked: only http/https URLs allowed (got ${parsed.protocol})`);
+            willRelay = false;
+          }
+        } catch (e) {
+          console.error(`[WsjtxRelay] Invalid relay URL: ${e.message}`);
+          willRelay = false;
         }
-      } catch (e) {
-        console.error(`[WsjtxRelay] Invalid relay URL: ${e.message}`);
-        return;
       }
 
       const udpPort = cfg.udpPort || 2237;
@@ -322,7 +329,7 @@ const descriptor = {
         if (msg.type === WSJTX_MSG.STATUS && bus) bus.emit('status', { source: 'wsjtx-relay', ...msg });
         if (msg.type === WSJTX_MSG.QSO_LOGGED && bus) bus.emit('qso', { source: 'wsjtx-relay', ...msg });
         if (msg.type !== WSJTX_MSG.REPLAY) {
-          messageQueue.push(msg);
+          if (willRelay) messageQueue.push(msg);
           if (cfg.verbose && msg.type === WSJTX_MSG.DECODE) {
             const snr = msg.snr != null ? (msg.snr >= 0 ? `+${msg.snr}` : msg.snr) : '?';
             console.log(
@@ -359,30 +366,34 @@ const descriptor = {
           }
         }
 
-        scheduleBatch();
+        if (willRelay) {
+          scheduleBatch();
 
-        // Initial health check then heartbeat
-        const healthUrl = `${serverUrl}/api/health`;
-        makeRequest(healthUrl, 'GET', null, {}, (err, statusCode) => {
-          if (!err && statusCode === 200) {
-            console.log(`[WsjtxRelay] Server reachable (${serverUrl})`);
-          } else if (err) {
-            console.error(`[WsjtxRelay] Cannot reach server: ${err.message}`);
-          }
-          sendHeartbeat();
-        });
-
-        heartbeatInterval = setInterval(sendHeartbeat, 30000);
-
-        healthInterval = setInterval(() => {
-          const checkUrl = `${serverUrl}/api/wsjtx`;
-          makeRequest(checkUrl, 'GET', null, {}, (err, statusCode) => {
-            if (!err && statusCode === 200 && consecutiveErrors > 0) {
-              console.log('[WsjtxRelay] Server connection restored');
-              consecutiveErrors = 0;
+          // Initial health check then heartbeat
+          const healthUrl = `${serverUrl}/api/health`;
+          makeRequest(healthUrl, 'GET', null, {}, (err, statusCode) => {
+            if (!err && statusCode === 200) {
+              console.log(`[WsjtxRelay] Server reachable (${serverUrl})`);
+            } else if (err) {
+              console.error(`[WsjtxRelay] Cannot reach server: ${err.message}`);
             }
+            sendHeartbeat();
           });
-        }, 60000);
+
+          heartbeatInterval = setInterval(sendHeartbeat, 30000);
+
+          healthInterval = setInterval(() => {
+            const checkUrl = `${serverUrl}/api/wsjtx`;
+            makeRequest(checkUrl, 'GET', null, {}, (err, statusCode) => {
+              if (!err && statusCode === 200 && consecutiveErrors > 0) {
+                console.log('[WsjtxRelay] Server connection restored');
+                consecutiveErrors = 0;
+              }
+            });
+          }, 60000);
+        } else {
+          console.log('[WsjtxRelay] SSE-only mode — decodes flow via /stream, no OHC server relay');
+        }
       });
 
       // SECURITY: Bind to localhost by default to prevent external UDP packet injection.
@@ -423,19 +434,22 @@ const descriptor = {
         socket = null;
       }
       _currentInstance = null;
-      console.log(`[WsjtxRelay] Stopped (session: ${totalDecodes} decodes, ${totalRelayed} relayed)`);
+      console.log(
+        `[WsjtxRelay] Stopped (${totalDecodes} decode(s)${willRelay ? `, ${totalRelayed} relayed to server` : ', SSE-only mode'})`,
+      );
     }
 
     function getStatus() {
       return {
-        enabled: !!(cfg.url && cfg.key && cfg.session),
+        enabled: cfg.enabled,
+        relayToServer: willRelay,
         running: socket !== null,
         serverReachable,
         decodeCount: totalDecodes,
         relayCount: totalRelayed,
         consecutiveErrors,
         udpPort: cfg.udpPort || 2237,
-        serverUrl,
+        serverUrl: willRelay ? serverUrl : null,
         multicast: mcEnabled,
         multicastGroup: mcEnabled ? mcGroup : null,
       };

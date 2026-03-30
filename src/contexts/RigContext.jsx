@@ -237,6 +237,10 @@ export const RigProvider = ({ children, rigConfig }) => {
               [data.prop]: data.value,
               lastUpdate: Date.now(),
             }));
+          } else if (data.type === 'plugin' || data.type === 'plugin-init') {
+            // Forward plugin data (decodes, status, APRS, QSOs) as a window
+            // event so individual hooks can subscribe without coupling to RigContext.
+            window.dispatchEvent(new CustomEvent('rig-plugin-data', { detail: data }));
           }
         } catch (e) {
           console.error('[RigContext] Failed to parse SSE message', e);

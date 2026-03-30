@@ -23,6 +23,7 @@ import {
   saveBandColorOverrides,
 } from '../utils/bandColors.js';
 import { createTerminator } from '../utils/terminator.js';
+import { getAprsSymbolIcon } from '../utils/aprs-symbols.js';
 import { getAllLayers } from '../plugins/layerRegistry.js';
 import useLocalInstall from '../hooks/app/useLocalInstall.js';
 import PluginLayer from './PluginLayer.jsx';
@@ -1773,34 +1774,39 @@ export const WorldMap = ({
         const isRF = station.source === 'local-tnc';
         // amber for watched, green for local RF, cyan for internet
         const color = isWatched ? '#f59e0b' : isRF ? '#4ade80' : '#22d3ee';
-        const size = isWatched ? 7 : 5;
+        const iconSize = isWatched ? 20 : 16;
 
         try {
-          // Triangle marker for APRS stations (distinct from circles/diamonds)
           replicatePoint(lat, lon).forEach(([rLat, rLon]) => {
+            // Use APRS symbol sprite when available, fall back to triangle
+            const symbolDesc = getAprsSymbolIcon(station.symbol, { size: iconSize, borderColor: color });
+            const iconOpts = symbolDesc
+              ? { className: '', ...symbolDesc }
+              : (() => {
+                  const s = isWatched ? 7 : 5;
+                  return {
+                    className: '',
+                    html: `<div style="width:0;height:0;border-left:${s}px solid transparent;border-right:${s}px solid transparent;border-bottom:${s * 1.6}px solid ${color};filter:drop-shadow(0 0 2px rgba(0,0,0,0.5));opacity:0.9"></div>`,
+                    iconSize: [s * 2, s * 1.6],
+                    iconAnchor: [s, s * 1.6],
+                  };
+                })();
+
             const marker = L.marker([rLat, rLon], {
-              icon: L.divIcon({
-                className: '',
-                html: `<div style="
-                  width: 0; height: 0;
-                  border-left: ${size}px solid transparent;
-                  border-right: ${size}px solid transparent;
-                  border-bottom: ${size * 1.6}px solid ${color};
-                  filter: drop-shadow(0 0 2px rgba(0,0,0,0.5));
-                  opacity: 0.9;
-                "></div>`,
-                iconSize: [size * 2, size * 1.6],
-                iconAnchor: [size, size * 1.6],
-              }),
+              icon: L.divIcon(iconOpts),
               zIndexOffset: isWatched ? 5000 : 1000,
             });
 
+            const ageMin =
+              station.age ?? (station.timestamp != null ? Math.floor((Date.now() - station.timestamp) / 60000) : null);
             const ageStr =
-              station.age < 1
-                ? 'now'
-                : station.age < 60
-                  ? `${station.age}m ago`
-                  : `${Math.floor(station.age / 60)}h ago`;
+              ageMin == null
+                ? ''
+                : ageMin < 1
+                  ? 'now'
+                  : ageMin < 60
+                    ? `${ageMin}m ago`
+                    : `${Math.floor(ageMin / 60)}h ago`;
 
             marker
               .bindPopup(
@@ -1816,9 +1822,7 @@ export const WorldMap = ({
               )
               .addTo(map);
 
-            if (onSpotClick) {
-              marker.on('click', () => onSpotClick({ call: station.call, lat, lon }));
-            }
+            // APRS clicks open the popup only — intentionally do not set DX location
 
             aprsMarkersRef.current.push(marker);
           });

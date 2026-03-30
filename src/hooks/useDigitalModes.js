@@ -56,6 +56,35 @@ export function useDigitalModes() {
 
   useVisibilityRefresh(fetchStatuses, 5000);
 
+  // Receive status events pushed over the rig-bridge SSE /stream.
+  // In local/direct mode the OHC server doesn't proxy /api/{mshv,jtdx,js8call}/status,
+  // so HTTP polling always returns empty. SSE status events are the working path.
+  useEffect(() => {
+    const handler = (e) => {
+      const msg = e.detail;
+      if (msg.event !== 'status') return;
+      const { source, data: s } = msg;
+      if (!PLUGINS.includes(source)) return;
+      if (!mountedRef.current) return;
+      setStatuses((prev) => ({
+        ...prev,
+        [source]: {
+          ...prev[source],
+          enabled: true,
+          running: true,
+          connected: s.dialFrequency != null,
+          dialFrequency: s.dialFrequency,
+          mode: s.mode,
+          transmitting: s.transmitting,
+          decoding: s.decoding,
+        },
+      }));
+      setLoading(false);
+    };
+    window.addEventListener('rig-plugin-data', handler);
+    return () => window.removeEventListener('rig-plugin-data', handler);
+  }, []);
+
   // Control actions
   const sendCommand = useCallback(async (pluginId, action, body = {}) => {
     try {

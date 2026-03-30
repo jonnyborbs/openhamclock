@@ -22,7 +22,14 @@
 const VERSION = '2.0.0';
 
 const { config, loadConfig, applyCliArgs } = require('./core/config');
-const { updateState, state, onStateChange, removeStateChangeListener } = require('./core/state');
+const {
+  updateState,
+  state,
+  broadcast,
+  onStateChange,
+  removeStateChangeListener,
+  addToDecodeRingBuffer,
+} = require('./core/state');
 const PluginRegistry = require('./core/plugin-registry');
 const { startServer } = require('./core/server');
 
@@ -85,3 +92,64 @@ registry.connectActive();
 
 // 8. Start all enabled integration plugins (e.g. WSJT-X relay)
 registry.connectIntegrations();
+
+// 9. Bridge plugin bus events to the SSE /stream so browsers in local/direct
+//    mode receive all plugin data (decodes, status, APRS) over the same
+//    connection used for freq/mode/ptt — no separate HTTP POSTs needed.
+pluginBus.on('decode', (msg) => {
+  // Build a trimmed decode object with the fields the UI needs.
+  // id is a stable content key used for client-side deduplication.
+  const d = {
+    id: `${msg.source}-${msg.time?.formatted ?? Date.now()}-${msg.deltaFreq}-${(msg.message ?? '').replace(/\s/g, '')}`,
+    source: msg.source,
+    snr: msg.snr,
+    deltaTime: msg.deltaTime,
+    deltaFreq: msg.deltaFreq,
+    freq: msg.deltaFreq, // alias used by useWSJTX dedup key
+    time: msg.time?.formatted ?? '',
+    mode: msg.mode,
+    message: msg.message,
+    dialFrequency: msg.dialFrequency,
+    timestamp: Date.now(),
+  };
+  addToDecodeRingBuffer(d);
+  broadcast({ type: 'plugin', event: 'decode', source: msg.source, data: d });
+});
+
+pluginBus.on('status', (msg) => {
+  broadcast({
+    type: 'plugin',
+    event: 'status',
+    source: msg.source,
+    data: {
+      dialFrequency: msg.dialFrequency,
+      mode: msg.mode,
+      dxCall: msg.dxCall,
+      dxGrid: msg.dxGrid,
+      transmitting: msg.transmitting,
+      decoding: msg.decoding,
+      txEnabled: msg.txEnabled,
+    },
+  });
+});
+
+pluginBus.on('qso', (msg) => {
+  broadcast({
+    type: 'plugin',
+    event: 'qso',
+    source: msg.source,
+    data: {
+      dxCall: msg.dxCall,
+      dxGrid: msg.dxGrid,
+      mode: msg.mode,
+      reportSent: msg.reportSent,
+      reportReceived: msg.reportReceived,
+      txFrequency: msg.txFrequency,
+      timestamp: Date.now(),
+    },
+  });
+});
+
+pluginBus.on('aprs', (pkt) => {
+  broadcast({ type: 'plugin', event: 'aprs', source: 'aprs-tnc', data: pkt });
+});

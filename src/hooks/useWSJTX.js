@@ -52,7 +52,9 @@ export function useWSJTX(enabled = true) {
   const lastTimestamp = useRef(0);
   const fullFetchCounter = useRef(0);
   const backoffUntil = useRef(0); // Rate-limit backoff timestamp
-  const hasDataFlowing = useRef(false); // True when relay/UDP is active
+  const hasDataFlowing = useRef(false); // True when relay/UDP is active (HTTP path)
+  const isLocalMode = useRef(false); // True once SSE data arrives from rig-bridge directly
+  const lastSseAt = useRef(0); // Timestamp of last SSE message (ms); used for staleness check
 
   // ── DX Target tracking ──
   // When the operator selects a callsign in WSJT-X (Std Msgs), the server
@@ -148,12 +150,21 @@ export function useWSJTX(enabled = true) {
     if (enabled) fetchFull();
   }, [enabled, fetchFull]);
 
-  // Polling - adaptive: fast (2s) when data flows, slow (30s) when idle
+  // Polling - adaptive: fast (2s) when data flows, slow (30s) when idle.
+  // Stops entirely once local/direct SSE mode is detected (isLocalMode).
   useEffect(() => {
     if (!enabled) return;
 
     let timer;
+    const SSE_STALE_MS = 30000; // Reset local mode if no SSE message for 30 s
     const tick = () => {
+      // SSE from rig-bridge is the data source — no need to poll the server.
+      // But if SSE has gone silent for >30 s, assume rig-bridge disconnected and
+      // resume polling so the UI doesn't show stale data indefinitely.
+      if (isLocalMode.current) {
+        if (Date.now() - lastSseAt.current < SSE_STALE_MS) return;
+        isLocalMode.current = false; // SSE appears stale — fall back to polling
+      }
       const interval = hasDataFlowing.current ? POLL_FAST : POLL_SLOW;
       fullFetchCounter.current++;
       if (fullFetchCounter.current >= 8) {
@@ -174,6 +185,86 @@ export function useWSJTX(enabled = true) {
   useVisibilityRefresh(() => {
     if (enabled) fetchFull();
   }, 5000);
+
+  // Receive decode/status/qso events pushed over the rig-bridge SSE /stream
+  // (local/direct mode only — cloud relay uses the server polling path above).
+  // plugin-init seeds the decode list with recent history from rig-bridge's
+  // ring-buffer so the UI is populated immediately on connect.
+  useEffect(() => {
+    if (!enabled) return;
+    const handler = (e) => {
+      const msg = e.detail;
+
+      // Mark local mode on the first SSE message and refresh the heartbeat on every one.
+      // The polling loop checks lastSseAt and resets isLocalMode if SSE goes silent for >30 s.
+      lastSseAt.current = Date.now();
+      if (!isLocalMode.current) {
+        isLocalMode.current = true;
+        setLoading(false);
+        setError(null);
+      }
+
+      if (msg.type === 'plugin-init') {
+        // Seed from ring-buffer replay
+        if (Array.isArray(msg.decodes) && msg.decodes.length > 0) {
+          setData((prev) => {
+            const existingKeys = new Set(
+              prev.decodes.map((d) => `${d.time}-${d.freq}-${(d.message ?? '').replace(/\s+/g, '')}`),
+            );
+            const fresh = msg.decodes.filter((d) => {
+              const k = `${d.time}-${d.freq}-${(d.message ?? '').replace(/\s+/g, '')}`;
+              return !existingKeys.has(k);
+            });
+            if (fresh.length === 0) return prev;
+            const merged = [...fresh, ...prev.decodes].slice(-500);
+            return { ...prev, decodes: merged, enabled: true };
+          });
+        }
+        return;
+      }
+
+      if (msg.event === 'decode') {
+        setData((prev) => {
+          const d = msg.data;
+          const existingIds = new Set(prev.decodes.map((x) => x.id));
+          if (d.id && existingIds.has(d.id)) return prev;
+          const existingKeys = new Set(
+            prev.decodes.map((x) => `${x.time}-${x.freq}-${(x.message ?? '').replace(/\s+/g, '')}`),
+          );
+          const contentKey = `${d.time}-${d.freq}-${(d.message ?? '').replace(/\s+/g, '')}`;
+          if (existingKeys.has(contentKey)) return prev;
+          const merged = [...prev.decodes, d].slice(-500);
+          return { ...prev, decodes: merged, enabled: true, stats: { ...prev.stats, totalDecodes: merged.length } };
+        });
+      } else if (msg.event === 'status') {
+        const { source, data: s } = msg;
+        setData((prev) => ({
+          ...prev,
+          enabled: true,
+          clients: {
+            ...prev.clients,
+            [source]: {
+              ...(prev.clients[source] ?? {}),
+              dialFrequency: s.dialFrequency,
+              mode: s.mode,
+              dxCall: s.dxCall,
+              dxGrid: s.dxGrid,
+              transmitting: s.transmitting,
+              decoding: s.decoding,
+              lastSeen: Date.now(),
+            },
+          },
+        }));
+      } else if (msg.event === 'qso') {
+        setData((prev) => {
+          const updated = [msg.data, ...prev.qsos].slice(-200);
+          return { ...prev, qsos: updated, stats: { ...prev.stats, totalQsos: updated.length } };
+        });
+      }
+    };
+    window.addEventListener('rig-plugin-data', handler);
+    return () => window.removeEventListener('rig-plugin-data', handler);
+  }, [enabled]);
 
   // ── Derive DX target from active WSJT-X client status ──
   // Pick the most recently active client (most recent lastSeen).
