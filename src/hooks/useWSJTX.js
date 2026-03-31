@@ -54,6 +54,7 @@ export function useWSJTX(enabled = true) {
   const backoffUntil = useRef(0); // Rate-limit backoff timestamp
   const hasDataFlowing = useRef(false); // True when relay/UDP is active (HTTP path)
   const isLocalMode = useRef(false); // True once SSE data arrives from rig-bridge directly
+  const lastSseAt = useRef(0); // Timestamp of last SSE message (ms); used for staleness check
 
   // ── DX Target tracking ──
   // When the operator selects a callsign in WSJT-X (Std Msgs), the server
@@ -155,9 +156,15 @@ export function useWSJTX(enabled = true) {
     if (!enabled) return;
 
     let timer;
+    const SSE_STALE_MS = 30000; // Reset local mode if no SSE message for 30 s
     const tick = () => {
       // SSE from rig-bridge is the data source — no need to poll the server.
-      if (isLocalMode.current) return;
+      // But if SSE has gone silent for >30 s, assume rig-bridge disconnected and
+      // resume polling so the UI doesn't show stale data indefinitely.
+      if (isLocalMode.current) {
+        if (Date.now() - lastSseAt.current < SSE_STALE_MS) return;
+        isLocalMode.current = false; // SSE appears stale — fall back to polling
+      }
       const interval = hasDataFlowing.current ? POLL_FAST : POLL_SLOW;
       fullFetchCounter.current++;
       if (fullFetchCounter.current >= 8) {
@@ -188,7 +195,9 @@ export function useWSJTX(enabled = true) {
     const handler = (e) => {
       const msg = e.detail;
 
-      // Mark local mode on the very first SSE message — polling loop will stop.
+      // Mark local mode on the first SSE message and refresh the heartbeat on every one.
+      // The polling loop checks lastSseAt and resets isLocalMode if SSE goes silent for >30 s.
+      lastSseAt.current = Date.now();
       if (!isLocalMode.current) {
         isLocalMode.current = true;
         setLoading(false);

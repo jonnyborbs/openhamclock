@@ -86,6 +86,15 @@ module.exports = function (app, ctx) {
     return /^[A-Za-z0-9_\-:.]{1,128}$/.test(id);
   }
 
+  // Validate WSJT-X client IDs — more permissive than session IDs since these are
+  // user-configurable instance names (e.g. "WSJT-X - FT991A") that can contain spaces.
+  // Only block prototype pollution vectors and enforce a length limit.
+  function isValidClientId(id) {
+    if (!id || typeof id !== 'string' || id.length > 128) return false;
+    if (id === '__proto__' || id === 'constructor' || id === 'prototype') return false;
+    return true;
+  }
+
   function getRelaySession(sessionId) {
     if (!isValidSessionId(sessionId)) return null;
     if (!wsjtxRelaySessions[sessionId]) {
@@ -480,7 +489,7 @@ module.exports = function (app, ctx) {
     if (!msg) return;
     if (!state) state = wsjtxState;
     // Reject dangerous msg.id values to prevent prototype pollution on state.clients
-    if (msg.id && !isValidSessionId(msg.id)) return;
+    if (msg.id && !isValidClientId(msg.id)) return;
 
     // Ensure clients is a prototype-less object to prevent prototype pollution
     if (!state.clients || Object.getPrototypeOf(state.clients) !== null) {

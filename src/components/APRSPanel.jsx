@@ -8,7 +8,7 @@ import { useTranslation } from 'react-i18next';
 import CallsignLink from './CallsignLink.jsx';
 import { calculateDistance, formatDistance } from '../utils/geo.js';
 
-const APRSPanel = ({ aprsData, showOnMap, onToggleMap, onSpotClick, onHoverSpot, deLocation, units = 'metric' }) => {
+const APRSPanel = ({ aprsData, showOnMap, onToggleMap, onHoverSpot, deLocation, units = 'metric' }) => {
   const {
     filteredStations = [],
     stations = [],
@@ -507,7 +507,7 @@ const APRSPanel = ({ aprsData, showOnMap, onToggleMap, onSpotClick, onHoverSpot,
                   onHoverSpot?.(null);
                   setTooltip(null);
                 }}
-                onClick={() => onSpotClick?.({ call: station.call, lat: station.lat, lon: station.lon })}
+                onClick={() => {}}
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '1fr auto',
@@ -582,9 +582,10 @@ const APRSPanel = ({ aprsData, showOnMap, onToggleMap, onSpotClick, onHoverSpot,
         (() => {
           const s = tooltip.station;
           const age = stationAgeMinutes(s);
-          // Keep tooltip within viewport
-          const tipX = tooltip.x + 14;
-          const tipY = tooltip.y + 14;
+          const TIP_W = 290;
+          const TIP_H = 220;
+          const tipX = Math.min(tooltip.x + 14, window.innerWidth - TIP_W - 4);
+          const tipY = Math.min(tooltip.y + 14, window.innerHeight - TIP_H - 4);
           return (
             <div
               style={{

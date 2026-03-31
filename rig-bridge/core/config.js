@@ -154,7 +154,7 @@ const DEFAULT_CONFIG = {
     // Local forwarding: push received packets to the local OHC server's /api/aprs/local
     // Set to false when using cloudRelay to avoid duplicate injection on the cloud server.
     localForward: true,
-    ohcUrl: 'http://localhost:3000', // URL of the local OpenHamClock server
+    ohcUrl: 'http://localhost:8080', // URL of the local OpenHamClock server
   },
   // Rotator control via rotctld (Hamlib)
   rotator: {
