@@ -30,7 +30,7 @@ export const BandConditionsPanel = ({ data, loading, extras }) => {
         {t('band.conditions')}
         {staleMinutes != null && (
           <span
-            title={`N0NBH data could not be refreshed — showing data from ${staleMinutes} minute${staleMinutes === 1 ? '' : 's'} ago`}
+            title={t('band.conditions.stale.tooltip', { mins: staleMinutes })}
             style={{
               fontSize: '10px',
               fontWeight: '600',
@@ -42,7 +42,7 @@ export const BandConditionsPanel = ({ data, loading, extras }) => {
               cursor: 'default',
             }}
           >
-            ⚠ stale ({staleMinutes}m)
+            {t('band.conditions.stale.label', { mins: staleMinutes })}
           </span>
         )}
       </div>

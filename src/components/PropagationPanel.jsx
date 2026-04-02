@@ -218,7 +218,7 @@ export const PropagationPanel = ({
               const mins = Math.round((Date.now() - bandConditions.extras.fetchedAt) / 60_000);
               return (
                 <span
-                  title={`N0NBH data could not be refreshed — showing data from ${mins} minute${mins === 1 ? '' : 's'} ago`}
+                  title={t('band.conditions.stale.tooltip', { mins })}
                   style={{
                     fontSize: '10px',
                     fontWeight: '600',
@@ -230,7 +230,7 @@ export const PropagationPanel = ({
                     cursor: 'default',
                   }}
                 >
-                  ⚠ stale ({mins}m)
+                  {t('band.conditions.stale.label', { mins })}
                 </span>
               );
             })()}
