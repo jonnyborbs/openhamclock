@@ -190,25 +190,31 @@ module.exports = function (app, ctx) {
       }
 
       // Kp history
+      // NOAA changed from array-of-arrays [[header],[time,Kp,...],...] to
+      // array-of-objects [{time_tag,Kp,...},...] — support both formats.
       if (kIndexRes.status === 'fulfilled' && kIndexRes.value.ok) {
         const data = await kIndexRes.value.json();
-        if (data?.length > 1) {
-          const recent = data.slice(1).slice(-24);
+        if (data?.length) {
+          const isObj = !Array.isArray(data[0]);
+          const rows = isObj ? data : data.slice(1); // old format has a header row
+          const recent = rows.slice(-24);
           result.kp.history = recent.map((d) => ({
-            time: d[0],
-            value: parseFloat(d[1]) || 0,
+            time: isObj ? d.time_tag : d[0],
+            value: Number.isFinite(isObj ? d.Kp : parseFloat(d[1])) ? (isObj ? d.Kp : parseFloat(d[1])) : 0,
           }));
           result.kp.current = result.kp.history[result.kp.history.length - 1]?.value ?? null;
         }
       }
 
-      // Kp forecast
+      // Kp forecast — same format change; forecast uses lowercase 'kp' field.
       if (kForecastRes.status === 'fulfilled' && kForecastRes.value.ok) {
         const data = await kForecastRes.value.json();
-        if (data?.length > 1) {
-          result.kp.forecast = data.slice(1).map((d) => ({
-            time: d[0],
-            value: parseFloat(d[1]) || 0,
+        if (data?.length) {
+          const isObj = !Array.isArray(data[0]);
+          const rows = isObj ? data : data.slice(1);
+          result.kp.forecast = rows.map((d) => ({
+            time: isObj ? d.time_tag : d[0],
+            value: Number.isFinite(isObj ? d.kp : parseFloat(d[1])) ? (isObj ? d.kp : parseFloat(d[1])) : 0,
           }));
         }
       }
