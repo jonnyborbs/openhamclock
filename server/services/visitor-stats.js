@@ -365,12 +365,11 @@ function createVisitorStatsService(ctx) {
     rolloverVisitorStats();
 
     const rawIp = req.ip || req.connection?.remoteAddress || 'unknown';
-    if (req.path !== '/api/health' && !req.path.startsWith('/assets/')) {
-      sessionTracker.touch(rawIp);
-    }
+    const isTrackable = req.path !== '/api/health' && !req.path.startsWith('/assets/');
 
-    const countableRoutes = ['/', '/index.html', '/api/config'];
-    if (countableRoutes.includes(req.path)) {
+    if (isTrackable) {
+      sessionTracker.touch(rawIp);
+
       const ipHash = hashIP(rawIp);
 
       const isNewToday = !todayIPHashes.has(ipHash);
