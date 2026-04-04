@@ -231,8 +231,10 @@ export const WorldMap = ({
 
   // On touch devices, visual spot markers are non-interactive; ghost markers with an
   // expanded hit area overlay them and handle all tap events.
+  // realMarker + glowColor are optional — when supplied the ghost applies a glow to
+  // the visual marker on popupopen and removes it on popupclose.
   const addTouchGhost = useCallback(
-    (type, latlng, popupHtml, onTune, markersRef) => {
+    (type, latlng, popupHtml, onTune, markersRef, realMarker, glowColor) => {
       if (!isTouchDeviceRef.current) return;
       const map = mapInstanceRef.current;
       if (!map) return;
@@ -255,6 +257,40 @@ export const WorldMap = ({
           }),
           interactive: true,
           zIndexOffset: 1000,
+        });
+      }
+
+      // Apply glow to the real visual marker when the ghost's popup opens/closes
+      if (realMarker && glowColor) {
+        let glowRing = null;
+        ghost.on('popupopen', () => {
+          if (realMarker._path) {
+            // SVG circleMarker — use a Leaflet glow ring
+            glowRing = L.circleMarker(latlng, {
+              radius: 16,
+              fillColor: glowColor,
+              color: glowColor,
+              weight: 12,
+              opacity: 0.3,
+              fillOpacity: 0.2,
+              interactive: false,
+            }).addTo(map);
+            markersRef.current.push(glowRing);
+          } else if (realMarker._icon) {
+            // divIcon — CSS drop-shadow filter
+            realMarker._icon.style.filter = `drop-shadow(0 0 4px ${glowColor}) drop-shadow(0 0 10px ${glowColor}) drop-shadow(0 0 20px ${glowColor})`;
+          }
+        });
+        ghost.on('popupclose', () => {
+          if (glowRing) {
+            try {
+              map.removeLayer(glowRing);
+            } catch (_) {}
+            const idx = markersRef.current.indexOf(glowRing);
+            if (idx !== -1) markersRef.current.splice(idx, 1);
+            glowRing = null;
+          }
+          if (realMarker._icon) realMarker._icon.style.filter = '';
         });
       }
 
@@ -1378,7 +1414,15 @@ export const WorldMap = ({
               if (!isTouchDeviceRef.current) {
                 bindSpotClick(dxCircle, () => onSpotClick(path));
               } else {
-                addTouchGhost('circle', [lat, lon], dxPopupHtml, () => onSpotClick(path), dxPathsMarkersRef);
+                addTouchGhost(
+                  'circle',
+                  [lat, lon],
+                  dxPopupHtml,
+                  () => onSpotClick(path),
+                  dxPathsMarkersRef,
+                  dxCircle,
+                  color,
+                );
               }
             }
 
@@ -1416,7 +1460,15 @@ export const WorldMap = ({
                 if (!isTouchDeviceRef.current) {
                   bindSpotClick(label, () => onSpotClick(path));
                 } else {
-                  addTouchGhost('icon', [lat, lon], dxPopupHtml, () => onSpotClick(path), dxPathsMarkersRef);
+                  addTouchGhost(
+                    'icon',
+                    [lat, lon],
+                    dxPopupHtml,
+                    () => onSpotClick(path),
+                    dxPathsMarkersRef,
+                    label,
+                    color,
+                  );
                 }
               }
 
@@ -1547,7 +1599,15 @@ export const WorldMap = ({
               if (!isTouchDeviceRef.current) {
                 bindSpotClick(marker, () => onSpotClick(spot));
               } else {
-                addTouchGhost('icon', [lat, lon], spotPopupHtml, () => onSpotClick(spot), markersRef);
+                addTouchGhost(
+                  'icon',
+                  [lat, lon],
+                  spotPopupHtml,
+                  () => onSpotClick(spot),
+                  markersRef,
+                  marker,
+                  mapDefaults.color,
+                );
               }
             }
 
@@ -1582,7 +1642,15 @@ export const WorldMap = ({
                 if (!isTouchDeviceRef.current) {
                   bindSpotClick(label, () => onSpotClick(spot));
                 } else {
-                  addTouchGhost('icon', [lat, lon], spotPopupHtml, () => onSpotClick(spot), markersRef);
+                  addTouchGhost(
+                    'icon',
+                    [lat, lon],
+                    spotPopupHtml,
+                    () => onSpotClick(spot),
+                    markersRef,
+                    label,
+                    mapDefaults.color,
+                  );
                 }
               }
 
@@ -1855,7 +1923,15 @@ export const WorldMap = ({
                   bindSpotClick(marker, () => onSpotClick(spot));
                 } else {
                   const ghostType = isRx ? 'icon' : 'circle';
-                  addTouchGhost(ghostType, [rLat, rLon], pskPopupHtml, () => onSpotClick(spot), pskMarkersRef);
+                  addTouchGhost(
+                    ghostType,
+                    [rLat, rLon],
+                    pskPopupHtml,
+                    () => onSpotClick(spot),
+                    pskMarkersRef,
+                    marker,
+                    bandColor,
+                  );
                 }
               }
 
@@ -1977,7 +2053,15 @@ export const WorldMap = ({
                 if (!isTouchDeviceRef.current) {
                   bindSpotClick(diamond, () => onSpotClick(spot));
                 } else {
-                  addTouchGhost('icon', [rLat, rLon], wsjtxPopupHtml, () => onSpotClick(spot), wsjtxMarkersRef);
+                  addTouchGhost(
+                    'icon',
+                    [rLat, rLon],
+                    wsjtxPopupHtml,
+                    () => onSpotClick(spot),
+                    wsjtxMarkersRef,
+                    diamond,
+                    bandColor,
+                  );
                 }
               }
 
