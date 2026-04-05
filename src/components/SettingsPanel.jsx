@@ -2909,8 +2909,8 @@ export const SettingsPanel = ({
                 Show What's New on Startup
               </label>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                By default, What's New is displayed. Setting this true means it will only be displayed when the version
-                is clicked.
+                By default (when checked), What's New is displayed. Unchecking this means it will only be displayed when
+                the version is clicked.
               </div>
             </div>
 
