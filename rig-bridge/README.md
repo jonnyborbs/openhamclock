@@ -12,14 +12,15 @@ It also connects FT8/FT4 decoding software (WSJT-X, JTDX, MSHV, JS8Call) to Open
 
 1. [Supported Radios](#supported-radios)
 2. [Getting Started](#getting-started)
-3. [Connecting Your Radio](#connecting-your-radio)
-4. [Connecting to OpenHamClock](#connecting-to-openhamclock)
-5. [Digital Mode Software (FT8, JS8, etc.)](#digital-mode-software)
-6. [APRS via Local TNC](#aprs-via-local-tnc)
-7. [Antenna Rotator](#antenna-rotator)
-8. [HTTPS Setup (needed for openhamclock.com)](#https-setup)
-9. [Troubleshooting](#troubleshooting)
-10. [Advanced Topics](#advanced-topics)
+3. [Updating Rig Bridge](#updating-rig-bridge)
+4. [Connecting Your Radio](#connecting-your-radio)
+5. [Connecting to OpenHamClock](#connecting-to-openhamclock)
+6. [Digital Mode Software (FT8, JS8, etc.)](#digital-mode-software)
+7. [APRS via Local TNC](#aprs-via-local-tnc)
+8. [Antenna Rotator](#antenna-rotator)
+9. [HTTPS Setup (needed for openhamclock.com)](#https-setup)
+10. [Troubleshooting](#troubleshooting)
+11. [Advanced Topics](#advanced-topics)
 
 ---
 
@@ -67,15 +68,49 @@ Select **Simulated Radio** in the setup screen. A fake radio will drift through 
 
 ### Step 1 — Download and run Rig Bridge
 
-**Option A — Standalone executable (easiest, no installation needed)**
+**Option A — Installer from the OpenHamClock Settings tab (recommended)**
 
-1. Go to the Releases page and download the file for your operating system:
-   - `ohc-rig-bridge-win.exe` — Windows
-   - `ohc-rig-bridge-macos` — macOS (Intel)
-   - `ohc-rig-bridge-macos-arm` — macOS (Apple Silicon / M1, M2, M3, M4)
-   - `ohc-rig-bridge-linux` — Linux
-2. Double-click the file to run it. On macOS you may need to right-click → Open the first time.
-3. A terminal/console window will appear showing log messages — leave it running.
+> Requires **Node.js** and **git** to be installed on your computer.
+
+1. In OpenHamClock, open **Settings → Rig Bridge**.
+2. Tick **Enable Rig Bridge**.
+3. Click the download button for your operating system — **Windows**, **Mac**, or **Linux**.
+
+**Windows**
+
+4. Open your Downloads folder and double-click `install-rig-bridge.bat`.
+   A Command Prompt window will open, download Rig Bridge, and start it automatically.
+
+**macOS**
+
+4. Open **Terminal** (Applications → Utilities → Terminal) and run:
+   ```bash
+   chmod +x ~/Downloads/install-rig-bridge.sh
+   ~/Downloads/install-rig-bridge.sh
+   ```
+   The script downloads Rig Bridge and starts it. Leave the Terminal window open.
+
+**Linux**
+
+4. Open a terminal and run:
+   ```bash
+   chmod +x ~/Downloads/install-rig-bridge.sh
+   ~/Downloads/install-rig-bridge.sh
+   ```
+   The script downloads Rig Bridge and starts it. Leave the terminal open.
+
+---
+
+5. Once Rig Bridge is running, return to OpenHamClock **Settings → Rig Bridge** and click
+   **Open Setup UI** — this opens **http://localhost:5555** in a new tab.
+6. Copy the **API Token** shown at the top of that page.
+7. Back in OpenHamClock **Settings → Rig Bridge**, paste the token into the **API Token** field.
+8. Confirm **Host** is `http://localhost` and **Port** is `5555`.
+9. Tick **Click-to-tune** if you want spot clicks to tune your radio, then click **Save**.
+
+Now configure your radio in the Rig Bridge Setup UI — see [Connecting Your Radio](#connecting-your-radio).
+
+To update Rig Bridge in the future, see [Updating Rig Bridge](#updating-rig-bridge).
 
 **Option B — Run from source with Node.js**
 
@@ -106,6 +141,48 @@ See [Connecting Your Radio](#connecting-your-radio) below for step-by-step instr
 ### Step 4 — Connect to OpenHamClock
 
 See [Connecting to OpenHamClock](#connecting-to-openhamclock) below.
+
+---
+
+## Updating Rig Bridge
+
+To update to the latest version, re-run the installer script you downloaded during setup
+with the `--update` flag. Your radio configuration is preserved automatically.
+
+**Windows**
+
+Open Command Prompt, navigate to your Downloads folder, and run:
+
+```cmd
+install-rig-bridge.bat --update
+```
+
+> You cannot pass arguments by double-clicking a `.bat` file — open Command Prompt first
+> (`Win + R` → type `cmd` → Enter), then run the command above.
+
+**macOS / Linux**
+
+```bash
+~/Downloads/install-rig-bridge.sh --update
+```
+
+> If you no longer have the original script, download it again from
+> **Settings → Rig Bridge** in OpenHamClock — the `--update` flag works on a freshly
+> downloaded copy too, as long as Rig Bridge is already installed.
+
+### What the update does
+
+1. Stops the running Rig Bridge instance (if any)
+2. Downloads the latest files from the repository
+3. Preserves your `rig-bridge-config.json` (radio settings, tokens, plugins)
+4. Re-installs dependencies
+5. Restarts Rig Bridge
+
+### What gets reset
+
+Nothing in your configuration is changed. Any manual edits you made directly to
+`rig-bridge.js` or other source files **will be overwritten** — the update replaces
+all source files.
 
 ---
 
