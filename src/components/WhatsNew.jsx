@@ -9,7 +9,7 @@ import { useState, useEffect } from 'react';
 // Set to null to hide. Shown at the top of the What's New modal.
 const ANNOUNCEMENT = {
   emoji: '🎪',
-  text: 'OpenHamClock will be at Dayton Hamvention 2026! Come visit us in the Flea Market area — Booth #9518. Say hi, see a live demo, and grab some stickers!',
+  text: 'OpenHamClock will be at Dayton Hamvention 2026! Come visit us in the Flea Market area — Booth #9518. Say hi, see a live demo, and grab some stickers!\n\nWe are moving from weekly to monthly releases, giving us more time to develop features and improve stability. Look for updates on the first Tuesday of each month.',
   color: '#ff6b35',
   bg: 'rgba(255, 107, 53, 0.10)',
   border: 'rgba(255, 107, 53, 0.30)',
@@ -1216,6 +1216,7 @@ export default function WhatsNew({ showWhatsNew }) {
                 border: `1px solid ${ANNOUNCEMENT.border}`,
                 lineHeight: '1.5',
                 textAlign: 'center',
+                whiteSpace: 'pre-line',
               }}
             >
               <span style={{ fontSize: '18px', display: 'block', marginBottom: '4px' }}>{ANNOUNCEMENT.emoji}</span>
