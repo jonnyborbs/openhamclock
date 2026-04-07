@@ -379,7 +379,8 @@ module.exports = function (app, ctx) {
       }
 
       // If ITURHFProp hourly failed, try single-hour for current state
-      if (!usedITURHFProp && useITURHFProp) {
+      // Skip if service is known down — fall straight through to built-in model
+      if (!usedITURHFProp && useITURHFProp && !iturhfpropIsDown()) {
         const singleHour = await fetchITURHFPropPrediction(
           de.lat,
           de.lon,
