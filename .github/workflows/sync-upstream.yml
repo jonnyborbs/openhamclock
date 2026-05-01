@@ -1,0 +1,32 @@
+name: Sync Fork with Upstream
+
+on:
+  schedule:
+    - cron: '0 5 * * *'   # 05:00 UTC daily — runs before the nightly build
+  workflow_dispatch:       # manual trigger anytime
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/accius/openhamclock.git
+          git fetch upstream
+
+      - name: Merge upstream main into fork
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git merge upstream/main --ff-only
+
+      - name: Push if updated
+        run: git push origin main
