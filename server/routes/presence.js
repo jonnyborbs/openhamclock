@@ -23,11 +23,14 @@ module.exports = function (app, ctx) {
   // map of POST operation IP remote addresses, with periodic cleanup
   const remoteAddresses = new Map();
   const remoteAddress_TTL = 60 * 60 * 1000; // 60 minutes
-  setInterval(() => {
-    const cutoff = Date.now() - remoteAddress_TTL;
-    for (const [key, remoteAddress] of remoteAddresses)
-      if (Date.now() >= remoteAddress.createTime + remoteAddress_TTL) remoteAddresses.delete(key);
-  }, 10000); // every ten minutes
+  setInterval(
+    () => {
+      const cutoff = Date.now() - remoteAddress_TTL;
+      for (const [key, remoteAddress] of remoteAddresses)
+        if (Date.now() >= remoteAddress.createTime + remoteAddress_TTL) remoteAddresses.delete(key);
+    },
+    10 * 60 * 1000,
+  ); // every ten minutes
 
   // POST /api/presence — heartbeat from a user
   app.post('/api/presence', (req, res) => {
