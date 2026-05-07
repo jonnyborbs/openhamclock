@@ -4,7 +4,7 @@
  * Stores favorites in localStorage as openhamclock_dxFavorites.
  */
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
-import { parseGridSquare, calculateGridSquare } from '../utils/geo.js';
+import { calculateGridSquare } from '../utils/geo.js';
 import { syncAllSettingsToServer } from '../utils';
 
 const STORAGE_KEY = 'openhamclock_dxFavorites';
