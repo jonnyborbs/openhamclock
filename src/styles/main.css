@@ -76,6 +76,34 @@ body::before {
   font-size: 12px !important;
 }
 
+/* Panels with padding:0 on the outer container (flush-header layout) need the
+   title bar without the -10px margin compensation. Same specificity as the rule
+   above but placed later in the cascade so it wins for .meshcom-header. */
+[data-theme='retro'] .panel > div.meshcom-header {
+  background: linear-gradient(90deg, #000080, #1084d0) !important;
+  color: #ffffff !important;
+  font-weight: bold !important;
+  padding: 4px 8px !important;
+  margin: 0 !important;
+  font-size: 12px !important;
+}
+
+/* Force all child elements (spans) inside the header to white.
+   Specificity [0,3,1] beats the retro button rule [0,1,1] so this wins
+   even when both declarations carry !important. */
+[data-theme='retro'] .panel > div.meshcom-header * {
+  color: #ffffff !important;
+}
+
+/* Buttons inside the header keep retro black text (raised 3D button look).
+   Both selectors beat the wildcard rule [0,3,1]: button at [0,3,2],
+   button * at [0,3,2] (universal selector adds 0 specificity but the
+   extra element type on button already wins). */
+[data-theme='retro'] .panel > div.meshcom-header button,
+[data-theme='retro'] .panel > div.meshcom-header button * {
+  color: #000000 !important;
+}
+
 /* Classic buttons */
 [data-theme='retro'] button,
 [data-theme='retro'] .map-style-btn {

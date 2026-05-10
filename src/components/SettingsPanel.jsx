@@ -3,7 +3,7 @@
  * Full settings modal with map layer controls
  */
 import { useState, useEffect, useRef } from 'react';
-import { calculateGridSquare, parseGridSquare } from '../utils/geo.js';
+import { latLonToMaidenhead, maidenheadToLatLon } from '../utils/geo.js';
 import { useTranslation, Trans } from 'react-i18next';
 import { LANGUAGES } from '../lang/i18n.js';
 import {
@@ -23,6 +23,7 @@ import CustomThemeEditor from './CustomThemeEditor';
 import useLocalInstall from '../hooks/app/useLocalInstall.js';
 import { emojiToIso2 } from '../utils/countryFlags';
 import { getAlertSettings, saveAlertSettings, playTone, TONE_PRESETS, ALERT_FEEDS } from '../utils/audioAlerts';
+import { setRelaySessionId, setRelayConfigured, clearRelaySession } from '../utils/relaySession';
 
 export const SettingsPanel = ({
   isOpen,
@@ -77,7 +78,24 @@ export const SettingsPanel = ({
   const [tuneEnabled, setTuneEnabled] = useState(config?.rigControl?.tuneEnabled || false);
   const [autoMode, setAutoMode] = useState(config?.rigControl?.autoMode !== false);
   const [rigApiToken, setRigApiToken] = useState(config?.rigControl?.apiToken || '');
-  const [cloudRelaySession, setCloudRelaySession] = useState(config?.rigControl?.cloudRelaySession || '');
+  const [cloudRelaySession, setCloudRelaySession] = useState(() => {
+    // 1. Prefer localStorage — set by "Connect Cloud Relay" in this browser.
+    try {
+      const stored = localStorage.getItem('ohc-relay-session');
+      if (stored) return stored;
+    } catch {}
+    // 2. Migration: older versions stored the session in server config.
+    //    Copy it to localStorage so the user doesn't need to re-connect.
+    const serverSession = config?.rigControl?.cloudRelaySession?.trim();
+    if (serverSession && /^[a-z0-9]{8,32}$/.test(serverSession)) {
+      try {
+        localStorage.setItem('ohc-relay-session', serverSession);
+        localStorage.setItem('ohc-relay-configured', 'true');
+      } catch {}
+      return serverSession;
+    }
+    return '';
+  });
   const [showRigToken, setShowRigToken] = useState(false);
   const [wsjtxRelayStatus, setWsjtxRelayStatus] = useState(null); // null | 'pushing' | 'ok' | 'error'
   const [wsjtxRelayMsg, setWsjtxRelayMsg] = useState('');
@@ -205,7 +223,7 @@ export const SettingsPanel = ({
       setAutoMode(config.rigControl?.autoMode !== false);
       setRigApiToken(config.rigControl?.apiToken || '');
       if (config.location?.lat != null && config.location?.lon != null) {
-        const grid = calculateGridSquare(config.location.lat, config.location.lon);
+        const grid = latLonToMaidenhead({ lat: config.location.lat, lon: config.location.lon });
         setGridSquare(grid);
         setConfigLocator(grid);
       }
@@ -324,7 +342,7 @@ export const SettingsPanel = ({
     gridEditingRef.current = true;
     setGridSquare(grid.toUpperCase());
     if (grid.length >= 4) {
-      const parsed = parseGridSquare(grid);
+      const parsed = maidenheadToLatLon(grid);
       if (parsed) {
         setLat(parsed.lat);
         setLon(parsed.lon);
@@ -337,7 +355,7 @@ export const SettingsPanel = ({
     gridEditingRef.current = false;
     // Now recalculate full 6-char grid from lat/lon
     if (lat != null && lon != null) {
-      const grid = calculateGridSquare(lat, lon);
+      const grid = latLonToMaidenhead({ lat, lon });
       setGridSquare(grid);
       setConfigLocator(grid);
     }
@@ -347,7 +365,7 @@ export const SettingsPanel = ({
     // Skip auto-completion while user is actively typing in the grid field
     if (gridEditingRef.current) return;
     if (lat != null && lon != null) {
-      const grid = calculateGridSquare(lat, lon);
+      const grid = latLonToMaidenhead({ lat, lon });
       setGridSquare(grid);
       setConfigLocator(grid);
     }
@@ -453,7 +471,8 @@ export const SettingsPanel = ({
         tuneEnabled,
         autoMode,
         apiToken: rigApiToken.trim(),
-        cloudRelaySession: cloudRelaySession.trim(),
+        // cloudRelaySession intentionally omitted — session ID belongs in
+        // localStorage (per-browser), not in the shared server config.
       },
     });
   };
@@ -5115,6 +5134,8 @@ export const SettingsPanel = ({
                             if (Number.isFinite(p) && p > 0) nextRigPort = p;
                           }
                           setCloudRelaySession('');
+                          // Clear session and configured flag from localStorage
+                          clearRelaySession();
                           onSave({
                             ...config,
                             rigControl: {
@@ -5125,7 +5146,6 @@ export const SettingsPanel = ({
                               tuneEnabled,
                               autoMode,
                               apiToken: rigApiToken.trim(),
-                              cloudRelaySession: '',
                             },
                           });
                         }}
@@ -5175,6 +5195,13 @@ export const SettingsPanel = ({
                             }
 
                             setCloudRelaySession(credData.session);
+                            // Persist in localStorage so all relay-consuming hooks
+                            // (WSJTX, MeshCom, APRS) immediately poll with this ID
+                            // instead of whatever random ID they generated earlier.
+                            setRelaySessionId(credData.session);
+                            // Mark cloud relay as explicitly configured so RigContext
+                            // enters cloud relay mode on next re-render (save triggers it).
+                            setRelayConfigured(true);
 
                             // Copy config to clipboard for easy paste into rig-bridge
                             const configText = JSON.stringify(credData.configPayload, null, 2);

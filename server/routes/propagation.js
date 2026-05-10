@@ -14,7 +14,6 @@ module.exports = function (app, ctx) {
     logWarn,
     logErrorOnce,
     upstream,
-    maidenheadToLatLon,
     n0nbhCache,
     maintainCache,
   } = ctx;
@@ -24,6 +23,7 @@ module.exports = function (app, ctx) {
     calculateMUF,
     calculateLUF,
     calculateSignalMargin,
+    modeAdvantageDb,
     adjustReliability,
     calculateEnhancedReliability,
     calculateSNR,
@@ -273,6 +273,10 @@ module.exports = function (app, ctx) {
     const antennaKey = antenna || 'isotropic';
     const txGain = ANTENNA_PROFILES[antennaKey]?.gain ?? 0;
     const signalMarginDb = calculateSignalMargin(txMode, txPower, txGain);
+    // ITURHFProp already consumed txPower (Path.txpower) and txGain (TXGOS),
+    // so post-processing its BCR uses mode advantage only — applying the full
+    // signalMarginDb again would double-count power and antenna gain.
+    const p533PostAdjustDb = modeAdvantageDb(txMode);
 
     const useITURHFProp = ITURHFPROP_URL !== null;
     logDebug(
@@ -385,15 +389,18 @@ module.exports = function (app, ctx) {
               iturhfpropMuf = hourEntry.muf;
             }
 
-            // Map each frequency result to a band, applying signal margin
-            // P.533 BCR assumes SSB @ 100W isotropic. adjustReliability corrects for
-            // the user's actual mode (FT8 = +34dB), power, and antenna gain.
+            // P.533 BCR already reflects the user's TX power (Path.txpower)
+            // and antenna gain (TXGOS) — proppy passes both into ITURHFProp.
+            // Only the mode advantage (FT8 = +34 dB, etc.) needs to be
+            // applied here, since ITURHFProp runs with a fixed SSB-equivalent
+            // BW=3000 / SNRr=15 and doesn't know about digital-mode SNR
+            // thresholds.
             const hourBandReliability = {};
             for (const freqResult of hourEntry.frequencies || []) {
               const band = freqToBand(freqResult.freq);
               if (band) {
                 const raw = Math.max(0, Math.min(99, Math.round(freqResult.reliability)));
-                hourBandReliability[band] = adjustReliability(raw, signalMarginDb);
+                hourBandReliability[band] = adjustReliability(raw, p533PostAdjustDb);
               }
             }
 
@@ -444,7 +451,7 @@ module.exports = function (app, ctx) {
           currentBands = bands
             .map((band, idx) => {
               const ituBand = singleHour.bands?.[band];
-              const rel = ituBand ? adjustReliability(Math.round(ituBand.reliability), signalMarginDb) : 0;
+              const rel = ituBand ? adjustReliability(Math.round(ituBand.reliability), p533PostAdjustDb) : 0;
               // Pre-seed the predictions array with the ITURHFProp value for current hour
               if (!predictions[band]) predictions[band] = [];
               predictions[band][currentHour] = { hour: currentHour, reliability: rel, snr: calculateSNR(rel) };

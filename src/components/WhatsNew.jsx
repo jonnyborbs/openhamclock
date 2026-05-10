@@ -9,7 +9,7 @@ import { useState, useEffect } from 'react';
 // Set to null to hide. Shown at the top of the What's New modal.
 const ANNOUNCEMENT = {
   emoji: '🎪',
-  text: 'OpenHamClock will be at Dayton Hamvention 2026! Come visit us in the Flea Market area — Booth #9518. Say hi, see a live demo, and grab some stickers!\n\nWe are moving from weekly to monthly releases, giving us more time to develop features and improve stability. Look for updates on the first Tuesday of each month.',
+  text: "Surprise pre-Hamvention drop! A hotfix for the VOACAP propagation panel plus a brand-new MeshCom LoRa mesh integration — see below for details.\n\nApologies — we also missed including all of our 26.3.0 updates on the last production release. They're listed below in this What's New so you can see exactly what changed.\n\nNext week is Hamvention 2026, May 15–17 in Dayton, Ohio! Come visit OpenHamClock in the Flea Market area — Booth #9518. Say hi, see a live demo, and grab some stickers. We look forward to seeing some of you there!",
   color: '#ff6b35',
   bg: 'rgba(255, 107, 53, 0.10)',
   border: 'rgba(255, 107, 53, 0.30)',
@@ -28,6 +28,119 @@ const ANNOUNCEMENT = {
 // The jump to v26 resets the scheme to something meaningful going forward.
 
 const CHANGELOG = [
+  {
+    version: '26.3.2',
+    date: '2026-05-10',
+    heading:
+      'Surprise pre-Hamvention drop. Headline hotfix: VOACAP no longer double-counts TX power and antenna gain — at high power the WASM swap was flooding the chart green. Headline feature: brand-new MeshCom LoRa mesh integration. Also bundled: a Pi update reliability fix, a project-wide Maidenhead grid helper consolidation, an audited satellite tracking list, plus the full set of 26.3.0 and 26.3.1 features and security work that never reached production as standalone releases.',
+    features: [
+      {
+        icon: '🛰️',
+        title: 'NEW: MeshCom LoRa Mesh Integration',
+        desc: "OpenHamClock now talks to MeshCom, the LoRa-based VHF/UHF mesh network popular in Europe. Set up the new MeshCom plugin in rig-bridge and OHC will plot every node it hears on the map, list them in a tab with whatever weather or telemetry they're broadcasting, and let you read and reply to chat traffic right from the panel. Click any message to pop up reply buttons (broadcast, group, or direct), or type any callsign or group name into the To field — known nodes auto-suggest as you go. Works whether your rig-bridge talks straight to your browser or routes through Cloud Relay. Translated into all 16 languages. Big thanks to Joe Lukowski (DH1OK) for building this.",
+      },
+      {
+        icon: '🐛',
+        title: 'HOTFIX: VOACAP Was Going All Green at High Power',
+        desc: "At higher transmit powers the Propagation panel was lighting every band green — the WASM prediction looked broken. The cause: your TX power and antenna gain were being counted twice (once inside the prediction engine, then again on top of its result). Now they're only counted once, so 1,000 W and 100 W produce the realistic difference you'd expect, and bands above the MUF stop pretending to be open. The dB margin shown next to each band still reflects your real power and antenna advantage — only the math behind the colors changed.",
+      },
+      {
+        icon: '🐛',
+        title: 'Propagation Panel — First-Load Crash Fix',
+        desc: "Fixed a brief red error that could appear in the Propagation panel during the first few seconds after page load if your timezone hadn't resolved yet. The panel now waits patiently and renders normally once your location settles in.",
+      },
+      {
+        icon: '🥧',
+        title: 'Smoother update.sh on Pi and Self-Hosted Installs',
+        desc: "The update.sh script now does a fully clean Node-modules reinstall on each update instead of layering new packages on top of old ones. That fixes a few reported cases where a fresh dependency added in a recent release didn't actually land on disk after running update.sh, leading to a 'Cannot find module' error on next start. Thanks ceotjoe.",
+      },
+      {
+        icon: '🛰️',
+        title: 'Tracked Satellite List Audited',
+        desc: 'Re-curated the satellite list. Removed dead birds (AO-92 reentered Feb 2024, AO-27, RS-15, FO-99, GOES-13 deactivated, plus several decayed CAS / XW satellites and the science-only UVSQ-SAT and MeznSat). Added the new active ham birds AO-123 (ASRTU-1), SO-125 (HADES-ICM), and QMR-KWT-2, plus several active weather satellites (NOAA-20/21, EWS-G1/G2, GK-2A, ELEKTRO-L2/3, HIMAWARI-9). TEVEL constellation NORAD IDs corrected per AMSAT bulletin and ISS consolidated into a single entry. Thanks Michael Wheeley.',
+      },
+      {
+        icon: '🧹',
+        title: 'Lightning Panel — Console Typo Fix',
+        desc: 'Tiny console-log spelling typo in the Lightning code corrected (#963 — thanks Michael Wheeley).',
+      },
+      {
+        icon: '📐',
+        title: 'Behind the Scenes — Grid Locator Cleanup (closes #951)',
+        desc: 'There were several copies of Maidenhead-to-lat/lon code scattered across the project. Everything now uses one shared module that handles every grid precision (DM, DM12, DM12kv, all the way to DM12kv99) and a new bounding-box helper that plugin authors can use to draw grid overlays. The third-party @hamset/maidenhead-locator package has been retired. Thanks Michael Wheeley.',
+      },
+      {
+        icon: '🔒',
+        title: 'Cloud Relay — Credential Overhaul (26.3.1)',
+        desc: "Cloud Relay (the optional setting that lets your home rig-bridge be reached from a remote browser) got a security overhaul. Each rig-bridge now gets its own random one-time token instead of using your shared relay key, and that token survives server restarts and deploys so you don't have to keep re-pairing. Added protections against spoofed hosts and a fix for a TLS-enabled rig-bridge that was crashing on incoming commands. Heads-up: existing Cloud Relay users will need to re-run 'Connect Cloud Relay' in Settings → Rig Bridge once after this update to generate a fresh token.",
+      },
+      {
+        icon: '🔒',
+        title: 'Public-Site Security Tightening (26.3.1)',
+        desc: "Three fixes from a May audit. The Active Users map layer now ties each callsign to its source IP and rate-limits updates to once a minute, so nobody can casually spoof another op's pin. The internal health endpoint stopped exposing internal counters and visitor history to anyone who asked — only basic status and uptime are visible without auth. And the Dial-A-Moon image loader now confirms the URL is on nasa.gov before following it, closing a redirect-chasing vulnerability.",
+      },
+      {
+        icon: '♻️',
+        title: 'Server-Side Memory Leaks Closed (26.3.1)',
+        desc: 'Several server-side caches (NWS alerts, FEMA shelters, disaster declarations, MUF map, error-log dedupe) used to grow forever — invisible on a home Pi but a slow drag on openhamclock.com over weeks of uptime. Each cache now has a hard size cap and periodic cleanup.',
+      },
+      {
+        icon: '🧹',
+        title: 'Cleaner Browser Console (26.3.1)',
+        desc: "Routine status messages from the various map layers and feeds (lightning, WSPR, RBN, weather, spots, etc.) moved to debug-level logging. If you didn't have DevTools open you'll never notice — but anyone who did look saw far more noise than signal before. The verbose lines are still available behind the Debug filter, or by adding ?log=debug to the URL.",
+      },
+      {
+        icon: '📡',
+        title: 'VOACAP-Grade Propagation Predictions (26.3.0)',
+        desc: 'The Propagation panel now runs the actual ITU-R P.533 model — the same engine VOACAP itself uses — directly inside your browser. A small badge in the panel header tells you which engine produced the current view: WASM (the new in-browser P.533), REST (a server-side fallback), or EST (our older fast estimator). Predictions match VOACAP closely on long daylight paths where the older estimator was over-optimistic — for example, US to Kuwait on 80 m at midday is now correctly shown as closed.',
+      },
+      {
+        icon: '🛰️',
+        title: 'Winlink Gateway Map Layer (26.3.0)',
+        desc: "A new map layer plots 4,800+ Winlink gateways worldwide, color-coded by mode (Pactor, VARA-FM, VARA-HF, etc.). Filter by band, service, or mode in a draggable filter panel; press 'k' to toggle. The EmComm layout adds a 'Nearby Winlink Gateways' panel and rings the closest 25 gateways on the EmComm map.",
+      },
+      {
+        icon: '🛰️',
+        title: 'Satellite Next-Pass and Ending Countdown (26.3.0)',
+        desc: "The satellite info window now shows a 'Next Pass:' countdown when a satellite is below your minimum elevation, and an 'Ending:' countdown when one is currently overhead — so you know how long the window stays open. Computed for the next 7 days and refreshed hourly. Also fixed a small off-by-one that was returning one extra pass.",
+      },
+      {
+        icon: '📰',
+        title: 'DX News from Three Sources (26.3.0)',
+        desc: 'The DX News ticker now combines DXNews.com, DX-World, and NG3K into a single 24-hour feed with duplicates removed. The source label rotates so you can tell where each item came from, and clicking opens the article. Stray contest-reminder noise that was leaking into NG3K titles is now cleaned out.',
+      },
+      {
+        icon: '⚡',
+        title: 'Custom TX Power in the Propagation Panel (26.3.0)',
+        desc: "The Propagation panel's VOACAP view now has a 'Custom…' power option that pops up a 0.1–2,000 W input field, so you can model anything from QRP to legal limit without being stuck with the four preset buttons.",
+      },
+      {
+        icon: '🌅',
+        title: 'Local Sunrise/Sunset in the Propagation Panel (26.3.0)',
+        desc: 'The day/night badge in the Propagation panel now uses your actual local sunrise and sunset times instead of a fixed UTC 6 AM–6 PM window. Times are shown in your local timezone with a label (UTC for the DX side). Polar night and midnight sun are handled too.',
+      },
+      {
+        icon: '⛅',
+        title: 'Faster Weather Load (26.3.0)',
+        desc: 'Weather data now appears within a couple of seconds of changing your location instead of waiting 30 seconds for a settle delay. First fetch fires immediately when you set DE or your first DX target. If Open-Meteo rate-limits us, retries are tighter and the error message points to the optional API-key escape hatch.',
+      },
+      {
+        icon: '🛰️',
+        title: 'Satellite TLE Failover Hardening (26.3.0)',
+        desc: "When CelesTrak rate-limits us (which has happened more than once), the per-satellite SatNOGS / CelesTrak-CATNR fallback now runs without an arbitrary cap when the main fetch comes back empty — exactly when the safety net needs to fire hardest. Empty TLE responses also send a no-cache header so a CDN miss doesn't pin failure for an hour.",
+      },
+      {
+        icon: '🔒',
+        title: 'Security and Dependency Updates (26.3.0)',
+        desc: 'rig-bridge moved off the deprecated vercel/pkg packager (which had an unfixable security advisory) to the maintained @yao-pkg/pkg fork; build targets bumped from Node 18 to Node 20. The main project picked up Vite 6 and Vitest 3, closing the rest of the open advisories.',
+      },
+      {
+        icon: '🐛',
+        title: 'Other Bug Fixes (26.3.0)',
+        desc: "DX Favorites dropdown no longer clips off-screen near the edges. Duplicate version label removed from the expanded left sidebar. The MUF readout in the Propagation panel reappears after the engine swap (the previous parser was missing it). NG3K news titles no longer contain stray 'Check here for pericontest' text. ITURHFProp service stopped flooding the server log with noise.",
+      },
+    ],
+  },
   {
     version: '26.3.1',
     date: '2026-05-04',

@@ -44,6 +44,16 @@ export function calculateSignalMargin(mode, powerWatts, antGain) {
   return modeAdv + powerOffset + (antGain || 0);
 }
 
+// Mode-only advantage (dB) for post-processing P.533 reliability. ITURHFProp
+// already consumed the user's TX power (via Path.txpower) and antenna gain
+// (via TXGOS) when it produced the BCR — applying calculateSignalMargin on
+// top would double-count both. The mode advantage is legitimate to add post
+// hoc because we hardcode Path.BW=3000 / Path.SNRr=15 (SSB-equivalent), so
+// digital-mode SNR thresholds aren't reflected in the WASM output.
+export function modeAdvantageDb(mode) {
+  return MODE_ADVANTAGE_DB[mode] || 0;
+}
+
 export function adjustReliability(baseRel, signalMarginDb) {
   if (!signalMarginDb || baseRel <= 0) return baseRel;
   let rel = baseRel;

@@ -1,6 +1,6 @@
 {
   "name": "openhamclock",
-  "version": "26.3.1",
+  "version": "26.3.2",
   "description": "Amateur Radio Dashboard - A modern web-based HamClock alternative",
   "main": "electron/main.js",
   "scripts": {
@@ -21,7 +21,6 @@
     "prepare": "husky || true"
   },
   "dependencies": {
-    "@hamset/maidenhead-locator": "^0.2.1",
     "axios": "^1.6.2",
     "compression": "^1.7.4",
     "cors": "^2.8.5",

@@ -97,6 +97,62 @@ describe('runBrowserEngine', () => {
     expect(ft8.signalMargin).toBe(34);
   });
 
+  it('does NOT double-count power: 1000W and 100W produce identical reliability', async () => {
+    // Regression for the "1000W floods everything green" bug. ITURHFProp
+    // already consumed Path.txpower when it produced this raw 5% BCR, so
+    // bumping the user-facing power knob from 100W to 1000W must not change
+    // the post-processed reliability — only the WASM input changes.
+    predictMock.mockResolvedValue(fakeHourResult({ reliability: 5 }));
+
+    const at100 = await runBrowserEngine({
+      deLocation: DE,
+      dxLocation: DX,
+      mode: 'SSB',
+      power: 100,
+      antenna: 'vert-qw',
+    });
+    const at1000 = await runBrowserEngine({
+      deLocation: DE,
+      dxLocation: DX,
+      mode: 'SSB',
+      power: 1000,
+      antenna: 'vert-qw',
+    });
+
+    const rel100 = at100.currentBands[0].reliability;
+    const rel1000 = at1000.currentBands[0].reliability;
+    // Raw 5% with mode-only adjustment (SSB = 0 dB) → reliability stays 5.
+    expect(rel100).toBe(5);
+    expect(rel1000).toBe(5);
+    // Reported margin still reflects power+antenna for the UI badge.
+    expect(at100.signalMargin).toBe(1.5);
+    expect(at1000.signalMargin).toBe(11.5);
+  });
+
+  it('does NOT double-count antenna gain across antenna choices', async () => {
+    predictMock.mockResolvedValue(fakeHourResult({ reliability: 30 }));
+
+    const iso = await runBrowserEngine({
+      deLocation: DE,
+      dxLocation: DX,
+      mode: 'SSB',
+      power: 100,
+      antenna: 'isotropic',
+    });
+    const yagi = await runBrowserEngine({
+      deLocation: DE,
+      dxLocation: DX,
+      mode: 'SSB',
+      power: 100,
+      antenna: 'yagi5',
+    });
+
+    // SSB (mode advantage 0). Raw 30% should land at 30 regardless of antenna
+    // because gain is fed into ITURHFProp via TXGOS, not the post-processor.
+    expect(iso.currentBands[0].reliability).toBe(30);
+    expect(yagi.currentBands[0].reliability).toBe(30);
+  });
+
   it('picks MUF from the current-hour result', async () => {
     const currentHour = new Date().getUTCHours();
     predictMock.mockImplementation((params) =>

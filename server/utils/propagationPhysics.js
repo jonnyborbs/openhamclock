@@ -204,10 +204,20 @@ function calculateSignalMargin(mode, powerWatts, antGain) {
   return modeAdv + powerOffset + (antGain || 0);
 }
 
+// Mode-only advantage for post-processing P.533 BCR. The proppy service
+// passes the user's actual TX power (Path.txpower) and antenna gain (TXGOS)
+// straight into ITURHFProp, so power and antenna are already reflected in
+// the BCR. Only the mode advantage is missing — ITURHFProp runs with a
+// fixed SSB-equivalent BW=3000 / SNRr=15.
+function modeAdvantageDb(mode) {
+  return MODE_ADVANTAGE_DB[mode] || 0;
+}
+
 /**
- * Apply signal margin to a pre-computed base reliability. Used when we receive
- * a number from ITURHFProp/P.533 which already embeds its own SSB/100 W
- * assumption — we shift it by the user's actual mode/power/antenna.
+ * Apply a dB margin to a pre-computed base reliability via a softmax-style
+ * curve. Used to nudge the heuristic engine's output by the full
+ * mode/power/antenna margin, and to nudge P.533 output by mode advantage
+ * alone (P.533 has already consumed power and antenna).
  */
 function adjustReliability(baseRel, signalMarginDb) {
   if (!signalMarginDb || baseRel <= 0) return baseRel;
@@ -332,6 +342,7 @@ module.exports = {
   calculateMUF,
   calculateLUF,
   calculateSignalMargin,
+  modeAdvantageDb,
   adjustReliability,
   calculateEnhancedReliability,
   calculateSNR,

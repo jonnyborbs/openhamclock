@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   calculateSignalMargin,
+  modeAdvantageDb,
   adjustReliability,
   calculateSNR,
   getStatus,
@@ -71,5 +72,15 @@ describe('propagationAdjust — table exports', () => {
     // 0.01W floor only kicks in when callers pass a truthy small value.
     expect(calculateSignalMargin('SSB', 0, 0)).toBe(0);
     expect(calculateSignalMargin('SSB', 0.01, 0)).toBeCloseTo(-40, 5);
+  });
+
+  it('modeAdvantageDb returns mode advantage only (no power/antenna)', () => {
+    // P.533 post-processing: power and antenna are inside ITURHFProp's input,
+    // so post-hoc adjustment should be mode-only to avoid double counting.
+    expect(modeAdvantageDb('SSB')).toBe(0);
+    expect(modeAdvantageDb('FT8')).toBe(34);
+    expect(modeAdvantageDb('CW')).toBe(10);
+    expect(modeAdvantageDb('WSPR')).toBe(41);
+    expect(modeAdvantageDb('UNKNOWN_MODE')).toBe(0);
   });
 });

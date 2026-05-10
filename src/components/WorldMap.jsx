@@ -6,14 +6,14 @@ import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next';
 import { MAP_STYLES } from '../utils/config.js';
 import {
-  calculateGridSquare,
+  latLonToMaidenhead,
   getSunPosition,
   getMoonPosition,
   getGreatCirclePoints,
   replicatePath,
   replicatePoint,
 } from '../utils/geo.js';
-import { getBandColor, getBandFromFreq } from '../utils/callsign.js';
+import { getBandColor, getBandFromFreq, primaryCall } from '../utils/callsign.js';
 import {
   BAND_LEGEND_ORDER,
   getBandColorForBand,
@@ -127,6 +127,8 @@ export const WorldMap = ({
   showAPRS,
   aprsStations,
   aprsWatchlistCalls,
+  showMeshCom,
+  meshcomNodes,
   onSpotClick,
   hoveredSpot,
   callsign = 'N0CALL',
@@ -162,6 +164,7 @@ export const WorldMap = ({
   const pskMarkersRef = useRef([]);
   const wsjtxMarkersRef = useRef([]);
   const aprsMarkersRef = useRef([]);
+  const meshcomMarkersRef = useRef([]);
   const countriesLayerRef = useRef([]);
   const dxLockedRef = useRef(dxLocked);
   const pinnedPopupRef = useRef({ marker: null, timer: null });
@@ -353,7 +356,7 @@ export const WorldMap = ({
   // Calculate grid locator from DE location for plugins
   const deLocator = useMemo(() => {
     if (deLocation?.lat == null || deLocation?.lon == null) return '';
-    return calculateGridSquare(deLocation.lat, deLocation.lon);
+    return latLonToMaidenhead({ lat: deLocation.lat, lon: deLocation.lon });
   }, [deLocation?.lat, deLocation?.lon]);
 
   const selectedMapBands = useMemo(() => {
@@ -1250,7 +1253,7 @@ export const WorldMap = ({
         iconSize: [32, 32],
         iconAnchor: [16, 16],
       });
-      const html = `<b>DE - Your Location</b><br>${esc(calculateGridSquare(deLocation.lat, deLocation.lon))}<br>${deLocation.lat.toFixed(4)}°, ${deLocation.lon.toFixed(4)}°`;
+      const html = `<b>DE - Your Location</b><br>${esc(latLonToMaidenhead({ lat: deLocation.lat, lon: deLocation.lon }))}<br>${deLocation.lat.toFixed(4)}°, ${deLocation.lon.toFixed(4)}°`;
       const m = L.marker([lat, lon], { icon: deIcon, zIndexOffset: 20000 }).addTo(map);
       attachPopupWeather(m, lat, lon, html);
       deMarkerRef.current.push(m);
@@ -1264,7 +1267,7 @@ export const WorldMap = ({
         iconSize: [32, 32],
         iconAnchor: [16, 16],
       });
-      const baseHtml = `<b>DX - Target</b><br>${esc(calculateGridSquare(dxLocation.lat, dxLocation.lon))}<br>${dxLocation.lat.toFixed(4)}°, ${dxLocation.lon.toFixed(4)}°`;
+      const baseHtml = `<b>DX - Target</b><br>${esc(latLonToMaidenhead({ lat: dxLocation.lat, lon: dxLocation.lon }))}<br>${dxLocation.lat.toFixed(4)}°, ${dxLocation.lon.toFixed(4)}°`;
       const m = L.marker([lat, lon], { icon: dxIcon, zIndexOffset: 19000 }).addTo(map);
       attachPopupWeather(m, lat, lon, baseHtml);
       dxMarkerRef.current.push(m);
@@ -2113,6 +2116,91 @@ export const WorldMap = ({
       });
     }
   }, [aprsStations, showAPRS, aprsWatchlistCalls]);
+
+  // Update MeshCom node markers
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+
+    meshcomMarkersRef.current.forEach((m) => map.removeLayer(m));
+    meshcomMarkersRef.current = [];
+
+    if (showMeshCom && meshcomNodes && meshcomNodes.length > 0) {
+      meshcomNodes.forEach((node) => {
+        // Coordinates must be finite numbers — 0 is a valid position
+        if (!Number.isFinite(node.lat) || !Number.isFinite(node.lon)) return;
+
+        // Compute age at render time so SSE-delivered nodes age correctly in
+        // local/direct mode where polling returns no server-side ageMin.
+        const ageMin = Math.max(0, Math.floor((Date.now() - (node.timestamp ?? 0)) / 60_000));
+        const isAged = ageMin > 30;
+        // Brand crimson when fresh, grey when aged >30 min
+        const nodeColor = isAged ? '#6b7280' : '#8B1A2A';
+
+        // MeshCom logo — mesh network icon matching the official brand mark.
+        // White disc background ensures visibility on any map tile colour.
+        // Centre: (12,12), outer radius 7.5, outer node r 2.2, centre node r 3.8
+        const iconHtml = `<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="11.5" fill="white" fill-opacity="0.88" stroke="${nodeColor}" stroke-width="0.6"/>
+          <line x1="12" y1="4.5"  x2="18.5" y2="8.25"  stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="18.5" y1="8.25"  x2="18.5" y2="15.75" stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="18.5" y1="15.75" x2="12"   y2="19.5"  stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="12"   y1="19.5"  x2="5.5"  y2="15.75" stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="5.5"  y1="15.75" x2="5.5"  y2="8.25"  stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="5.5"  y1="8.25"  x2="12"   y2="4.5"   stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="12" y1="12" x2="12"   y2="4.5"   stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="12" y1="12" x2="18.5" y2="8.25"  stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="12" y1="12" x2="18.5" y2="15.75" stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="12" y1="12" x2="12"   y2="19.5"  stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="12" y1="12" x2="5.5"  y2="15.75" stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="12" y1="12" x2="5.5"  y2="8.25"  stroke="${nodeColor}" stroke-width="1.3"/>
+          <circle cx="12"  cy="4.5"  r="2.2" fill="white" stroke="${nodeColor}" stroke-width="1.3"/>
+          <circle cx="18.5" cy="8.25"  r="2.2" fill="white" stroke="${nodeColor}" stroke-width="1.3"/>
+          <circle cx="18.5" cy="15.75" r="2.2" fill="white" stroke="${nodeColor}" stroke-width="1.3"/>
+          <circle cx="12"  cy="19.5" r="2.2" fill="white" stroke="${nodeColor}" stroke-width="1.3"/>
+          <circle cx="5.5" cy="15.75" r="2.2" fill="white" stroke="${nodeColor}" stroke-width="1.3"/>
+          <circle cx="5.5" cy="8.25"  r="2.2" fill="white" stroke="${nodeColor}" stroke-width="1.3"/>
+          <circle cx="12" cy="12" r="3.8" fill="${nodeColor}"/>
+        </svg>`;
+
+        const ageStr = ageMin < 1 ? 'now' : ageMin < 60 ? `${ageMin}m ago` : `${Math.floor(ageMin / 60)}h ago`;
+
+        const battLine = node.batt != null ? `${t('meshcomPanel.mapPopupBattery')} ${Math.round(node.batt)}%<br>` : '';
+        const altLine = node.alt != null ? `${t('meshcomPanel.mapPopupAlt')} ${Math.round(node.alt)}m<br>` : '';
+        const wxLine =
+          node.weather?.tempC != null
+            ? `${node.weather.tempC.toFixed(1)}°C ${node.weather.humidity != null ? node.weather.humidity.toFixed(0) + '% ' : ''}${node.weather.pressureHpa != null ? node.weather.pressureHpa.toFixed(0) + 'hPa' : ''}<br>`
+            : '';
+
+        try {
+          replicatePoint(node.lat, node.lon).forEach(([rLat, rLon]) => {
+            const marker = L.marker([rLat, rLon], {
+              icon: L.divIcon({
+                className: '',
+                html: iconHtml,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12],
+              }),
+              zIndexOffset: 1200,
+            });
+
+            marker
+              .bindPopup(
+                `<b style="color:var(--accent-cyan)">${esc(primaryCall(node.call))}</b><br>
+                <span style="color:var(--text-muted);font-size:11px">${t('meshcomPanel.mapPopupAge', { age: ageStr })}</span><br>
+                ${battLine}${altLine}${wxLine}
+                ${node.firmware ? `<span style="font-size:10px;color:var(--text-muted)">${t('meshcomPanel.mapPopupFirmware')} ${esc(node.firmware)}</span>` : ''}`,
+              )
+              .addTo(map);
+
+            meshcomMarkersRef.current.push(marker);
+          });
+        } catch {
+          // skip bad node
+        }
+      });
+    }
+  }, [meshcomNodes, showMeshCom, t]);
 
   const openBandColorEditor = (band) => {
     setEditingBand(band);

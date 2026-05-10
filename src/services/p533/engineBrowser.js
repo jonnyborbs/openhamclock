@@ -15,6 +15,7 @@ import { predictInWorker } from './predictInWorker.js';
 import {
   ANTENNA_PROFILES,
   calculateSignalMargin,
+  modeAdvantageDb,
   adjustReliability,
   calculateSNR,
   getStatus,
@@ -77,7 +78,11 @@ export async function runBrowserEngine({
   const txPower = parseFloat(power) || 100;
   const antProfile = ANTENNA_PROFILES[antenna] || ANTENNA_PROFILES.isotropic;
   const txGain = antProfile.gain;
+  // Full margin is reported back in the response for the UI's "+/-NdB" badge,
+  // but post-processing the BCR uses mode advantage only — power and gain
+  // are already inside the WASM input (Path.txpower / TXGOS).
   const signalMarginDb = calculateSignalMargin(mode, txPower, txGain);
+  const postAdjustDb = modeAdvantageDb(mode);
 
   const now = new Date();
   const year = now.getUTCFullYear();
@@ -120,7 +125,7 @@ export async function runBrowserEngine({
       const band = freqToBand(f.freq);
       if (band) {
         const raw = Math.max(0, Math.min(99, Math.round(f.reliability)));
-        perBand[band] = adjustReliability(raw, signalMarginDb);
+        perBand[band] = adjustReliability(raw, postAdjustDb);
       }
     }
 
