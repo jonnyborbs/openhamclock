@@ -467,7 +467,7 @@
   "station.settings.satellites.name_plural": "ดาวเทียม",
   "station.settings.satellites.nextPass": "รอบผ่านถัดไป",
   "station.settings.satellites.predict": "คาดการณ์",
-  "station.settings.satellites.predictionDetails": "รายละเอียดการทำนายดาวเทียม",
+  "station.settings.satellites.predictionDetails": "รายละเอียดการคาดการณ์ดาวเทียม",
   "station.settings.satellites.range": "ระยะทาง",
   "station.settings.satellites.rangeRate": "อัตราการของระยะทาง",
   "station.settings.satellites.selectAll": "เลือกทั้งหมด",
