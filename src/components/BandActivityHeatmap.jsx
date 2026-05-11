@@ -110,8 +110,10 @@ export default function BandActivityHeatmap({ dxSpots = [], userCallsign = '' })
       const band = getBandFromFreq(spot.freq);
       if (!band || !BANDS.includes(band)) continue;
 
+      // Spot list shape from useDXClusterData uses `call` for the DX side;
+      // accept `dxCall` too in case the panel is fed from a different source.
       const sCont = getCallsignInfo(spot.spotter)?.continent;
-      const dCont = getCallsignInfo(spot.dxCall)?.continent;
+      const dCont = getCallsignInfo(spot.call || spot.dxCall)?.continent;
 
       // Only count spots where at least one party is on the perspective continent.
       // The "other" party determines which column the spot lands in. If both are on
