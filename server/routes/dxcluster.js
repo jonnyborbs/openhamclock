@@ -1314,17 +1314,29 @@ module.exports = function (app, ctx) {
       if (source === 'udp') {
         const udpSession = getOrCreateDxUdpSession(udpHost, udpPort);
         udpSession.lastAccess = now;
-        newSpots = (udpSession.spots || []).slice(0, 100).map((s) => ({
-          spotter: s.spotter,
-          spotterGrid: s.spotterGrid || CONFIG.gridSquare || null,
-          dxCall: s.dxCall,
-          dxGrid: s.dxGrid || null,
-          freq: s.freq,
-          comment: s.comment || '',
-          time: s.time || toHHMMz(s.timestamp),
-          timestamp: s.timestamp || now,
-          id: s.id || `${s.dxCall}-${s.freq}-${s.spotter}-${s.timestamp || now}`,
-        }));
+        const ownCall = String(CONFIG.callsign || '')
+          .toUpperCase()
+          .split(/[-/]/)[0];
+        newSpots = (udpSession.spots || []).slice(0, 100).map((s) => {
+          // Only assume the spot originated here when the UDP payload's spotter is our own call.
+          // Otherwise the downstream HamQTH/prefix lookups locate the real spotter — falling back
+          // to CONFIG.gridSquare draws every line back to the user's home station (#961).
+          const spotterBase = String(s.spotter || '')
+            .toUpperCase()
+            .split(/[-/]/)[0];
+          const isSelfSpot = ownCall && spotterBase && spotterBase === ownCall;
+          return {
+            spotter: s.spotter,
+            spotterGrid: s.spotterGrid || (isSelfSpot ? CONFIG.gridSquare || null : null),
+            dxCall: s.dxCall,
+            dxGrid: s.dxGrid || null,
+            freq: s.freq,
+            comment: s.comment || '',
+            time: s.time || toHHMMz(s.timestamp),
+            timestamp: s.timestamp || now,
+            id: s.id || `${s.dxCall}-${s.freq}-${s.spotter}-${s.timestamp || now}`,
+          };
+        });
         usedSource = 'udp';
         if (newSpots.length > 0) {
           logDebug('[DX Paths] Got', newSpots.length, 'spots from UDP');
