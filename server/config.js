@@ -201,9 +201,9 @@ const APRS_CALLSIGN_FILTER = process.env.APRS_CALLSIGN_FILTER || '';
 const N3FJP_QSO_RETENTION_MINUTES = parseInt(process.env.N3FJP_QSO_RETENTION_MINUTES || '720');
 
 // Rotator settings
+// Note: PSTROTATOR_HOST and PSTROTATOR_UDP_PORT are read directly from
+// process.env inside server/routes/rotator.js — they're not surfaced here.
 const ROTATOR_PROVIDER = process.env.ROTATOR_PROVIDER || 'none';
-const ROTATOR_HOST = process.env.ROTATOR_HOST || '127.0.0.1';
-const ROTATOR_PORT = parseInt(process.env.ROTATOR_PORT || '12000', 10);
 
 // Rig Bridge Cloud Relay
 const RIG_BRIDGE_RELAY_KEY = process.env.RIG_BRIDGE_RELAY_KEY || process.env.WSJTX_RELAY_KEY || '';
@@ -246,8 +246,6 @@ module.exports = {
   APRS_CALLSIGN_FILTER,
   N3FJP_QSO_RETENTION_MINUTES,
   ROTATOR_PROVIDER,
-  ROTATOR_HOST,
-  ROTATOR_PORT,
   RIG_BRIDGE_RELAY_KEY,
   DXSPIDER_PROXY_URL,
   CORS_ORIGINS,
