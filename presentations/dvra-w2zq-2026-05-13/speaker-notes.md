@@ -72,7 +72,7 @@ can be using it ninety seconds from now.
 > "Anyone who's been licensed for more than a few years probably knows the
 > name Elwood Downey, WB0OEW. He built the original HamClock — the little
 > dashboard you've seen mounted on Raspberry Pis in shacks all over the
-> place. He became a Silent Key in early 2024."
+> place. He became a Silent Key in early 2026."
 >
 > "HamClock ran on Pis, on tablets, on old laptops, on those cheap 800x480
 > screens. It was honest, it was useful, it was beautifully crafted. And it
@@ -176,10 +176,25 @@ they've been waiting for.
 > "If you run FT8 or FT4 or WSPR — you don't need a second tab open anymore.
 > It's right there next to everything else."
 
+**DVRA contributor moment — DO NOT SKIP:**
+
+There's a callout on this slide for **Rich Freedman, N2EHL**, a DVRA
+member whose work shaped the cluster filtering UX. Pause when you reach
+it. Look toward Rich if he's in the room. Suggested line:
+
+> "Quick aside — the cluster filtering you're seeing here, the exclude
+> list, the watchlist, band/mode/zone — that pattern is largely shaped
+> by contributions from one of your own, Rich Freedman, N2EHL. And the
+> same approach is what now drives how activations get filtered too.
+> Rich, if you're here — thank you. Your contributions are greatly
+> appreciated."
+
+Let the room react. This is a moment.
+
 **Transition:**
 
-> "Beyond rag-chewing and DX, the cluster shows another whole world —
-> portable activators."
+> "Speaking of activations — beyond rag-chewing and DX, the cluster
+> shows another whole world: portable activators."
 
 ---
 
@@ -522,10 +537,14 @@ for _them_.
 
 **Sample close:**
 
-> "Thanks again for having me. This project exists because of WB0OEW
-> Elwood Downey, and because of 28 people who decided to send PRs to a
-> three-month-old repo. If anyone has questions — I'm Chris, K0CJH, my
-> contact's on the screen — I'd love to take them."
+> "Thanks again for having me. This project exists because of 28 people
+> who decided to send PRs to a three-month-old repo. And a special thanks
+> on screen to one of your own — Rich Freedman, N2EHL — whose work on
+> cluster filtering shaped how the activations panel filters too. Rich,
+> truly appreciated."
+>
+> "If anyone has questions — I'm Chris, K0CJH, my contact's on the screen
+> — I'd love to take them."
 
 **73, sit back, take questions.**
 
