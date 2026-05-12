@@ -237,35 +237,55 @@ module.exports = function (app, ctx) {
         logDebug(
           `[Satellites] ${missingSats.length} sats missing from group files: ${missingSats.map(([k]) => k).join(', ')}`,
         );
-        // Fetch in batches of 5 to avoid hammering upstream
-        for (let i = 0; i < missingSats.length; i += 5) {
-          const batch = missingSats.slice(i, i + 5);
+
+        // CelesTrak rate-limits aggressive parallel requests by returning HTTP 200 with an
+        // empty body. Keep parallelism low and retry once on empty/short responses before
+        // falling through to SatNOGS — SatNOGS doesn't carry weather geos (EWS-G2, GK-2A,
+        // HIMAWARI-9), so giving up on CelesTrak too quickly poisons the 12h cache.
+        const PER_NORAD_BATCH_SIZE = 2;
+        const PER_NORAD_BATCH_DELAY_MS = 500;
+
+        const fetchCelestrakCatnr = async (sat) => {
+          const res = await fetch(`https://celestrak.org/NORAD/elements/gp.php?CATNR=${sat.norad}&FORMAT=tle`, {
+            headers: { 'User-Agent': `OpenHamClock/${APP_VERSION}` },
+            signal: AbortSignal.timeout(5000),
+          });
+          if (!res.ok) return { ok: false, reason: `http ${res.status}` };
+          const text = await res.text();
+          const lines = text.trim().split('\n');
+          if (lines.length >= 3 && lines[1].trim().startsWith('1 ')) {
+            return { ok: true, tle1: lines[1].trim(), tle2: lines[2].trim() };
+          }
+          // 200 with empty body == rate limited. Caller will retry.
+          return {
+            ok: false,
+            reason: text.trim().length === 0 ? 'empty body (throttled?)' : `unexpected ${lines.length} lines`,
+          };
+        };
+
+        for (let i = 0; i < missingSats.length; i += PER_NORAD_BATCH_SIZE) {
+          const batch = missingSats.slice(i, i + PER_NORAD_BATCH_SIZE);
           const results = await Promise.allSettled(
             batch.map(async ([key, sat]) => {
-              // Try CelesTrak individual CATNR lookup first
-              try {
-                const catRes = await fetch(
-                  `https://celestrak.org/NORAD/elements/gp.php?CATNR=${sat.norad}&FORMAT=tle`,
-                  {
-                    headers: { 'User-Agent': `OpenHamClock/${APP_VERSION}` },
-                    signal: AbortSignal.timeout(5000),
-                  },
-                );
-                if (catRes.ok) {
-                  const catText = await catRes.text();
-                  const catLines = catText.trim().split('\n');
-                  if (catLines.length >= 3 && catLines[1].trim().startsWith('1 ')) {
+              // Try CelesTrak CATNR, retry once after 1s if it looks throttled
+              for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                  const r = await fetchCelestrakCatnr(sat);
+                  if (r.ok) {
                     const tleKey = key.replace(/[^A-Z0-9\-]/g, '_').toUpperCase();
-                    tleData[tleKey] = { ...sat, tle1: catLines[1].trim(), tle2: catLines[2].trim() };
-                    logDebug(`[Satellites] Filled ${key} (NORAD ${sat.norad}) from CelesTrak CATNR`);
+                    tleData[tleKey] = { ...sat, tle1: r.tle1, tle2: r.tle2 };
+                    logDebug(
+                      `[Satellites] Filled ${key} (NORAD ${sat.norad}) from CelesTrak CATNR${attempt ? ' (retry)' : ''}`,
+                    );
                     return key;
                   }
+                  logDebug(`[Satellites] CelesTrak CATNR ${sat.norad} ${r.reason}${attempt ? '' : ' — retrying'}`);
+                } catch (e) {
                   logDebug(
-                    `[Satellites] CelesTrak CATNR ${sat.norad} returned unexpected format: ${catLines.length} lines`,
+                    `[Satellites] CelesTrak CATNR ${sat.norad} failed: ${e.message}${attempt ? '' : ' — retrying'}`,
                   );
                 }
-              } catch (e) {
-                logDebug(`[Satellites] CelesTrak CATNR ${sat.norad} failed: ${e.message}`);
+                if (attempt === 0) await new Promise((r) => setTimeout(r, 1000));
               }
 
               // Fallback: SatNOGS TLE API
@@ -297,10 +317,31 @@ module.exports = function (app, ctx) {
           );
           const filled = results.filter((r) => r.status === 'fulfilled' && r.value).map((r) => r.value);
           if (filled.length > 0) logDebug(`[Satellites] Batch filled: ${filled.join(', ')}`);
-          // Small delay between batches to be polite
-          if (i + 5 < missingSats.length) await new Promise((r) => setTimeout(r, 300));
+          if (i + PER_NORAD_BATCH_SIZE < missingSats.length)
+            await new Promise((r) => setTimeout(r, PER_NORAD_BATCH_DELAY_MS));
         }
         logDebug(`[Satellites] After fill: ${Object.keys(tleData).length} total satellites resolved`);
+
+        // If we still failed to resolve any sats AND we have a previous good cache that's
+        // not too old, don't poison the cache with a partial result — bubble out and let
+        // the outer code serve stale. Without this, a single bad refresh strands users for
+        // 12h until the next cache expiry.
+        const stillMissing = Object.entries(HAM_SATELLITES).filter(
+          ([, s]) => !Object.values(tleData).some((t) => t.norad === s.norad),
+        );
+        if (
+          stillMissing.length >= 5 &&
+          tleCache.data &&
+          now - tleCache.timestamp < TLE_STALE_SERVE_LIMIT &&
+          Object.keys(tleCache.data).length > Object.keys(tleData).length
+        ) {
+          logWarn(
+            `[Satellites] Refresh degraded (${stillMissing.length} unresolved: ${stillMissing.map(([k]) => k).join(', ')}); keeping previous cache of ${Object.keys(tleCache.data).length}`,
+          );
+          tleNegativeCache = now;
+          res.set('X-TLE-Stale', 'true');
+          return res.json(tleCache.data);
+        }
       }
 
       // ISS fallback — try CelesTrak direct if ISS not found
