@@ -299,6 +299,27 @@ export const IconExpand = ({ size = defaults.size, color = defaults.color, ...pr
   </svg>
 );
 
+// Trash / Clear
+export const IconTrash = ({ size = defaults.size, color = defaults.color, ...props }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke={color}
+    strokeWidth="1.6"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <path d="M2.5 4h11" />
+    <path d="M6 4V2.5h4V4" />
+    <path d="M3.5 4l.8 9.5a1 1 0 0 0 1 .9h5.4a1 1 0 0 0 1-.9L12.5 4" />
+    <line x1="6.5" y1="7" x2="6.5" y2="12" />
+    <line x1="9.5" y1="7" x2="9.5" y2="12" />
+  </svg>
+);
+
 // Fullscreen shrink
 export const IconShrink = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
@@ -336,4 +357,5 @@ export default {
   IconTag,
   IconExpand,
   IconShrink,
+  IconTrash,
 };

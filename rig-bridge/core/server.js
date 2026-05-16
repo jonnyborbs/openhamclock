@@ -820,6 +820,16 @@ function buildSetupHtml(version, firstRunToken = null) {
             </div>
           </div>
 
+          <!-- HamQTH callsign lookup (always visible when enabled) -->
+          <div class="checkbox-row" style="margin-top:10px;">
+            <input type="checkbox" id="wsjtxHamqth">
+            <span>HamQTH callsign lookup</span>
+          </div>
+          <div class="help-text" style="margin-top:-8px; margin-bottom:10px;">
+            Resolve unknown callsigns to country-level coordinates via the HamQTH DXCC database.
+            Results are cached for 24 h. Requires outbound internet access from this machine.
+          </div>
+
           <!-- Server relay fields — only shown in relay mode -->
           <div id="wsjtxServerOpts" style="display:none; margin-top:4px; padding:10px 12px; background:#1a1f2e; border:1px solid #2d3548; border-radius:6px;">
             <label>OpenHamClock Server URL</label>
@@ -997,6 +1007,11 @@ function buildSetupHtml(version, firstRunToken = null) {
         { id: 'pushInterval', label: 'Push Interval (ms)', type: 'number', default: 2000 },
         { id: 'pollInterval', label: 'Poll Interval (ms)', type: 'number', default: 1000 },
       ]},
+      { key: 'meshcom', name: 'MeshCom UDP', maturity: 'beta', desc: 'Receive MeshCom LoRa mesh node positions, messages and telemetry via UDP JSON (port 1799)', fields: [
+        { id: 'bindPort', label: 'UDP Listen Port', type: 'number', default: 1799 },
+        { id: 'bindHost', label: 'Bind Address', type: 'text', default: '0.0.0.0' },
+        { id: 'verbose', label: 'Verbose logging', type: 'checkbox', default: false },
+      ]},
     ];
 
     function maturityBadge(level) {
@@ -1130,6 +1145,7 @@ function buildSetupHtml(version, firstRunToken = null) {
       document.getElementById('wsjtxMulticast').checked = !!w.multicast;
       document.getElementById('wsjtxMulticastGroup').value = w.multicastGroup || '224.0.0.1';
       document.getElementById('wsjtxMulticastInterface').value = w.multicastInterface || '';
+      document.getElementById('wsjtxHamqth').checked = !!w.hamqthLookup;
       // Set delivery mode radio
       const relayMode = !!w.relayToServer;
       document.getElementById('wsjtxModeSSE').checked = !relayMode;
@@ -1200,6 +1216,7 @@ function buildSetupHtml(version, firstRunToken = null) {
         multicast: document.getElementById('wsjtxMulticast').checked,
         multicastGroup: document.getElementById('wsjtxMulticastGroup').value.trim() || '224.0.0.1',
         multicastInterface: document.getElementById('wsjtxMulticastInterface').value.trim(),
+        hamqthLookup: document.getElementById('wsjtxHamqth').checked,
       };
       try {
         const res = await fetch('/api/config', {
@@ -1231,11 +1248,14 @@ function buildSetupHtml(version, firstRunToken = null) {
           if (!data.running) {
             el.textContent = 'Not running';
             el.style.color = '#6b7280';
-          } else if (!data.serverReachable) {
+          } else if (data.relayToServer && !data.serverReachable) {
             el.textContent = 'Running — connecting to server...';
             el.style.color = '#f59e0b';
           } else {
-            el.textContent = 'Running — ' + data.decodeCount + ' decodes, ' + data.relayCount + ' relayed';
+            let status = 'Running — ' + data.decodeCount + ' decodes';
+            if (data.relayToServer) status += ', ' + data.relayCount + ' relayed';
+            if (data.hamqthLookup) status += ', ' + data.callsignCacheSize + ' callsigns cached';
+            el.textContent = status;
             el.style.color = '#22c55e';
           }
         } catch (e) {}
@@ -2170,7 +2190,7 @@ function createServer(registry, version) {
       config.rtltcp = { ...config.rtltcp, ...newConfig.rtltcp };
     }
     // Deep-merge plugin config sections
-    for (const key of ['mshv', 'jtdx', 'js8call', 'aprs', 'rotator', 'cloudRelay', 'winlink']) {
+    for (const key of ['mshv', 'jtdx', 'js8call', 'aprs', 'rotator', 'cloudRelay', 'winlink', 'meshcom']) {
       if (newConfig[key]) {
         config[key] = { ...(config[key] || {}), ...newConfig[key] };
         // Handle nested objects (e.g. winlink.pat)

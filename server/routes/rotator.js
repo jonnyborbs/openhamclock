@@ -10,11 +10,26 @@ module.exports = function (app, ctx) {
 
   // Default to 'none' so hosted/cloud instances don't try to reach a LAN rotator.
   // Self-hosted users must explicitly set ROTATOR_PROVIDER=pstrotator_udp.
-  const ROTATOR_PROVIDER = (process.env.ROTATOR_PROVIDER || 'none').toLowerCase();
-  const PSTROTATOR_HOST = process.env.PSTROTATOR_HOST || '192.168.1.43';
+  const SUPPORTED_PROVIDERS = new Set(['none', 'pstrotator_udp']);
+  const rawProvider = (process.env.ROTATOR_PROVIDER || 'none').toLowerCase();
+  let ROTATOR_PROVIDER = rawProvider;
+  if (!SUPPORTED_PROVIDERS.has(rawProvider)) {
+    console.warn(
+      `[Rotator] Unknown ROTATOR_PROVIDER='${rawProvider}'. Supported: ${[...SUPPORTED_PROVIDERS].join(', ')}. Disabling rotator.`,
+    );
+    ROTATOR_PROVIDER = 'none';
+  }
+  const PSTROTATOR_HOST = process.env.PSTROTATOR_HOST || '';
   const PSTROTATOR_UDP_PORT = parseInt(process.env.PSTROTATOR_UDP_PORT || '12000', 10);
   const ROTATOR_STALE_MS = parseInt(process.env.ROTATOR_STALE_MS || '5000', 10);
   const ROTATOR_POLL_MS = parseInt(process.env.ROTATOR_POLL_MS || '1000', 10);
+
+  // Refuse to start the UDP poll if the user enabled the provider but forgot to
+  // point it at a host — otherwise we'd silently blast UDP to whatever we'd defaulted to.
+  if (ROTATOR_PROVIDER === 'pstrotator_udp' && !PSTROTATOR_HOST) {
+    console.warn('[Rotator] ROTATOR_PROVIDER=pstrotator_udp but PSTROTATOR_HOST is not set. Disabling rotator.');
+    ROTATOR_PROVIDER = 'none';
+  }
 
   // PstRotatorAz replies to UDP port+1 at the sender's IP (per manual)
   const PSTROTATOR_REPLY_PORT = PSTROTATOR_UDP_PORT + 1;

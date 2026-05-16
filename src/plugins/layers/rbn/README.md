@@ -306,7 +306,7 @@ Higher SNR = stronger signal = better propagation!
 
 ### File Structure
 
-```
+```text
 src/plugins/layers/
 ├── useRBN.js           # Main plugin file
 └── rbn/
@@ -322,7 +322,6 @@ src/plugins/layers/
 
 ### Key Functions
 
-- `gridToLatLon(grid)`: Converts Maidenhead grid to coordinates
 - `getSNRColor(snr)`: Maps SNR to color gradient
 - `getMarkerSize(snr)`: Maps SNR to marker size
 - `getGreatCirclePath()`: Calculates curved paths
@@ -501,6 +500,6 @@ MIT License - Same as OpenHamClock project
 
 ---
 
-_73 de OpenHamClock Contributors! 📡_
+_73 de OpenHamClock Contributors! 📡_ <!-- markdownlint-disable-line MD036 -->
 
 _"See your signal around the world!"_ 🌍

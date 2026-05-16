@@ -6,14 +6,14 @@ import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next';
 import { MAP_STYLES } from '../utils/config.js';
 import {
-  calculateGridSquare,
+  latLonToMaidenhead,
   getSunPosition,
   getMoonPosition,
   getGreatCirclePoints,
   replicatePath,
   replicatePoint,
 } from '../utils/geo.js';
-import { getBandColor, getBandFromFreq } from '../utils/callsign.js';
+import { getBandColor, getBandFromFreq, primaryCall } from '../utils/callsign.js';
 import {
   BAND_LEGEND_ORDER,
   getBandColorForBand,
@@ -92,6 +92,7 @@ import { mapDefs as WWFFDefs } from './WWFFPanel.jsx';
 const POPUP_AUTO_CLOSE_MS = 20_000;
 
 export const WorldMap = ({
+  config,
   deLocation,
   dxLocation,
   onDXChange,
@@ -126,6 +127,8 @@ export const WorldMap = ({
   showAPRS,
   aprsStations,
   aprsWatchlistCalls,
+  showMeshCom,
+  meshcomNodes,
   onSpotClick,
   hoveredSpot,
   callsign = 'N0CALL',
@@ -161,6 +164,7 @@ export const WorldMap = ({
   const pskMarkersRef = useRef([]);
   const wsjtxMarkersRef = useRef([]);
   const aprsMarkersRef = useRef([]);
+  const meshcomMarkersRef = useRef([]);
   const countriesLayerRef = useRef([]);
   const dxLockedRef = useRef(dxLocked);
   const pinnedPopupRef = useRef({ marker: null, timer: null });
@@ -352,7 +356,7 @@ export const WorldMap = ({
   // Calculate grid locator from DE location for plugins
   const deLocator = useMemo(() => {
     if (deLocation?.lat == null || deLocation?.lon == null) return '';
-    return calculateGridSquare(deLocation.lat, deLocation.lon);
+    return latLonToMaidenhead({ lat: deLocation.lat, lon: deLocation.lon });
   }, [deLocation?.lat, deLocation?.lon]);
 
   const selectedMapBands = useMemo(() => {
@@ -1249,7 +1253,7 @@ export const WorldMap = ({
         iconSize: [32, 32],
         iconAnchor: [16, 16],
       });
-      const html = `<b>DE - Your Location</b><br>${esc(calculateGridSquare(deLocation.lat, deLocation.lon))}<br>${deLocation.lat.toFixed(4)}°, ${deLocation.lon.toFixed(4)}°`;
+      const html = `<b>DE - Your Location</b><br>${esc(latLonToMaidenhead({ lat: deLocation.lat, lon: deLocation.lon }))}<br>${deLocation.lat.toFixed(4)}°, ${deLocation.lon.toFixed(4)}°`;
       const m = L.marker([lat, lon], { icon: deIcon, zIndexOffset: 20000 }).addTo(map);
       attachPopupWeather(m, lat, lon, html);
       deMarkerRef.current.push(m);
@@ -1263,7 +1267,7 @@ export const WorldMap = ({
         iconSize: [32, 32],
         iconAnchor: [16, 16],
       });
-      const baseHtml = `<b>DX - Target</b><br>${esc(calculateGridSquare(dxLocation.lat, dxLocation.lon))}<br>${dxLocation.lat.toFixed(4)}°, ${dxLocation.lon.toFixed(4)}°`;
+      const baseHtml = `<b>DX - Target</b><br>${esc(latLonToMaidenhead({ lat: dxLocation.lat, lon: dxLocation.lon }))}<br>${dxLocation.lat.toFixed(4)}°, ${dxLocation.lon.toFixed(4)}°`;
       const m = L.marker([lat, lon], { icon: dxIcon, zIndexOffset: 19000 }).addTo(map);
       attachPopupWeather(m, lat, lon, baseHtml);
       dxMarkerRef.current.push(m);
@@ -1451,7 +1455,7 @@ export const WorldMap = ({
           if (showDXLabels || isHovered) {
             const labelIcon = L.divIcon({
               className: '',
-              html: `<span style="display:inline-block;background:${isHovered ? '#fff' : color};color:${isHovered ? color : '#000'};padding:${isHovered ? '3px 6px' : '2px 5px'};border-radius:3px;font-family:'JetBrains Mono',monospace;font-size:${isHovered ? '12px' : '11px'};font-weight:700;white-space:nowrap;border:1px solid ${isHovered ? color : 'rgba(0,0,0,0.5)'};box-shadow:0 1px ${isHovered ? '4px' : '2px'} rgba(0,0,0,${isHovered ? '0.5' : '0.3'});line-height:1.1;">${esc(dxCall)}</span>`,
+              html: `<span style="display:inline-block;background:${isHovered ? '#fff' : color};color:${isHovered ? color : '#000'};padding:${isHovered ? '3px 6px' : '2px 5px'};border-radius:3px;font-family:var(--font-mono);font-size:${isHovered ? '12px' : '11px'};font-weight:700;white-space:nowrap;border:1px solid ${isHovered ? color : 'rgba(0,0,0,0.5)'};box-shadow:0 1px ${isHovered ? '4px' : '2px'} rgba(0,0,0,${isHovered ? '0.5' : '0.3'});line-height:1.1;">${esc(dxCall)}</span>`,
               iconSize: [0, 0],
               iconAnchor: [0, 0],
             });
@@ -1620,7 +1624,7 @@ export const WorldMap = ({
           if (showLabels) {
             const labelIcon = L.divIcon({
               className: '',
-              html: `<span style="display:inline-block;background:${mapDefaults.color};color:#000;padding:2px 5px;border-radius:3px;font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:700;white-space:nowrap;border:1px solid rgba(0,0,0,0.5);box-shadow:0 1px 2px rgba(0,0,0,0.3);line-height:1.1;">${esc(spot.call)}</span>`,
+              html: `<span style="display:inline-block;background:${mapDefaults.color};color:#000;padding:2px 5px;border-radius:3px;font-size:11px;font-family:var(--font-mono);font-weight:700;white-space:nowrap;border:1px solid rgba(0,0,0,0.5);box-shadow:0 1px 2px rgba(0,0,0,0.3);line-height:1.1;">${esc(spot.call)}</span>`,
               iconSize: [0, 0],
               iconAnchor: [0, -2],
             });
@@ -1703,7 +1707,7 @@ export const WorldMap = ({
 
       // Initialize state ONLY on first mount (when empty)
       if (Object.keys(pluginLayerStates).length === 0) {
-        console.log('Loading saved layer states:', initialStates);
+        console.debug('Loading saved layer states:', initialStates);
         setPluginLayerStates(initialStates);
       }
 
@@ -2113,6 +2117,91 @@ export const WorldMap = ({
     }
   }, [aprsStations, showAPRS, aprsWatchlistCalls]);
 
+  // Update MeshCom node markers
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+
+    meshcomMarkersRef.current.forEach((m) => map.removeLayer(m));
+    meshcomMarkersRef.current = [];
+
+    if (showMeshCom && meshcomNodes && meshcomNodes.length > 0) {
+      meshcomNodes.forEach((node) => {
+        // Coordinates must be finite numbers — 0 is a valid position
+        if (!Number.isFinite(node.lat) || !Number.isFinite(node.lon)) return;
+
+        // Compute age at render time so SSE-delivered nodes age correctly in
+        // local/direct mode where polling returns no server-side ageMin.
+        const ageMin = Math.max(0, Math.floor((Date.now() - (node.timestamp ?? 0)) / 60_000));
+        const isAged = ageMin > 30;
+        // Brand crimson when fresh, grey when aged >30 min
+        const nodeColor = isAged ? '#6b7280' : '#8B1A2A';
+
+        // MeshCom logo — mesh network icon matching the official brand mark.
+        // White disc background ensures visibility on any map tile colour.
+        // Centre: (12,12), outer radius 7.5, outer node r 2.2, centre node r 3.8
+        const iconHtml = `<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="11.5" fill="white" fill-opacity="0.88" stroke="${nodeColor}" stroke-width="0.6"/>
+          <line x1="12" y1="4.5"  x2="18.5" y2="8.25"  stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="18.5" y1="8.25"  x2="18.5" y2="15.75" stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="18.5" y1="15.75" x2="12"   y2="19.5"  stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="12"   y1="19.5"  x2="5.5"  y2="15.75" stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="5.5"  y1="15.75" x2="5.5"  y2="8.25"  stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="5.5"  y1="8.25"  x2="12"   y2="4.5"   stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="12" y1="12" x2="12"   y2="4.5"   stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="12" y1="12" x2="18.5" y2="8.25"  stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="12" y1="12" x2="18.5" y2="15.75" stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="12" y1="12" x2="12"   y2="19.5"  stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="12" y1="12" x2="5.5"  y2="15.75" stroke="${nodeColor}" stroke-width="1.3"/>
+          <line x1="12" y1="12" x2="5.5"  y2="8.25"  stroke="${nodeColor}" stroke-width="1.3"/>
+          <circle cx="12"  cy="4.5"  r="2.2" fill="white" stroke="${nodeColor}" stroke-width="1.3"/>
+          <circle cx="18.5" cy="8.25"  r="2.2" fill="white" stroke="${nodeColor}" stroke-width="1.3"/>
+          <circle cx="18.5" cy="15.75" r="2.2" fill="white" stroke="${nodeColor}" stroke-width="1.3"/>
+          <circle cx="12"  cy="19.5" r="2.2" fill="white" stroke="${nodeColor}" stroke-width="1.3"/>
+          <circle cx="5.5" cy="15.75" r="2.2" fill="white" stroke="${nodeColor}" stroke-width="1.3"/>
+          <circle cx="5.5" cy="8.25"  r="2.2" fill="white" stroke="${nodeColor}" stroke-width="1.3"/>
+          <circle cx="12" cy="12" r="3.8" fill="${nodeColor}"/>
+        </svg>`;
+
+        const ageStr = ageMin < 1 ? 'now' : ageMin < 60 ? `${ageMin}m ago` : `${Math.floor(ageMin / 60)}h ago`;
+
+        const battLine = node.batt != null ? `${t('meshcomPanel.mapPopupBattery')} ${Math.round(node.batt)}%<br>` : '';
+        const altLine = node.alt != null ? `${t('meshcomPanel.mapPopupAlt')} ${Math.round(node.alt)}m<br>` : '';
+        const wxLine =
+          node.weather?.tempC != null
+            ? `${node.weather.tempC.toFixed(1)}°C ${node.weather.humidity != null ? node.weather.humidity.toFixed(0) + '% ' : ''}${node.weather.pressureHpa != null ? node.weather.pressureHpa.toFixed(0) + 'hPa' : ''}<br>`
+            : '';
+
+        try {
+          replicatePoint(node.lat, node.lon).forEach(([rLat, rLon]) => {
+            const marker = L.marker([rLat, rLon], {
+              icon: L.divIcon({
+                className: '',
+                html: iconHtml,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12],
+              }),
+              zIndexOffset: 1200,
+            });
+
+            marker
+              .bindPopup(
+                `<b style="color:var(--accent-cyan)">${esc(primaryCall(node.call))}</b><br>
+                <span style="color:var(--text-muted);font-size:11px">${t('meshcomPanel.mapPopupAge', { age: ageStr })}</span><br>
+                ${battLine}${altLine}${wxLine}
+                ${node.firmware ? `<span style="font-size:10px;color:var(--text-muted)">${t('meshcomPanel.mapPopupFirmware')} ${esc(node.firmware)}</span>` : ''}`,
+              )
+              .addTo(map);
+
+            meshcomMarkersRef.current.push(marker);
+          });
+        } catch {
+          // skip bad node
+        }
+      });
+    }
+  }, [meshcomNodes, showMeshCom, t]);
+
   const openBandColorEditor = (band) => {
     setEditingBand(band);
     setEditingColor(getBandColorForBand(band, effectiveBandColors));
@@ -2211,23 +2300,44 @@ export const WorldMap = ({
       {/* Key includes projection so hooks fully remount when map instance changes.
           This resets internal refs (layerGroupRef, controlRef) that are bound to a
           specific Leaflet map — without this, layers stay on the hidden old map. */}
-      {getAllLayers().map((layerDef) => (
-        <PluginLayer
-          key={`${layerDef.id}-${isAzimuthal ? 'az' : 'merc'}`}
-          plugin={layerDef}
-          enabled={pluginLayerStates[layerDef.id]?.enabled ?? layerDef.defaultEnabled}
-          opacity={pluginLayerStates[layerDef.id]?.opacity ?? layerDef.defaultOpacity}
-          onDXChange={onDXChange}
-          mapBandFilter={mapBandFilter}
-          config={pluginLayerStates[layerDef.id]?.config ?? layerDef.config}
-          map={isAzimuthal ? azimuthalMapRef.current : mapInstanceRef.current}
-          satellites={satellites}
-          allUnits={allUnits}
-          callsign={callsign}
-          locator={deLocator}
-          lowMemoryMode={lowMemoryMode}
-        />
-      ))}
+      {getAllLayers().map((layerDef) => {
+        // Merge location config into satellite layer to keep config access consistent
+        const layerConfig = pluginLayerStates[layerDef.id]?.config ?? layerDef.config;
+        const finalConfig =
+          layerDef.id === 'satellites' && deLocation
+            ? {
+                ...layerConfig,
+                location: {
+                  lat: deLocation.lat,
+                  lon: deLocation.lon,
+                  stationAlt: parseInt(deLocation.stationAlt) || 100,
+                },
+                satellite: {
+                  minElev: config?.satellite?.minElev ?? layerConfig?.satellite?.minElev ?? 5,
+                },
+              }
+            : layerConfig;
+
+        return (
+          <PluginLayer
+            key={`${layerDef.id}-${isAzimuthal ? 'az' : 'merc'}`}
+            plugin={layerDef}
+            enabled={pluginLayerStates[layerDef.id]?.enabled ?? layerDef.defaultEnabled}
+            opacity={pluginLayerStates[layerDef.id]?.opacity ?? layerDef.defaultOpacity}
+            onDXChange={onDXChange}
+            mapBandFilter={mapBandFilter}
+            config={finalConfig}
+            map={isAzimuthal ? azimuthalMapRef.current : mapInstanceRef.current}
+            satellites={satellites}
+            allUnits={allUnits}
+            callsign={callsign}
+            locator={deLocator}
+            deLat={deLocation?.lat ?? null}
+            deLon={deLocation?.lon ?? null}
+            lowMemoryMode={lowMemoryMode}
+          />
+        );
+      })}
 
       {/* Unified map control dock */}
       {!isAzimuthal && (
@@ -2254,7 +2364,7 @@ export const WorldMap = ({
               padding: '6px 8px',
               borderRadius: '4px',
               minHeight: '42px',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
               cursor: 'pointer',
               lineHeight: 1,
             }}
@@ -2285,7 +2395,7 @@ export const WorldMap = ({
                   border: `1px solid ${mapLocked ? 'rgba(255, 80, 80, 0.7)' : '#444'}`,
                   borderRadius: '4px',
                   color: mapLocked ? '#ff5050' : '#ccc',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                   cursor: 'pointer',
                   lineHeight: 1,
                   textAlign: 'center',
@@ -2305,7 +2415,7 @@ export const WorldMap = ({
                     color: showDXLabels ? '#ffaa00' : '#888',
                     padding: '6px 8px',
                     borderRadius: '4px',
-                    fontFamily: 'JetBrains Mono, monospace',
+                    fontFamily: 'var(--font-mono)',
                     cursor: 'pointer',
                     textAlign: 'center',
                     minHeight: '30px',
@@ -2326,7 +2436,7 @@ export const WorldMap = ({
                   border: '1px solid #444',
                   borderRadius: '4px',
                   color: '#ccc',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                   cursor: mapLocked ? 'not-allowed' : 'pointer',
                   opacity: mapLocked ? 0.45 : 1,
                   textAlign: 'center',
@@ -2347,7 +2457,7 @@ export const WorldMap = ({
                   border: '1px solid #444',
                   borderRadius: '4px',
                   color: '#ccc',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                   cursor: mapLocked ? 'not-allowed' : 'pointer',
                   opacity: mapLocked ? 0.45 : 1,
                   textAlign: 'center',
@@ -2367,7 +2477,7 @@ export const WorldMap = ({
                   gap: '5px',
                   color: '#999',
                   fontSize: '12px',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                   textAlign: 'center',
                 }}
               >
@@ -2413,7 +2523,7 @@ export const WorldMap = ({
             style={{
               color: '#00ffcc',
               fontSize: '10px',
-              fontFamily: 'JetBrains Mono',
+              fontFamily: 'var(--font-mono)',
             }}
           >
             {gibsOffset === 0 ? 'LATEST IMAGERY' : `${gibsOffset} DAYS AGO`}
@@ -2465,7 +2575,7 @@ export const WorldMap = ({
                   border: 'none',
                   padding: '5px 8px',
                   fontSize: '10px',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                   cursor: 'pointer',
                   fontWeight: mapProjection === key ? 'bold' : 'normal',
                 }}
@@ -2487,7 +2597,7 @@ export const WorldMap = ({
               padding: '6px 10px',
               borderRadius: '4px',
               fontSize: '11px',
-              fontFamily: 'JetBrains Mono',
+              fontFamily: 'var(--font-mono)',
               cursor: 'pointer',
               outline: 'none',
             }}
@@ -2531,7 +2641,7 @@ export const WorldMap = ({
             zIndex: 1001,
             cursor: 'pointer',
             fontSize: '10px',
-            fontFamily: 'JetBrains Mono, monospace',
+            fontFamily: 'var(--font-mono)',
             color: '#888',
             lineHeight: 1.2,
           }}
@@ -2557,7 +2667,7 @@ export const WorldMap = ({
             gap: '8px',
             alignItems: 'center',
             fontSize: '11px',
-            fontFamily: 'JetBrains Mono, monospace',
+            fontFamily: 'var(--font-mono)',
             flexWrap: 'nowrap',
           }}
         >
@@ -2638,7 +2748,7 @@ export const WorldMap = ({
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
-            fontFamily: 'JetBrains Mono, monospace',
+            fontFamily: 'var(--font-mono)',
             fontSize: '11px',
           }}
         >
@@ -2664,7 +2774,7 @@ export const WorldMap = ({
               border: '1px solid #444',
               borderRadius: '3px',
               padding: '2px 5px',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
             }}
           >
             {editingColor}

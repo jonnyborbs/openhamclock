@@ -3,6 +3,7 @@ import { esc } from '../../utils/escapeHtml.js';
 import { addMinimizeToggle } from './addMinimizeToggle.js';
 import { makeDraggable } from './makeDraggable.js';
 import { getBandFromFreq } from '../../utils/callsign.js';
+import { maidenheadToLatLon } from '../../utils/geo.js';
 
 /**
  * WSPR Propagation Heatmap Plugin v1.6.0
@@ -46,29 +47,6 @@ export const metadata = {
   defaultOpacity: 0.7,
   version: '1.6.1',
 };
-
-// Convert grid square to lat/lon
-function gridToLatLon(grid) {
-  if (!grid || grid.length < 4) return null;
-
-  grid = grid.toUpperCase();
-  const lon = (grid.charCodeAt(0) - 65) * 20 - 180;
-  const lat = (grid.charCodeAt(1) - 65) * 10 - 90;
-  const lon2 = parseInt(grid[2]) * 2;
-  const lat2 = parseInt(grid[3]);
-
-  let longitude = lon + lon2 + 1;
-  let latitude = lat + lat2 + 0.5;
-
-  if (grid.length >= 6) {
-    const lon3 = (grid.charCodeAt(4) - 65) * (2 / 24);
-    const lat3 = (grid.charCodeAt(5) - 65) * (1 / 24);
-    longitude = lon + lon2 + lon3 + 1 / 24;
-    latitude = lat + lat2 + lat3 + 0.5 / 24;
-  }
-
-  return { lat: latitude, lon: longitude };
-}
 
 // Format distance using global units preference
 function fmtDist(km) {
@@ -256,14 +234,14 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
     const fetchWSPR = async () => {
       try {
         const timestamp = new Date().toLocaleTimeString();
-        console.log(`[WSPR] Fetching data at ${timestamp}...`);
+        console.debug(`[WSPR] Fetching data at ${timestamp}...`);
         const response = await fetch(`/api/wspr/heatmap?minutes=${timeWindow}&band=${bandFilter}`);
         if (response.ok) {
           const data = await response.json();
 
           // Handle new aggregated format
           if (data.format === 'aggregated' && data.grids) {
-            console.log(
+            console.info(
               `[WSPR Plugin] Loaded aggregated data: ${data.uniqueGrids} grids, ${data.paths?.length || 0} paths from ${data.totalSpots} spots`,
             );
 
@@ -338,7 +316,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
           // Filter by callsign ONLY if grid filter is OFF
           if (!filterByGrid && callsign && callsign !== 'N0CALL') {
             const baseCall = stripCallsign(callsign);
-            console.log(`[WSPR] Filtering for callsign: ${baseCall} (grid filter OFF)`);
+            console.debug(`[WSPR] Filtering for callsign: ${baseCall} (grid filter OFF)`);
 
             spots = spots.filter((spot) => {
               // Show spots where I'm TX or RX
@@ -347,9 +325,9 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
               return isTX || isRX;
             });
 
-            console.log(`[WSPR] Found ${spots.length} spots for ${baseCall} (TX or RX)`);
+            console.debug(`[WSPR] Found ${spots.length} spots for ${baseCall} (TX or RX)`);
           } else if (filterByGrid) {
-            console.log(`[WSPR] Grid filter ON - fetching ALL spots (${spots.length} total)`);
+            console.debug(`[WSPR] Grid filter ON - fetching ALL spots (${spots.length} total)`);
           }
 
           // Convert grid squares to lat/lon if coordinates are missing
@@ -358,7 +336,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
 
             // Convert sender grid to lat/lon if missing
             if ((!spot.senderLat || !spot.senderLon) && spot.senderGrid) {
-              const loc = gridToLatLon(spot.senderGrid);
+              const loc = maidenheadToLatLon(spot.senderGrid);
               if (loc) {
                 updated.senderLat = loc.lat;
                 updated.senderLon = loc.lon;
@@ -367,7 +345,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
 
             // Convert receiver grid to lat/lon if missing
             if ((!spot.receiverLat || !spot.receiverLon) && spot.receiverGrid) {
-              const loc = gridToLatLon(spot.receiverGrid);
+              const loc = maidenheadToLatLon(spot.receiverGrid);
               if (loc) {
                 updated.receiverLat = loc.lat;
                 updated.receiverLon = loc.lon;
@@ -378,7 +356,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
           });
 
           setWsprData(spots);
-          console.log(`[WSPR Plugin] Loaded ${spots.length} raw spots (${timeWindow}min, band: ${bandFilter})`);
+          console.info(`[WSPR Plugin] Loaded ${spots.length} raw spots (${timeWindow}min, band: ${bandFilter})`);
         }
       } catch (err) {
         console.error('WSPR data fetch error:', err);
@@ -478,7 +456,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
               placeholder="${gridFilter || 'e.g. FN03'}"
               value="${gridFilter || ''}"
               maxlength="6"
-              style="width: 100%; padding: 4px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 3px; font-family: 'JetBrains Mono', monospace; text-transform: uppercase;" />
+              style="width: 100%; padding: 4px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 3px; font-family: var(--font-mono); text-transform: uppercase;" />
             <div style="font-size: 9px; color: var(--text-muted); margin-top: 2px;">
               Prefix match: FN matches FN03, FN21, etc.
             </div>
@@ -563,20 +541,20 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       if (animCheck) animCheck.addEventListener('change', (e) => setShowAnimation(e.target.checked));
       if (heatCheck)
         heatCheck.addEventListener('change', (e) => {
-          console.log('[WSPR] Heatmap toggle:', e.target.checked);
+          console.debug('[WSPR] Heatmap toggle:', e.target.checked);
           setShowHeatmap(e.target.checked);
         });
       if (gridFilterCheck)
         gridFilterCheck.addEventListener('change', (e) => {
           setFilterByGrid(e.target.checked);
-          console.log('[WSPR] Grid filter toggle:', e.target.checked);
+          console.debug('[WSPR] Grid filter toggle:', e.target.checked);
         });
       if (gridInput) {
         gridInput.addEventListener('input', (e) => {
           const value = e.target.value.toUpperCase().substring(0, 6);
           e.target.value = value;
           setGridFilter(value);
-          console.log('[WSPR] Grid filter value:', value);
+          console.debug('[WSPR] Grid filter value:', value);
         });
       }
     }, 100);
@@ -738,7 +716,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       }
     }, 150);
 
-    console.log('[WSPR] All controls created once');
+    console.debug('[WSPR] All controls created once');
   }, [enabled, map]);
 
   // Render WSPR paths and markers
@@ -811,7 +789,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       return true;
     });
 
-    console.log(
+    console.debug(
       `[WSPR Paths] Filtering: filterByGrid=${filterByGrid}, gridFilter="${gridFilter}", callsign="${callsign}", input=${wsprData.length}, output=${filteredData.length}`,
     );
 
@@ -827,7 +805,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         if (spot.senderGrid) grids.add(spot.senderGrid.substring(0, 4));
         if (spot.receiverGrid) grids.add(spot.receiverGrid.substring(0, 4));
       });
-      console.log(
+      console.debug(
         `[WSPR Grid] Filtering for ${gridFilter}, found ${filteredData.length} spots with grids:`,
         Array.from(grids).join(', '),
       );
@@ -838,7 +816,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         if (spot.senderGrid) availableGrids.add(spot.senderGrid.substring(0, 4));
         if (spot.receiverGrid) availableGrids.add(spot.receiverGrid.substring(0, 4));
       });
-      console.log(
+      console.debug(
         `[WSPR Grid] No matches for ${gridFilter}. Available grids in data:`,
         Array.from(availableGrids).join(', '),
       );
@@ -903,7 +881,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       const spotQStr = spot.snr && spot.distance ? Math.round(spot.distance / Math.pow(10, spot.snr / 10)) : null;
 
       path.bindPopup(`
-        <div style="font-family: 'JetBrains Mono', monospace; min-width: 240px;">
+        <div style="font-family: var(--font-mono); min-width: 240px;">
           <div style="font-size: 13px; font-weight: bold; color: ${getSNRColor(spot.snr)}; margin-bottom: 8px; text-align: center;">
             ${esc(spot.sender)} ⇢ ${esc(spot.receiver)}
           </div>
@@ -957,7 +935,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         });
         // Build detailed tooltip for TX
         let txDetails = `
-          <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; min-width: 220px;">
+          <div style="font-family: var(--font-mono); font-size: 11px; min-width: 220px;">
             <div style="font-weight: bold; color: #ff6600; margin-bottom: 6px; font-size: 12px;">📡 TX Station</div>
             <div style="margin-bottom: 6px;"><b style="font-size: 13px;">${esc(spot.sender)}</b> ⇢ <b style="font-size: 13px;">${esc(spot.receiver)}</b></div>
             <div style="opacity: 0.7; margin-bottom: 8px;">Grid: ${esc(spot.senderGrid)}</div>
@@ -1024,7 +1002,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         });
         // Build detailed tooltip for RX
         let rxDetails = `
-          <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; min-width: 220px;">
+          <div style="font-family: var(--font-mono); font-size: 11px; min-width: 220px;">
             <div style="font-weight: bold; color: #0088ff; margin-bottom: 6px; font-size: 12px;">📻 RX Station</div>
             <div style="margin-bottom: 6px;"><b style="font-size: 13px;">${esc(spot.sender)}</b> ⇢ <b style="font-size: 13px;">${esc(spot.receiver)}</b></div>
             <div style="opacity: 0.7; margin-bottom: 8px;">Grid: ${esc(spot.receiverGrid)}</div>
@@ -1166,7 +1144,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       }
     }, 50);
 
-    console.log(
+    console.debug(
       `[WSPR Plugin] Rendered ${newPaths.length} paths, ${newMarkers.length} markers, ${bestPaths.length} best DX`,
     );
 
@@ -1209,7 +1187,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
 
     if (!enabled || !showHeatmap || wsprData.length === 0) return;
 
-    console.log('[WSPR] Rendering heatmap with', wsprData.length, 'spots');
+    console.debug('[WSPR] Rendering heatmap with', wsprData.length, 'spots');
 
     // Create heatmap circles for all TX and RX stations
     const heatPoints = [];
@@ -1260,7 +1238,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       return true;
     });
 
-    console.log(
+    console.debug(
       `[WSPR Heatmap] Filtering: filterByGrid=${filterByGrid}, gridFilter="${gridFilter}", input=${wsprData.length}, output=${filteredData.length}`,
     );
 
@@ -1290,7 +1268,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
           });
         }
       });
-      console.log(`[WSPR Heatmap] Using aggregated data: ${heatPoints.length} grid squares`);
+      console.debug(`[WSPR Heatmap] Using aggregated data: ${heatPoints.length} grid squares`);
     } else {
       // Legacy: count activity from individual spots
       filteredData.forEach((spot) => {
@@ -1373,7 +1351,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         if (i === 0) {
           const popupContent = point.grid
             ? `
-            <div style="font-family: 'JetBrains Mono', monospace;">
+            <div style="font-family: var(--font-mono);">
               <b>🔥 Grid: ${point.grid}</b><br>
               Total Activity: ${point.count}<br>
               ${point.stationCount ? `Stations: ${point.stationCount}<br>` : ''}
@@ -1382,7 +1360,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
             </div>
           `
             : `
-            <div style="font-family: 'JetBrains Mono', monospace;">
+            <div style="font-family: var(--font-mono);">
               <b>🔥 Activity Hot Spot</b><br>
               Stations: ${point.count}<br>
               Lat: ${point.lat.toFixed(2)}<br>
@@ -1401,7 +1379,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
     const heatGroup = L.layerGroup(heatCircles);
     setHeatmapLayer(heatGroup);
 
-    console.log(`[WSPR] Heatmap rendered with ${Object.keys(uniquePoints).length} hot spots`);
+    console.debug(`[WSPR] Heatmap rendered with ${Object.keys(uniquePoints).length} hot spots`);
 
     return () => {
       heatCircles.forEach((circle) => {
@@ -1434,13 +1412,13 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         return; // Nothing to clean up
       }
 
-      console.log('[WSPR] Plugin disabled - cleaning up all controls and layers');
+      console.debug('[WSPR] Plugin disabled - cleaning up all controls and layers');
 
       // Remove filter control
       if (filterControlRef.current) {
         try {
           map.removeControl(filterControlRef.current);
-          console.log('[WSPR] Removed filter control');
+          console.debug('[WSPR] Removed filter control');
         } catch (e) {
           console.error('[WSPR] Error removing filter control:', e);
         }
@@ -1452,7 +1430,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       if (legendControlRef.current) {
         try {
           map.removeControl(legendControlRef.current);
-          console.log('[WSPR] Removed legend control');
+          console.debug('[WSPR] Removed legend control');
         } catch (e) {
           console.error('[WSPR] Error removing legend control:', e);
         }
@@ -1464,7 +1442,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       if (statsControlRef.current) {
         try {
           map.removeControl(statsControlRef.current);
-          console.log('[WSPR] Removed stats control');
+          console.debug('[WSPR] Removed stats control');
         } catch (e) {
           console.error('[WSPR] Error removing stats control:', e);
         }
@@ -1476,7 +1454,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       if (chartControlRef.current) {
         try {
           map.removeControl(chartControlRef.current);
-          console.log('[WSPR] Removed chart control');
+          console.debug('[WSPR] Removed chart control');
         } catch (e) {
           console.error('[WSPR] Error removing chart control:', e);
         }
@@ -1488,7 +1466,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       if (heatmapLayer) {
         try {
           map.removeLayer(heatmapLayer);
-          console.log('[WSPR] Removed heatmap layer');
+          console.debug('[WSPR] Removed heatmap layer');
         } catch (e) {
           console.error('[WSPR] Error removing heatmap layer:', e);
         }

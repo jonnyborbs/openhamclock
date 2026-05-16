@@ -60,6 +60,7 @@ export default function ModernLayout(props) {
     deGrid,
     dxGrid,
     dxLocation,
+    dxCallsign,
     dxLocked,
     handleDXChange,
     handleToggleDxLock,
@@ -128,12 +129,17 @@ export default function ModernLayout(props) {
   const isMobile = breakpoint === 'mobile';
   const isTablet = breakpoint === 'tablet';
 
-  const handleParkSpotClick = (spot) => tuneTo(spot);
+  const handleParkSpotClick = (spot) => {
+    tuneTo(spot);
+    if (spot.lat != null && spot.lon != null) {
+      handleDXChange({ lat: spot.lat, lon: spot.lon, callsign: spot.call ?? null });
+    }
+  };
   const handleDXSpotClick = (spot) => {
     tuneTo(spot);
     const path = findDXPathForSpot(dxClusterData.paths || [], spot);
     if (path && path.dxLat != null && path.dxLon != null) {
-      handleDXChange({ lat: path.dxLat, lon: path.dxLon });
+      handleDXChange({ lat: path.dxLat, lon: path.dxLon, callsign: spot.call ?? spot.dxCall ?? null });
     }
   };
 
@@ -141,6 +147,7 @@ export default function ModernLayout(props) {
   const mapComponent = (style) => (
     <div style={{ position: 'relative', borderRadius: '6px', overflow: 'hidden', ...style }}>
       <WorldMap
+        config={config}
         deLocation={config.location}
         dxLocation={dxLocation}
         onDXChange={handleDXChange}
@@ -206,7 +213,7 @@ export default function ModernLayout(props) {
       <div style={{ fontSize: '14px', color: 'var(--accent-cyan)', fontWeight: '700', marginBottom: '10px' }}>
         {t('app.dxLocation.deTitle')}
       </div>
-      <div style={{ fontFamily: 'JetBrains Mono', fontSize: '14px' }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '14px' }}>
         <div style={{ color: 'var(--accent-amber)', fontSize: '22px', fontWeight: '700', letterSpacing: '1px' }}>
           {deGrid}
         </div>
@@ -215,9 +222,16 @@ export default function ModernLayout(props) {
         </div>
         <div style={{ marginTop: '8px', fontSize: '13px' }}>
           <span style={{ color: 'var(--text-secondary)' }}>☀ </span>
-          <span style={{ color: 'var(--accent-amber)', fontWeight: '600' }}>{deSunTimes.sunrise}</span>
-          <span style={{ color: 'var(--text-secondary)' }}> → </span>
-          <span style={{ color: 'var(--accent-purple)', fontWeight: '600' }}>{deSunTimes.sunset}</span>
+          <span style={{ color: 'var(--accent-amber)', fontWeight: '600' }}>{deSunTimes.local.sunrise}</span>
+          {deSunTimes.local.sunset !== '' && (
+            <>
+              <span style={{ color: 'var(--text-secondary)' }}> → </span>
+              <span style={{ color: 'var(--accent-purple)', fontWeight: '600' }}>
+                {deSunTimes.local?.sunset ?? deSunTimes.sunset}
+              </span>
+              <span> {config.timezone}</span>
+            </>
+          )}
         </div>
       </div>
       <WeatherPanel weatherData={localWeather} allUnits={config.allUnits} alerts={localAlerts} />
@@ -247,7 +261,7 @@ export default function ModernLayout(props) {
           {dxLocked ? '🔒' : '🔓'}
         </button>
       </div>
-      <div style={{ fontFamily: 'JetBrains Mono', fontSize: '14px' }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <DXGridInput
             dxGrid={dxGrid}
@@ -261,6 +275,19 @@ export default function ModernLayout(props) {
               flex: '1 1 auto',
             }}
           />
+          {dxCallsign && (
+            <span
+              style={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: '22px',
+                fontWeight: '900',
+                color: 'var(--accent-amber)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {dxCallsign}
+            </span>
+          )}
           <DXFavorites dxLocation={dxLocation} dxGrid={dxGrid} onDXChange={handleDXChange} dxLocked={dxLocked} />
           <button
             type="button"
@@ -273,7 +300,7 @@ export default function ModernLayout(props) {
               borderRadius: '4px',
               padding: '4px 8px',
               fontSize: '12px',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
               cursor: 'pointer',
               flex: '0 0 auto',
             }}
@@ -324,6 +351,7 @@ export default function ModernLayout(props) {
           <span style={{ color: 'var(--accent-amber)', fontWeight: '600' }}>{dxSunTimes.sunrise}</span>
           <span style={{ color: 'var(--text-secondary)' }}> → </span>
           <span style={{ color: 'var(--accent-purple)', fontWeight: '600' }}>{dxSunTimes.sunset}</span>
+          <span> UTC</span>
         </div>
       </div>
       {showDxWeather && <WeatherPanel weatherData={dxWeather} allUnits={config.allUnits} alerts={dxAlerts} />}
@@ -364,6 +392,7 @@ export default function ModernLayout(props) {
       wsjtxDecodes={wsjtx.decodes}
       wsjtxClients={wsjtx.clients}
       wsjtxQsos={wsjtx.qsos}
+      wsjtxWspr={wsjtx.wspr}
       wsjtxStats={wsjtx.stats}
       wsjtxLoading={wsjtx.loading}
       wsjtxEnabled={wsjtx.enabled}
@@ -517,6 +546,9 @@ export default function ModernLayout(props) {
                 propConfig={config.propagation}
                 dxSpots={dxClusterData.spots}
                 clusterFilters={dxFilters}
+                deSunTimes={deSunTimes}
+                currentTime={currentTime}
+                timeZone={config.timezone}
               />,
               'prop',
             )}
@@ -578,6 +610,9 @@ export default function ModernLayout(props) {
                   propConfig={config.propagation}
                   dxSpots={dxClusterData.spots}
                   clusterFilters={dxFilters}
+                  deSunTimes={deSunTimes}
+                  currentTime={currentTime}
+                  timeZone={config.timezone}
                 />
               )}
             </div>
@@ -655,6 +690,9 @@ export default function ModernLayout(props) {
               propConfig={config.propagation}
               dxSpots={dxClusterData.spots}
               clusterFilters={dxFilters}
+              deSunTimes={deSunTimes}
+              currentTime={currentTime}
+              timeZone={config.timezone}
             />
           )}
         </div>

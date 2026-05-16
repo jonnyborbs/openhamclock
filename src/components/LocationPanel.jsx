@@ -4,7 +4,7 @@
  */
 import React from 'react';
 import {
-  calculateGridSquare,
+  latLonToMaidenhead,
   calculateBearing,
   calculateDistance,
   formatDistance,
@@ -21,8 +21,8 @@ export const LocationPanel = ({
   dxLocked,
   onToggleDxLock,
 }) => {
-  const deGrid = calculateGridSquare(config.location.lat, config.location.lon);
-  const dxGrid = calculateGridSquare(dxLocation.lat, dxLocation.lon);
+  const deGrid = latLonToMaidenhead({ lat: config.location.lat, lon: config.location.lon });
+  const dxGrid = latLonToMaidenhead({ lat: dxLocation.lat, lon: dxLocation.lon });
   const bearing = calculateBearing(config.location.lat, config.location.lon, dxLocation.lat, dxLocation.lon);
   const distance = calculateDistance(config.location.lat, config.location.lon, dxLocation.lat, dxLocation.lon);
   const moonPhase = getMoonPhase(currentTime);
@@ -54,7 +54,7 @@ export const LocationPanel = ({
           <span
             style={{
               color: 'var(--accent-green)',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
               fontSize: '12px',
             }}
           >
@@ -65,7 +65,7 @@ export const LocationPanel = ({
           style={{
             fontSize: '11px',
             color: 'var(--text-muted)',
-            fontFamily: 'JetBrains Mono, monospace',
+            fontFamily: 'var(--font-mono)',
           }}
         >
           {config.location.lat.toFixed(4)}°, {config.location.lon.toFixed(4)}°
@@ -112,7 +112,7 @@ export const LocationPanel = ({
                   borderRadius: '4px',
                   padding: '2px 6px',
                   fontSize: '10px',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -126,7 +126,7 @@ export const LocationPanel = ({
           <span
             style={{
               color: 'var(--accent-green)',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
               fontSize: '12px',
             }}
           >
@@ -137,7 +137,7 @@ export const LocationPanel = ({
           style={{
             fontSize: '11px',
             color: 'var(--text-muted)',
-            fontFamily: 'JetBrains Mono, monospace',
+            fontFamily: 'var(--font-mono)',
           }}
         >
           {dxLocation.lat.toFixed(4)}°, {dxLocation.lon.toFixed(4)}°

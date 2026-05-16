@@ -395,7 +395,7 @@ The WSPR (Weak Signal Propagation Reporter) Heatmap Plugin provides real-time vi
 
 ### File Structure
 
-```
+```text
 src/plugins/layers/
 ├── useWSPR.js          # Main plugin file
 └── wspr/
@@ -411,7 +411,6 @@ src/plugins/layers/
 
 ### Key Functions
 
-- `gridToLatLon(grid)`: Converts Maidenhead grid to coordinates
 - `getSNRColor(snr)`: Maps SNR to color gradient
 - `getLineWeight(snr)`: Maps SNR to line thickness
 - `useLayer()`: Main plugin hook (called by PluginLayer.jsx)
@@ -593,4 +592,4 @@ MIT License - Same as OpenHamClock project
 
 ---
 
-_73 de OpenHamClock Contributors! 📡_
+_73 de OpenHamClock Contributors! 📡_ <!-- markdownlint-disable-line MD036 -->

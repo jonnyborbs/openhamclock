@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { maidenheadToLatLon } = require('../server/utils/grid');
 
 const ROOT_DIR = path.join(__dirname, '..');
 
@@ -44,30 +45,6 @@ if (fs.existsSync(envPath)) {
   console.log('[Config] Loaded configuration from .env file');
 }
 
-// Convert Maidenhead grid locator to lat/lon (used only during config init)
-function gridToLatLon(grid) {
-  if (!grid || grid.length < 4) return null;
-
-  grid = grid.toUpperCase();
-  const lon = (grid.charCodeAt(0) - 65) * 20 - 180;
-  const lat = (grid.charCodeAt(1) - 65) * 10 - 90;
-  const lon2 = parseInt(grid[2]) * 2;
-  const lat2 = parseInt(grid[3]);
-
-  let longitude = lon + lon2 + 1; // Center of grid
-  let latitude = lat + lat2 + 0.5;
-
-  // 6-character grid for more precision
-  if (grid.length >= 6) {
-    const lon3 = (grid.charCodeAt(4) - 65) * (2 / 24);
-    const lat3 = (grid.charCodeAt(5) - 65) * (1 / 24);
-    longitude = lon + lon2 + lon3 + 1 / 24;
-    latitude = lat + lat2 + lat3 + 0.5 / 24;
-  }
-
-  return { latitude, longitude };
-}
-
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
@@ -104,10 +81,10 @@ let stationLat = parseFloat(process.env.LATITUDE);
 let stationLon = parseFloat(process.env.LONGITUDE);
 
 if ((!Number.isFinite(stationLat) || !Number.isFinite(stationLon)) && locator) {
-  const coords = gridToLatLon(locator);
+  const coords = maidenheadToLatLon(locator);
   if (coords) {
-    stationLat = Number.isFinite(stationLat) ? stationLat : coords.latitude;
-    stationLon = Number.isFinite(stationLon) ? stationLon : coords.longitude;
+    stationLat = Number.isFinite(stationLat) ? stationLat : coords.lat;
+    stationLon = Number.isFinite(stationLon) ? stationLon : coords.lon;
   }
 }
 
@@ -224,15 +201,21 @@ const APRS_CALLSIGN_FILTER = process.env.APRS_CALLSIGN_FILTER || '';
 const N3FJP_QSO_RETENTION_MINUTES = parseInt(process.env.N3FJP_QSO_RETENTION_MINUTES || '720');
 
 // Rotator settings
+// Note: PSTROTATOR_HOST and PSTROTATOR_UDP_PORT are read directly from
+// process.env inside server/routes/rotator.js — they're not surfaced here.
 const ROTATOR_PROVIDER = process.env.ROTATOR_PROVIDER || 'none';
-const ROTATOR_HOST = process.env.ROTATOR_HOST || '127.0.0.1';
-const ROTATOR_PORT = parseInt(process.env.ROTATOR_PORT || '12000', 10);
 
 // Rig Bridge Cloud Relay
 const RIG_BRIDGE_RELAY_KEY = process.env.RIG_BRIDGE_RELAY_KEY || process.env.WSJTX_RELAY_KEY || '';
 
 // DX Spider Proxy URL
 const DXSPIDER_PROXY_URL = process.env.DXSPIDER_PROXY_URL || 'https://spider-production-1ec7.up.railway.app';
+
+// Winlink API key — used by server/routes/winlink.js to proxy gateway lookups
+// to api.winlink.org without exposing the key to the browser. Acquired from
+// the Winlink team per issue #297. When unset, /api/winlink/gateways returns
+// 503 and the browser hook falls back to the rig-bridge plugin at /winlink/*.
+const WINLINK_API_KEY = process.env.WINLINK_API_KEY || '';
 
 // CORS origins
 const CORS_ORIGINS = process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',').map((s) => s.trim()) : null;
@@ -263,12 +246,11 @@ module.exports = {
   APRS_CALLSIGN_FILTER,
   N3FJP_QSO_RETENTION_MINUTES,
   ROTATOR_PROVIDER,
-  ROTATOR_HOST,
-  ROTATOR_PORT,
   RIG_BRIDGE_RELAY_KEY,
   DXSPIDER_PROXY_URL,
   CORS_ORIGINS,
   SETTINGS_SYNC,
+  WINLINK_API_KEY,
   configJsonPath,
   jsonConfig,
 };

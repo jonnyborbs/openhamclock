@@ -18,10 +18,12 @@ import {
   SolarPanel,
   PropagationPanel,
   BandHealthPanel,
+  BandActivityHeatmap,
   RotatorPanel,
   DXpeditionPanel,
   PSKReporterPanel,
   APRSPanel,
+  MeshComPanel,
   WeatherPanel,
   AmbientPanel,
   AnalogClockPanel,
@@ -32,6 +34,7 @@ import {
   DXLocalTime,
   DigitalModesPanel,
   WinlinkPanel,
+  IBPPanel,
 } from './components';
 import MeshtasticPanel from './components/MeshtasticPanel.jsx';
 
@@ -64,6 +67,7 @@ export const DockableApp = ({
   deGrid,
   dxGrid,
   dxLocation,
+  dxCallsign,
   deSunTimes,
   dxSunTimes,
   handleDXChange,
@@ -101,6 +105,8 @@ export const DockableApp = ({
   pskReporter,
   wsjtx,
   aprsData,
+  ibp,
+  meshcomData,
   filteredPskSpots,
   wsjtxMapSpots,
 
@@ -138,6 +144,7 @@ export const DockableApp = ({
   togglePSKPaths,
   toggleWSJTX,
   toggleAPRS,
+  toggleMeshCom,
   toggleRotatorBearing,
   hoveredSpot,
   setHoveredSpot,
@@ -284,6 +291,7 @@ export const DockableApp = ({
   const toggleWSJTXEff = useInternalMapLayers ? internalMap.toggleWSJTX : toggleWSJTX;
   const toggleRotatorBearingEff = useInternalMapLayers ? internalMap.toggleRotatorBearing : toggleRotatorBearing;
   const toggleAPRSEff = useInternalMapLayers ? internalMap.toggleAPRS : toggleAPRS;
+  const toggleMeshComEff = useInternalMapLayers ? internalMap.toggleMeshCom : toggleMeshCom;
 
   // Per-panel zoom levels (persisted)
   const [panelZoom, setPanelZoom] = useState(() => {
@@ -344,12 +352,12 @@ export const DockableApp = ({
       // For DX Cluster spots, we need to find the path data which contains coordinates
       // For POTA/SOTA, the spot object itself has lat/lon
       if (spot.lat != null && spot.lon != null) {
-        handleDXChange({ lat: spot.lat, lon: spot.lon });
+        handleDXChange({ lat: spot.lat, lon: spot.lon, callsign: spot.call ?? null });
       } else if (spot.call) {
         // Try to find in DX Cluster paths
         const path = findDXPathForSpot(dxClusterData.paths || [], spot);
         if (path && path.dxLat != null && path.dxLon != null) {
-          handleDXChange({ lat: path.dxLat, lon: path.dxLon });
+          handleDXChange({ lat: path.dxLat, lon: path.dxLon, callsign: spot.call ?? null });
         }
       }
     },
@@ -422,6 +430,8 @@ export const DockableApp = ({
       'propagation-bars': { name: 'VOACAP Bars', icon: '📊', group: 'Propagation' },
       'band-conditions': { name: 'Band Conditions', icon: '📶', group: 'Propagation' },
       'band-health': { name: 'Band Health', icon: '📶' },
+      'band-activity': { name: 'Band Activity', icon: '🔥' },
+      ibp: { name: 'IBP Beacons', icon: '📡', group: 'Propagation' },
       'dx-cluster': { name: 'DX Cluster', icon: '📻' },
       'psk-reporter': { name: 'PSK Reporter', icon: '📡' },
       dxpeditions: { name: 'DXpeditions', icon: '🏝️' },
@@ -438,6 +448,7 @@ export const DockableApp = ({
       'id-timer': { name: 'ID Timer', icon: '📢' },
       keybindings: { name: 'Keyboard Shortcuts', icon: '⌨️' },
       meshtastic: { name: 'Meshtastic', icon: '📡' },
+      meshcom: { name: 'MeshCom', icon: '🔗' },
       'digital-modes': { name: 'Digital Modes', icon: '📻', group: 'Rig Bridge' },
       winlink: { name: 'Winlink', icon: '📬', group: 'Rig Bridge' },
     };
@@ -467,16 +478,23 @@ export const DockableApp = ({
       <div style={{ fontSize: '14px', color: 'var(--accent-cyan)', fontWeight: '700', marginBottom: '10px' }}>
         📍 DE - YOUR LOCATION
       </div>
-      <div style={{ fontFamily: 'JetBrains Mono', fontSize: '14px' }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '14px' }}>
         <div style={{ color: 'var(--accent-amber)', fontSize: '22px', fontWeight: '700' }}>{deGrid}</div>
         <div style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '4px' }}>
           {config.location.lat.toFixed(4)}°, {config.location.lon.toFixed(4)}°
         </div>
         <div style={{ marginTop: '8px', fontSize: '13px' }}>
           <span style={{ color: 'var(--text-secondary)' }}>☀ </span>
-          <span style={{ color: 'var(--accent-amber)', fontWeight: '600' }}>{deSunTimes.sunrise}</span>
-          <span style={{ color: 'var(--text-secondary)' }}> → </span>
-          <span style={{ color: 'var(--accent-purple)', fontWeight: '600' }}>{deSunTimes.sunset}</span>
+          <span style={{ color: 'var(--accent-amber)', fontWeight: '600' }}>{deSunTimes.local.sunrise}</span>
+          {deSunTimes.local.sunset !== '' && (
+            <>
+              <span style={{ color: 'var(--text-secondary)' }}> → </span>
+              <span style={{ color: 'var(--accent-purple)', fontWeight: '600' }}>
+                {deSunTimes.local?.sunset ?? deSunTimes.sunset}
+              </span>
+              <span style={{ color: 'var(--text-secondary) ' }}> {config.timezone}</span>
+            </>
+          )}
         </div>
       </div>
 
@@ -507,7 +525,7 @@ export const DockableApp = ({
                 borderRadius: '4px',
                 padding: '2px 6px',
                 fontSize: '10px',
-                fontFamily: 'JetBrains Mono, monospace',
+                fontFamily: 'var(--font-mono)',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
@@ -519,38 +537,57 @@ export const DockableApp = ({
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-          <div style={{ fontFamily: 'JetBrains Mono', fontSize: '14px', flex: '1 1 auto', minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <DXGridInput
-                dxGrid={dxGrid}
-                onDXChange={handleDXChange}
-                dxLocked={dxLocked}
-                style={{
-                  color: 'var(--accent-amber)',
-                  fontSize: '22px',
-                  fontWeight: '700',
-                  flex: '1 1 auto',
-                }}
-              />
-              <DXFavorites dxLocation={dxLocation} dxGrid={dxGrid} onDXChange={handleDXChange} dxLocked={dxLocked} />
-              <button
-                type="button"
-                onClick={() => setShowDxccSelect((prev) => !prev)}
-                title={t('app.dxLocation.dxccToggleTitle')}
-                style={{
-                  background: showDxccSelect ? 'var(--accent-amber)' : 'var(--bg-tertiary)',
-                  color: showDxccSelect ? '#000' : 'var(--text-secondary)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '4px',
-                  padding: '4px 8px',
-                  fontSize: '12px',
-                  fontFamily: 'JetBrains Mono, monospace',
-                  cursor: 'pointer',
-                  flex: '0 0 auto',
-                }}
-              >
-                DXCC
-              </button>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', flex: '1 1 auto', minWidth: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                <DXGridInput
+                  dxGrid={dxGrid}
+                  onDXChange={handleDXChange}
+                  dxLocked={dxLocked}
+                  style={{
+                    color: 'var(--accent-amber)',
+                    fontSize: '22px',
+                    fontWeight: '700',
+                    flex: '0 0 auto',
+                  }}
+                />
+                {dxCallsign && (
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '22px',
+                      fontWeight: '900',
+                      color: 'var(--accent-amber)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {dxCallsign}
+                  </span>
+                )}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <DXFavorites dxLocation={dxLocation} dxGrid={dxGrid} onDXChange={handleDXChange} dxLocked={dxLocked} />
+                <button
+                  type="button"
+                  onClick={() => setShowDxccSelect((prev) => !prev)}
+                  title={t('app.dxLocation.dxccToggleTitle')}
+                  style={{
+                    background: showDxccSelect ? 'var(--accent-amber)' : 'var(--bg-tertiary)',
+                    color: showDxccSelect ? '#000' : 'var(--text-secondary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '4px',
+                    padding: '4px 8px',
+                    fontSize: '12px',
+                    fontFamily: 'var(--font-mono)',
+                    cursor: 'pointer',
+                    flex: '0 0 auto',
+                  }}
+                >
+                  DXCC
+                </button>
+              </div>
             </div>
             {showDxccSelect && (
               <DXCCSelect dxLocked={dxLocked} onDXChange={handleDXChange} style={{ margin: '5px 0 10px 0' }} />
@@ -570,6 +607,7 @@ export const DockableApp = ({
               <span style={{ color: 'var(--accent-amber)', fontWeight: '600' }}>{dxSunTimes.sunrise}</span>
               <span style={{ color: 'var(--text-secondary)' }}> → </span>
               <span style={{ color: 'var(--accent-purple)', fontWeight: '600' }}>{dxSunTimes.sunset}</span>
+              <span style={{ color: 'var(--text-secondary)' }}> UTC </span>
             </div>
           </div>
 
@@ -638,6 +676,7 @@ export const DockableApp = ({
   const renderWorldMap = () => (
     <div style={{ height: '100%', width: '100%', position: 'relative' }}>
       <WorldMap
+        config={config}
         deLocation={config.location}
         dxLocation={dxLocation}
         onDXChange={handleDXChange}
@@ -677,6 +716,8 @@ export const DockableApp = ({
         showAPRS={mapLayersEff.showAPRS}
         aprsStations={aprsData?.filteredStations}
         aprsWatchlistCalls={aprsData?.allWatchlistCalls}
+        showMeshCom={mapLayersEff.showMeshCom}
+        meshcomNodes={meshcomData?.nodes}
         // ✅ Rotator bearing overlay support
         showRotatorBearing={mapLayersEff.showRotatorBearing}
         rotatorAzimuth={rot.azimuth}
@@ -747,6 +788,11 @@ export const DockableApp = ({
               bandConditions={bandConditions}
               allUnits={config.allUnits}
               propConfig={config.propagation}
+              deSunTimes={deSunTimes}
+              currentTime={currentTime}
+              dxSpots={dxClusterData.spots}
+              clusterFilters={dxFilters}
+              timeZone={config.timezone}
             />
           );
           break;
@@ -759,6 +805,9 @@ export const DockableApp = ({
               bandConditions={bandConditions}
               allUnits={config.allUnits}
               propConfig={config.propagation}
+              deSunTimes={deSunTimes}
+              currentTime={currentTime}
+              timeZone={config.timezone}
               forcedMode="chart"
             />
           );
@@ -772,6 +821,9 @@ export const DockableApp = ({
               bandConditions={bandConditions}
               allUnits={config.allUnits}
               propConfig={config.propagation}
+              deSunTimes={deSunTimes}
+              currentTime={currentTime}
+              timeZone={config.timezone}
               forcedMode="bars"
             />
           );
@@ -785,6 +837,9 @@ export const DockableApp = ({
               bandConditions={bandConditions}
               allUnits={config.allUnits}
               propConfig={config.propagation}
+              deSunTimes={deSunTimes}
+              currentTime={currentTime}
+              timeZone={config.timezone}
               forcedMode="bands"
             />
           );
@@ -792,6 +847,10 @@ export const DockableApp = ({
 
         case 'band-health':
           content = <BandHealthPanel dxSpots={dxClusterData.spots} clusterFilters={dxFilters} />;
+          break;
+
+        case 'band-activity':
+          content = <BandActivityHeatmap dxSpots={dxClusterData.spots} userCallsign={config.callsign} />;
           break;
 
         case 'dx-cluster':
@@ -980,12 +1039,33 @@ export const DockableApp = ({
           content = <MeshtasticPanel />;
           break;
 
+        case 'meshcom':
+          content = (
+            <MeshComPanel
+              showOnMap={mapLayersEff.showMeshCom}
+              onToggleMap={toggleMeshComEff}
+              onHoverSpot={setHoveredSpot}
+              onSpotClick={handleSpotClick}
+            />
+          );
+          break;
+
         case 'digital-modes':
           content = <DigitalModesPanel />;
           break;
 
         case 'winlink':
           content = <WinlinkPanel />;
+          break;
+
+        case 'ibp':
+          content = (
+            <IBPPanel
+              deLat={config.location?.lat ?? null}
+              deLon={config.location?.lon ?? null}
+              units={config.allUnits?.dist ?? 'metric'}
+            />
+          );
           break;
 
         default:
@@ -1082,7 +1162,7 @@ export const DockableApp = ({
             style={{
               fontSize: '11px',
               fontWeight: '700',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
               padding: '0 3px',
               opacity: currentZoom <= 0.7 ? 0.3 : 1,
             }}
@@ -1102,7 +1182,7 @@ export const DockableApp = ({
               }}
               style={{
                 fontSize: '9px',
-                fontFamily: 'JetBrains Mono, monospace',
+                fontFamily: 'var(--font-mono)',
                 padding: '0 2px',
                 color: 'var(--accent-amber)',
               }}
@@ -1123,7 +1203,7 @@ export const DockableApp = ({
             style={{
               fontSize: '11px',
               fontWeight: '700',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
               padding: '0 3px',
               opacity: currentZoom >= 2.0 ? 0.3 : 1,
             }}
@@ -1300,7 +1380,7 @@ export const DockableApp = ({
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 style={{ margin: '0 0 16px', color: '#00ffcc', fontFamily: 'JetBrains Mono', fontSize: '14px' }}>
+            <h3 style={{ margin: '0 0 16px', color: '#00ffcc', fontFamily: 'var(--font-mono)', fontSize: '14px' }}>
               Add Panel
             </h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
@@ -1338,7 +1418,7 @@ export const DockableApp = ({
                         <span style={{ fontSize: '16px', marginRight: '8px', color: p.iconColor || 'inherit' }}>
                           {p.icon}
                         </span>
-                        <span style={{ color: '#e2e8f0', fontFamily: 'JetBrains Mono', fontSize: '12px' }}>
+                        <span style={{ color: '#e2e8f0', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
                           {p.name}
                         </span>
                       </button>
@@ -1350,7 +1430,7 @@ export const DockableApp = ({
                             gridColumn: '1 / -1',
                             fontSize: '10px',
                             color: '#718096',
-                            fontFamily: 'JetBrains Mono',
+                            fontFamily: 'var(--font-mono)',
                             marginTop: '6px',
                             borderTop: '1px solid #2d3748',
                             paddingTop: '8px',
@@ -1380,7 +1460,7 @@ export const DockableApp = ({
                             <span style={{ fontSize: '14px', marginRight: '6px', color: p.iconColor || 'inherit' }}>
                               {p.icon}
                             </span>
-                            <span style={{ color: '#cbd5e0', fontFamily: 'JetBrains Mono', fontSize: '11px' }}>
+                            <span style={{ color: '#cbd5e0', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
                               {p.name}
                             </span>
                           </button>

@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { esc } from '../../utils/escapeHtml.js';
 import { addMinimizeToggle } from './addMinimizeToggle.js';
 import { makeDraggable } from './makeDraggable.js';
-import { getGreatCirclePoints, replicatePath } from '../../utils/geo.js';
+import { getGreatCirclePoints, replicatePath, maidenheadToLatLon } from '../../utils/geo.js';
 
 export const metadata = {
   id: 'n3fjp_logged_qsos',
@@ -288,7 +288,7 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null }) {
       });
 
       dxMarker.bindPopup(
-        `<div style="font-family: JetBrains Mono, monospace;">
+        `<div style="font-family: var(--font-mono);">
           <b>${esc(dxCall)}</b><br/>
           ${mode ? `Mode: ${esc(mode)}<br/>` : ''}
           ${freqMhz ? `Freq: ${esc(freqMhz)} MHz<br/>` : ''}

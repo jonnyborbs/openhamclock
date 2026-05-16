@@ -3,7 +3,7 @@
  * Full settings modal with map layer controls
  */
 import { useState, useEffect, useRef } from 'react';
-import { calculateGridSquare, parseGridSquare } from '../utils/geo.js';
+import { latLonToMaidenhead, maidenheadToLatLon } from '../utils/geo.js';
 import { useTranslation, Trans } from 'react-i18next';
 import { LANGUAGES } from '../lang/i18n.js';
 import {
@@ -23,6 +23,7 @@ import CustomThemeEditor from './CustomThemeEditor';
 import useLocalInstall from '../hooks/app/useLocalInstall.js';
 import { emojiToIso2 } from '../utils/countryFlags';
 import { getAlertSettings, saveAlertSettings, playTone, TONE_PRESETS, ALERT_FEEDS } from '../utils/audioAlerts';
+import { setRelaySessionId, setRelayConfigured, clearRelaySession } from '../utils/relaySession';
 
 export const SettingsPanel = ({
   isOpen,
@@ -49,6 +50,8 @@ export const SettingsPanel = ({
   const [gridSquare, setGridSquare] = useState(config?.locator || '');
   const [lat, setLat] = useState(config?.location?.lat ?? 0);
   const [lon, setLon] = useState(config?.location?.lon ?? 0);
+  const [stationAlt, setStationAlt] = useState(config?.location?.stationAlt ?? 100);
+  const [minElev, setMinElev] = useState(config?.satellite?.minElev ?? 5.0);
   const [layout, setLayout] = useState(config?.layout || 'modern');
   const [mouseZoom, setMouseZoom] = useState(config?.mouseZoom || 50);
   const [timezone, setTimezone] = useState(config?.timezone || '');
@@ -61,7 +64,7 @@ export const SettingsPanel = ({
   const [preventSleep, setPreventSleep] = useState(config?.preventSleep || false);
   const [sharePresence, setSharePresence] = useState(config?.sharePresence !== false);
   const [displaySchedule, setDisplaySchedule] = useState(
-    config?.displaySchedule || { enabled: false, sleepTime: '23:00', wakeTime: '07:00' },
+    config?.displaySchedule || { enabled: false, sleepTime: '23:00', wakeTime: '07:00', keepSignalActive: true },
   );
   const [distUnits, setDistUnits] = useState(config?.allUnits?.dist || config?.units || 'imperial');
   const [tempUnits, setTempUnits] = useState(config?.allUnits?.temp || config?.units || 'imperial');
@@ -75,7 +78,24 @@ export const SettingsPanel = ({
   const [tuneEnabled, setTuneEnabled] = useState(config?.rigControl?.tuneEnabled || false);
   const [autoMode, setAutoMode] = useState(config?.rigControl?.autoMode !== false);
   const [rigApiToken, setRigApiToken] = useState(config?.rigControl?.apiToken || '');
-  const [cloudRelaySession, setCloudRelaySession] = useState(config?.rigControl?.cloudRelaySession || '');
+  const [cloudRelaySession, setCloudRelaySession] = useState(() => {
+    // 1. Prefer localStorage — set by "Connect Cloud Relay" in this browser.
+    try {
+      const stored = localStorage.getItem('ohc-relay-session');
+      if (stored) return stored;
+    } catch {}
+    // 2. Migration: older versions stored the session in server config.
+    //    Copy it to localStorage so the user doesn't need to re-connect.
+    const serverSession = config?.rigControl?.cloudRelaySession?.trim();
+    if (serverSession && /^[a-z0-9]{8,32}$/.test(serverSession)) {
+      try {
+        localStorage.setItem('ohc-relay-session', serverSession);
+        localStorage.setItem('ohc-relay-configured', 'true');
+      } catch {}
+      return serverSession;
+    }
+    return '';
+  });
   const [showRigToken, setShowRigToken] = useState(false);
   const [wsjtxRelayStatus, setWsjtxRelayStatus] = useState(null); // null | 'pushing' | 'ok' | 'error'
   const [wsjtxRelayMsg, setWsjtxRelayMsg] = useState('');
@@ -124,6 +144,15 @@ export const SettingsPanel = ({
       return localStorage.getItem('n3fjp_line_color') || '#3388ff';
     } catch {
       return '#3388ff';
+    }
+  });
+
+  // Monospace font for panels/data displays (#923 — 0/8 readability)
+  const [monoFont, setMonoFont] = useState(() => {
+    try {
+      return localStorage.getItem('openhamclock_monoFont') || "'JetBrains Mono', monospace";
+    } catch {
+      return "'JetBrains Mono', monospace";
     }
   });
   const { t, i18n } = useTranslation();
@@ -180,6 +209,8 @@ export const SettingsPanel = ({
       setheaderSize(config.headerSize || 1.0);
       setLat(config.location?.lat ?? 0);
       setLon(config.location?.lon ?? 0);
+      setStationAlt(config.location?.stationAlt ?? 100);
+      setMinElev(config.satellite?.minElev ?? 5.0);
       setLayout(config.layout || 'modern');
       setMouseZoom(config.mouseZoom || 50);
       setTimezone(config.timezone || '');
@@ -201,7 +232,7 @@ export const SettingsPanel = ({
       setAutoMode(config.rigControl?.autoMode !== false);
       setRigApiToken(config.rigControl?.apiToken || '');
       if (config.location?.lat != null && config.location?.lon != null) {
-        const grid = calculateGridSquare(config.location.lat, config.location.lon);
+        const grid = latLonToMaidenhead({ lat: config.location.lat, lon: config.location.lon });
         setGridSquare(grid);
         setConfigLocator(grid);
       }
@@ -320,7 +351,7 @@ export const SettingsPanel = ({
     gridEditingRef.current = true;
     setGridSquare(grid.toUpperCase());
     if (grid.length >= 4) {
-      const parsed = parseGridSquare(grid);
+      const parsed = maidenheadToLatLon(grid);
       if (parsed) {
         setLat(parsed.lat);
         setLon(parsed.lon);
@@ -333,7 +364,7 @@ export const SettingsPanel = ({
     gridEditingRef.current = false;
     // Now recalculate full 6-char grid from lat/lon
     if (lat != null && lon != null) {
-      const grid = calculateGridSquare(lat, lon);
+      const grid = latLonToMaidenhead({ lat, lon });
       setGridSquare(grid);
       setConfigLocator(grid);
     }
@@ -343,7 +374,7 @@ export const SettingsPanel = ({
     // Skip auto-completion while user is actively typing in the grid field
     if (gridEditingRef.current) return;
     if (lat != null && lon != null) {
-      const grid = calculateGridSquare(lat, lon);
+      const grid = latLonToMaidenhead({ lat, lon });
       setGridSquare(grid);
       setConfigLocator(grid);
     }
@@ -420,7 +451,12 @@ export const SettingsPanel = ({
       headerSize: headerSize,
       swapHeaderClocks,
       showMutualReception,
-      location: { lat: parseFloat(lat), lon: parseFloat(lon) },
+      location: {
+        lat: parseFloat(lat) || 0,
+        lon: parseFloat(lon) || 0,
+        stationAlt: isNaN(parseInt(stationAlt)) ? 100 : parseInt(stationAlt),
+      },
+      satellite: { minElev: isNaN(parseFloat(minElev)) ? 5.0 : parseFloat(minElev) },
       theme,
       customTheme,
       layout,
@@ -444,7 +480,8 @@ export const SettingsPanel = ({
         tuneEnabled,
         autoMode,
         apiToken: rigApiToken.trim(),
-        cloudRelaySession: cloudRelaySession.trim(),
+        // cloudRelaySession intentionally omitted — session ID belongs in
+        // localStorage (per-browser), not in the shared server config.
       },
     });
   };
@@ -533,6 +570,9 @@ export const SettingsPanel = ({
     return t == 'imperial' ? 'US Customary' : 'Metric';
   };
 
+  // Set a sane default if we are not a local installation and we have 'udp' set as the dxClusterSource.
+  if (!isLocalInstall && dxClusterSource === 'udp') setDxClusterSource('auto');
+
   return (
     <div
       onClick={onClose}
@@ -597,7 +637,7 @@ export const SettingsPanel = ({
               fontSize: '13px',
               cursor: 'pointer',
               fontWeight: activeTab === 'station' ? '700' : '400',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
             }}
           >
             📻 {t('station.settings.tab.title.station')}
@@ -615,7 +655,7 @@ export const SettingsPanel = ({
               fontSize: '13px',
               cursor: 'pointer',
               fontWeight: activeTab === 'integrations' ? '700' : '400',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
             }}
           >
             🔌 {t('station.settings.tab.title.integrations')}
@@ -633,7 +673,7 @@ export const SettingsPanel = ({
               fontSize: '13px',
               cursor: 'pointer',
               fontWeight: activeTab === 'display' ? '700' : '400',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
             }}
           >
             🎨 {t('station.settings.tab.title.display')}
@@ -651,7 +691,7 @@ export const SettingsPanel = ({
               fontSize: '13px',
               cursor: 'pointer',
               fontWeight: activeTab === 'layers' ? '700' : '400',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
             }}
           >
             🗺️ {t('station.settings.tab.title.mapLayers')}
@@ -669,7 +709,7 @@ export const SettingsPanel = ({
               fontSize: '13px',
               cursor: 'pointer',
               fontWeight: activeTab === 'satellites' ? '700' : '400',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
             }}
           >
             🛰️ {t('station.settings.tab.title.satellites')}
@@ -690,7 +730,7 @@ export const SettingsPanel = ({
               fontSize: '13px',
               cursor: 'pointer',
               fontWeight: activeTab === 'profiles' ? '700' : '400',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
             }}
           >
             👤 {t('station.settings.tab.title.profiles')}
@@ -708,7 +748,7 @@ export const SettingsPanel = ({
               fontSize: '13px',
               cursor: 'pointer',
               fontWeight: activeTab === 'community' ? '700' : '400',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
             }}
           >
             🌐 {t('station.settings.tab.title.community')}
@@ -726,7 +766,7 @@ export const SettingsPanel = ({
               fontSize: '13px',
               cursor: 'pointer',
               fontWeight: activeTab === 'alerts' ? '700' : '400',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
             }}
           >
             🔔 {t('station.settings.tab.title.alerts')}
@@ -744,7 +784,7 @@ export const SettingsPanel = ({
               fontSize: '13px',
               cursor: 'pointer',
               fontWeight: activeTab === 'rig-bridge' ? '700' : '400',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
             }}
           >
             📻 {t('station.settings.tab.title.rig-bridge')}
@@ -818,7 +858,7 @@ export const SettingsPanel = ({
                   borderRadius: '6px',
                   color: 'var(--accent-amber)',
                   fontSize: '18px',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                   fontWeight: '700',
                   boxSizing: 'border-box',
                 }}
@@ -854,7 +894,7 @@ export const SettingsPanel = ({
                   borderRadius: '6px',
                   color: 'var(--accent-amber)',
                   fontSize: '18px',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                   fontWeight: '700',
                   boxSizing: 'border-box',
                 }}
@@ -888,7 +928,7 @@ export const SettingsPanel = ({
                     borderRadius: '6px',
                     color: 'var(--text-primary)',
                     fontSize: '14px',
-                    fontFamily: 'JetBrains Mono, monospace',
+                    fontFamily: 'var(--font-mono)',
                     boxSizing: 'border-box',
                   }}
                 />
@@ -918,7 +958,7 @@ export const SettingsPanel = ({
                     borderRadius: '6px',
                     color: 'var(--text-primary)',
                     fontSize: '14px',
-                    fontFamily: 'JetBrains Mono, monospace',
+                    fontFamily: 'var(--font-mono)',
                     boxSizing: 'border-box',
                   }}
                 />
@@ -1000,7 +1040,7 @@ export const SettingsPanel = ({
                   borderRadius: '6px',
                   color: timezone ? 'var(--accent-green)' : 'var(--text-muted)',
                   fontSize: '14px',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                   cursor: 'pointer',
                 }}
               >
@@ -1191,7 +1231,7 @@ export const SettingsPanel = ({
                     borderRadius: '4px',
                     color: wsjtxMulticastEnabled ? 'var(--text-primary)' : 'var(--text-secondary',
                     fontSize: '12px',
-                    fontFamily: 'JetBrains Mono, monospace',
+                    fontFamily: 'var(--font-mono)',
                     boxSizing: 'border-box',
                   }}
                 />
@@ -1339,7 +1379,7 @@ export const SettingsPanel = ({
                             borderRadius: '4px',
                             color: 'var(--accent-cyan)',
                             fontSize: '13px',
-                            fontFamily: 'JetBrains Mono',
+                            fontFamily: 'var(--font-mono)',
                             boxSizing: 'border-box',
                           }}
                         />
@@ -1368,7 +1408,7 @@ export const SettingsPanel = ({
                             borderRadius: '4px',
                             color: 'var(--accent-cyan)',
                             fontSize: '13px',
-                            fontFamily: 'JetBrains Mono',
+                            fontFamily: 'var(--font-mono)',
                             boxSizing: 'border-box',
                           }}
                         />
@@ -1618,7 +1658,7 @@ export const SettingsPanel = ({
                         fontSize: '11px',
                         cursor: 'pointer',
                         fontWeight: propMode === m.id ? '700' : '400',
-                        fontFamily: 'JetBrains Mono, monospace',
+                        fontFamily: 'var(--font-mono)',
                         lineHeight: 1.2,
                         textAlign: 'center',
                       }}
@@ -1638,7 +1678,7 @@ export const SettingsPanel = ({
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(4, 1fr) 1.2fr',
+                    gridTemplateColumns: 'repeat(4, 1fr)',
                     gap: '4px',
                     alignItems: 'center',
                   }}
@@ -1661,40 +1701,27 @@ export const SettingsPanel = ({
                         fontSize: '11px',
                         cursor: 'pointer',
                         fontWeight: propPower === p.w ? '700' : '400',
-                        fontFamily: 'JetBrains Mono, monospace',
+                        fontFamily: 'var(--font-mono)',
                       }}
                       title={p.tip}
                     >
                       {p.label}
                     </button>
                   ))}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-                    <input
-                      type="number"
-                      value={propPower}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        if (v > 0 && v <= 2000) setPropPower(v);
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '5px 4px',
-                        background: 'var(--bg-tertiary)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '4px',
-                        color: 'var(--text-primary)',
-                        fontSize: '11px',
-                        fontFamily: 'JetBrains Mono, monospace',
-                        textAlign: 'center',
-                        boxSizing: 'border-box',
-                      }}
-                      min="0.1"
-                      max="2000"
-                      step="1"
-                    />
-                    <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>W</span>
-                  </div>
                 </div>
+                {/* Non-preset value (set from Propagation panel's Custom… input) — show, but read-only here */}
+                {![5, 25, 100, 1500].includes(propPower) && (
+                  <div
+                    style={{
+                      marginTop: '4px',
+                      fontSize: '10px',
+                      color: 'var(--text-muted)',
+                      fontFamily: 'var(--font-mono)',
+                    }}
+                  >
+                    Custom: {propPower}W <span style={{ opacity: 0.7 }}>(set from Propagation panel)</span>
+                  </div>
+                )}
               </div>
 
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
@@ -1837,7 +1864,7 @@ export const SettingsPanel = ({
                       padding: '3px 8px',
                       borderRadius: '4px',
                       fontSize: '11px',
-                      fontFamily: 'JetBrains Mono, monospace',
+                      fontFamily: 'var(--font-mono)',
                       fontWeight: '600',
                       marginBottom: '6px',
                       background: wakeLockStatus.active ? 'rgba(0,200,100,0.15)' : 'rgba(255,160,0,0.15)',
@@ -1983,7 +2010,7 @@ export const SettingsPanel = ({
                         color: 'var(--text-primary)',
                         padding: '6px 10px',
                         fontSize: '13px',
-                        fontFamily: 'JetBrains Mono, monospace',
+                        fontFamily: 'var(--font-mono)',
                       }}
                     />
                   </div>
@@ -2004,16 +2031,39 @@ export const SettingsPanel = ({
                         color: 'var(--text-primary)',
                         padding: '6px 10px',
                         fontSize: '13px',
-                        fontFamily: 'JetBrains Mono, monospace',
+                        fontFamily: 'var(--font-mono)',
                       }}
                     />
                   </div>
                 </div>
               )}
+              {displaySchedule.enabled && (
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    color: 'var(--text-primary)',
+                    marginBottom: '8px',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={displaySchedule.keepSignalActive !== false}
+                    onChange={(e) => setDisplaySchedule({ ...displaySchedule, keepSignalActive: e.target.checked })}
+                    style={{ accentColor: 'var(--accent-amber)' }}
+                  />
+                  Keep HDMI signal active during sleep (recommended for TVs)
+                </label>
+              )}
               <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                 {displaySchedule.enabled
-                  ? `Display will go black at ${displaySchedule.sleepTime} and wake at ${displaySchedule.wakeTime} (local time). The wake lock will also be released so your TV or monitor can sleep.`
-                  : 'Set a daily schedule to automatically black out the display and release the wake lock. Ideal for shack TVs and kiosk displays.'}
+                  ? displaySchedule.keepSignalActive !== false
+                    ? `Display will go black at ${displaySchedule.sleepTime} and wake at ${displaySchedule.wakeTime} (local time). The HDMI signal stays alive so TVs don't latch into standby — turn this off only if you want the display to actually power down.`
+                    : `Display will go black at ${displaySchedule.sleepTime} and wake at ${displaySchedule.wakeTime} (local time). The wake lock will be released so your monitor can power off. Note: TVs that go to standby on signal loss will not wake automatically — enable "Keep HDMI signal active" above if this affects you.`
+                  : 'Set a daily schedule to automatically black out the display at night. Ideal for shack TVs and kiosk displays.'}
               </div>
             </div>
 
@@ -2041,7 +2091,7 @@ export const SettingsPanel = ({
                   borderRadius: '6px',
                   color: 'var(--accent-green)',
                   fontSize: '14px',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                   cursor: 'pointer',
                 }}
               >
@@ -2050,9 +2100,11 @@ export const SettingsPanel = ({
                 <option value="dxwatch">{t('station.settings.dx.option3')}</option>
                 <option value="auto">{t('station.settings.dx.option4')}</option>
                 <option value="custom">{t('station.settings.dx.custom.option')}</option>
-                <option value="udp">
-                  {t('station.settings.dx.udp.option', { defaultValue: 'UDP Spots (Local Network)' })}
-                </option>
+                {isLocalInstall && (
+                  <option value="udp">
+                    {t('station.settings.dx.udp.option', { defaultValue: 'UDP Spots (Local Network)' })}
+                  </option>
+                )}
               </select>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
                 {t('station.settings.dx.describe')}
@@ -2102,7 +2154,7 @@ export const SettingsPanel = ({
                       borderRadius: '6px',
                       color: 'var(--text-primary)',
                       fontSize: '14px',
-                      fontFamily: 'JetBrains Mono, monospace',
+                      fontFamily: 'var(--font-mono)',
                     }}
                   />
                 </div>
@@ -2126,7 +2178,7 @@ export const SettingsPanel = ({
                       borderRadius: '6px',
                       color: 'var(--text-primary)',
                       fontSize: '14px',
-                      fontFamily: 'JetBrains Mono, monospace',
+                      fontFamily: 'var(--font-mono)',
                     }}
                   />
                 </div>
@@ -2183,7 +2235,7 @@ export const SettingsPanel = ({
                       borderRadius: '6px',
                       color: 'var(--text-primary)',
                       fontSize: '14px',
-                      fontFamily: 'JetBrains Mono, monospace',
+                      fontFamily: 'var(--font-mono)',
                     }}
                   />
                 </div>
@@ -2208,7 +2260,7 @@ export const SettingsPanel = ({
                       borderRadius: '6px',
                       color: 'var(--text-primary)',
                       fontSize: '14px',
-                      fontFamily: 'JetBrains Mono, monospace',
+                      fontFamily: 'var(--font-mono)',
                     }}
                   />
                 </div>
@@ -2310,7 +2362,7 @@ export const SettingsPanel = ({
               </div>
               <div
                 style={{
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                   fontSize: 11,
                   padding: '4px 10px',
                   borderRadius: 999,
@@ -2372,7 +2424,7 @@ export const SettingsPanel = ({
                       display: 'flex',
                       alignItems: 'center',
                       gap: 8,
-                      fontFamily: 'JetBrains Mono, monospace',
+                      fontFamily: 'var(--font-mono)',
                       fontSize: 12,
                     }}
                   >
@@ -2431,7 +2483,7 @@ export const SettingsPanel = ({
                     <ol style={{ margin: 0, paddingLeft: 18 }}>
                       <li>
                         Run OpenHamClock locally:
-                        <div style={{ fontFamily: 'JetBrains Mono', marginTop: 4 }}>npm start</div>
+                        <div style={{ fontFamily: 'var(--font-mono)', marginTop: 4 }}>npm start</div>
                         Open the local URL shown in your terminal (example: http://127.0.0.1:3001).
                       </li>
 
@@ -2442,9 +2494,9 @@ export const SettingsPanel = ({
 
                       <li style={{ marginTop: 6 }}>
                         In the OpenHamClock folder:
-                        <div style={{ fontFamily: 'JetBrains Mono', marginTop: 4 }}>copy .env.example → .env</div>
+                        <div style={{ fontFamily: 'var(--font-mono)', marginTop: 4 }}>copy .env.example → .env</div>
                         Then edit:
-                        <div style={{ fontFamily: 'JetBrains Mono', marginTop: 4 }}>
+                        <div style={{ fontFamily: 'var(--font-mono)', marginTop: 4 }}>
                           VITE_PSTROTATOR_TARGET=http://192.168.1.43:50004
                         </div>
                         (Replace with the IP and port of your PstRotatorAz machine.)
@@ -2498,7 +2550,7 @@ export const SettingsPanel = ({
                         display: 'flex',
                         alignItems: 'center',
                         gap: 8,
-                        fontFamily: 'JetBrains Mono, monospace',
+                        fontFamily: 'var(--font-mono)',
                         fontSize: 12,
                       }}
                     >
@@ -2561,7 +2613,7 @@ export const SettingsPanel = ({
                       display: 'flex',
                       alignItems: 'center',
                       gap: 8,
-                      fontFamily: 'JetBrains Mono, monospace',
+                      fontFamily: 'var(--font-mono)',
                       fontSize: 12,
                     }}
                   >
@@ -2637,7 +2689,7 @@ export const SettingsPanel = ({
                         borderRadius: '6px',
                         color: 'var(--text-primary)',
                         fontSize: '14px',
-                        fontFamily: 'JetBrains Mono, monospace',
+                        fontFamily: 'var(--font-mono)',
                       }}
                     >
                       {[15, 30, 60, 120, 240, 720, 1440].map((m) => (
@@ -2714,7 +2766,7 @@ export const SettingsPanel = ({
                     <ol style={{ margin: 0, paddingLeft: 18 }}>
                       <li>
                         Run OpenHamClock locally:
-                        <div style={{ fontFamily: 'JetBrains Mono', marginTop: 4 }}>npm start</div>
+                        <div style={{ fontFamily: 'var(--font-mono)', marginTop: 4 }}>npm start</div>
                         Open the local URL shown in your terminal (example: http://127.0.0.1:3001).
                       </li>
 
@@ -2724,7 +2776,7 @@ export const SettingsPanel = ({
 
                       <li style={{ marginTop: 6 }}>
                         Edit the bridge <b>config.json</b> file and set:
-                        <div style={{ fontFamily: 'JetBrains Mono', marginTop: 4 }}>
+                        <div style={{ fontFamily: 'var(--font-mono)', marginTop: 4 }}>
                           "OHC_BASE_URL": "http://127.0.0.1:3001"
                         </div>
                         (Use the exact URL printed by OpenHamClock.)
@@ -2732,7 +2784,7 @@ export const SettingsPanel = ({
 
                       <li style={{ marginTop: 6 }}>
                         Ensure:
-                        <div style={{ fontFamily: 'JetBrains Mono', marginTop: 4 }}>"ENABLE_OHC_HTTP": true</div>
+                        <div style={{ fontFamily: 'var(--font-mono)', marginTop: 4 }}>"ENABLE_OHC_HTTP": true</div>
                       </li>
 
                       <li style={{ marginTop: 6 }}>
@@ -2810,7 +2862,7 @@ export const SettingsPanel = ({
                 </span>
                 <span
                   style={{
-                    fontFamily: 'JetBrains Mono, monospace',
+                    fontFamily: 'var(--font-mono)',
                     fontWeight: 700,
                     color: 'var(--accent-cyan)',
                     fontSize: `${24 * headerSize}px`,
@@ -2822,7 +2874,7 @@ export const SettingsPanel = ({
                 </span>
                 <span
                   style={{
-                    fontFamily: 'JetBrains Mono, monospace',
+                    fontFamily: 'var(--font-mono)',
                     fontSize: `${13 * headerSize}px`,
                     color: 'var(--text-muted)',
                     whiteSpace: 'nowrap',
@@ -2852,7 +2904,7 @@ export const SettingsPanel = ({
                   fontSize: '12px',
                   color: 'var(--accent-amber)',
                   fontWeight: 600,
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                   marginTop: '4px',
                 }}
               >
@@ -3044,6 +3096,66 @@ export const SettingsPanel = ({
                 />
               )}
             </div>
+
+            {/* Monospace font selector (#923 — 0/8 readability) */}
+            <div style={{ marginBottom: '8px' }}>
+              <label
+                htmlFor="mono-font-select"
+                style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  color: 'var(--text-muted)',
+                  fontSize: '11px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px',
+                }}
+              >
+                {t('station.settings.monoFont')}
+              </label>
+              <select
+                id="mono-font-select"
+                value={monoFont}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setMonoFont(next);
+                  try {
+                    localStorage.setItem('openhamclock_monoFont', next);
+                  } catch {}
+                  document.documentElement.style.setProperty('--font-mono', next);
+                }}
+                style={{
+                  width: '100%',
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  padding: '6px 8px',
+                  fontFamily: monoFont,
+                  fontSize: '12px',
+                }}
+              >
+                <option value="'JetBrains Mono', monospace">JetBrains Mono — default (dotted 0)</option>
+                <option value="'Fira Code', monospace">Fira Code — slashed 0</option>
+                <option value="'IBM Plex Mono', monospace">IBM Plex Mono — slashed 0, wider</option>
+              </select>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                {t('station.settings.monoFont.describe')}
+              </div>
+              <div
+                style={{
+                  fontFamily: monoFont,
+                  fontSize: '14px',
+                  marginTop: '8px',
+                  padding: '6px 10px',
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  letterSpacing: '0.05em',
+                }}
+              >
+                0 8 O 1 l I — 14.074 MHz — W1AW/0 K8O
+              </div>
+            </div>
           </div>
         )}
 
@@ -3135,7 +3247,7 @@ export const SettingsPanel = ({
                             color: item.checked ? 'var(--accent-amber)' : 'var(--text-primary)',
                             fontSize: '14px',
                             fontWeight: '600',
-                            fontFamily: 'JetBrains Mono, monospace',
+                            fontFamily: 'var(--font-mono)',
                           }}
                         >
                           {item.title}
@@ -3181,7 +3293,7 @@ export const SettingsPanel = ({
                               color: layer.enabled ? 'var(--accent-amber)' : 'var(--text-primary)',
                               fontSize: '14px',
                               fontWeight: '600',
-                              fontFamily: 'JetBrains Mono, monospace',
+                              fontFamily: 'var(--font-mono)',
                             }}
                           >
                             {layer.name.startsWith('plugins.') ? t(layer.name) : layer.name}
@@ -3336,7 +3448,7 @@ export const SettingsPanel = ({
                             color: layer.enabled ? 'var(--accent-amber)' : 'var(--text-primary)',
                             fontSize: '14px',
                             fontWeight: '600',
-                            fontFamily: 'JetBrains Mono, monospace',
+                            fontFamily: 'var(--font-mono)',
                           }}
                         >
                           {layer.name}
@@ -3390,6 +3502,79 @@ export const SettingsPanel = ({
                             Footprints
                           </label>
                         </div>
+
+                        {/* station altitude and minimum elevation inputs */}
+                        <div
+                          style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}
+                        >
+                          <div>
+                            <label
+                              style={{
+                                display: 'block',
+                                marginBottom: '6px',
+                                color: 'var(--text-muted)',
+                                fontSize: '11px',
+                                textTransform: 'uppercase',
+                              }}
+                            >
+                              Station Altitude [m]
+                            </label>
+                            <input
+                              type="number"
+                              step="1"
+                              min="-500"
+                              max="9000"
+                              value={isNaN(stationAlt) ? '' : stationAlt}
+                              onChange={(e) =>
+                                setStationAlt(isNaN(e.target.valueAsNumber) ? 100 : e.target.valueAsNumber)
+                              }
+                              style={{
+                                width: '100%',
+                                padding: '10px',
+                                background: 'var(--bg-tertiary)',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '6px',
+                                color: 'var(--text-primary)',
+                                fontSize: '14px',
+                                fontFamily: 'var(--font-mono)',
+                                boxSizing: 'border-box',
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <label
+                              style={{
+                                display: 'block',
+                                marginBottom: '6px',
+                                color: 'var(--text-muted)',
+                                fontSize: '11px',
+                                textTransform: 'uppercase',
+                              }}
+                            >
+                              Minimum Elevation [°]
+                            </label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="-5.0"
+                              max="89.0"
+                              value={isNaN(minElev) ? '' : minElev}
+                              onChange={(e) => setMinElev(isNaN(e.target.valueAsNumber) ? 5.0 : e.target.valueAsNumber)}
+                              style={{
+                                width: '100%',
+                                padding: '10px',
+                                background: 'var(--bg-tertiary)',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '6px',
+                                color: 'var(--text-primary)',
+                                fontSize: '14px',
+                                fontFamily: 'var(--font-mono)',
+                                boxSizing: 'border-box',
+                              }}
+                            />
+                          </div>
+                        </div>
+
                         {/* Lead Time Slider WIP
 						<div style={{ marginTop: '8px' }}>
 						  <label style={{
@@ -3456,7 +3641,7 @@ export const SettingsPanel = ({
                   padding: '6px 12px',
                   fontSize: '12px',
                   cursor: 'pointer',
-                  fontFamily: 'JetBrains Mono',
+                  fontFamily: 'var(--font-mono)',
                 }}
               >
                 {t('station.settings.satellites.selectAll')}
@@ -3471,7 +3656,7 @@ export const SettingsPanel = ({
                   padding: '6px 12px',
                   fontSize: '12px',
                   cursor: 'pointer',
-                  fontFamily: 'JetBrains Mono',
+                  fontFamily: 'var(--font-mono)',
                 }}
               >
                 {t('station.settings.satellites.clear')}
@@ -3504,7 +3689,7 @@ export const SettingsPanel = ({
                   border: '1px solid var(--border-color)',
                   borderRadius: '6px',
                   color: 'var(--text-primary)',
-                  fontFamily: 'JetBrains Mono',
+                  fontFamily: 'var(--font-mono)',
                   fontSize: '12px',
                   outline: 'none',
                 }}
@@ -3569,7 +3754,7 @@ export const SettingsPanel = ({
                         textAlign: 'left',
                         cursor: 'pointer',
                         color: 'var(--text-primary)',
-                        fontFamily: 'JetBrains Mono',
+                        fontFamily: 'var(--font-mono)',
                         fontSize: '12px',
                         display: 'flex',
                         alignItems: 'center',
@@ -3697,7 +3882,7 @@ export const SettingsPanel = ({
                     borderRadius: '4px',
                     color: 'var(--text-primary)',
                     fontSize: '12px',
-                    fontFamily: 'JetBrains Mono, monospace',
+                    fontFamily: 'var(--font-mono)',
                   }}
                 />
                 <button
@@ -3820,7 +4005,7 @@ export const SettingsPanel = ({
                                     borderRadius: '3px',
                                     color: 'var(--text-primary)',
                                     fontSize: '12px',
-                                    fontFamily: 'JetBrains Mono, monospace',
+                                    fontFamily: 'var(--font-mono)',
                                   }}
                                 />
                                 <button
@@ -4126,7 +4311,7 @@ export const SettingsPanel = ({
                         borderRadius: '4px',
                         color: 'var(--text-primary)',
                         fontSize: '12px',
-                        fontFamily: 'JetBrains Mono, monospace',
+                        fontFamily: 'var(--font-mono)',
                         boxSizing: 'border-box',
                       }}
                     />
@@ -4143,7 +4328,7 @@ export const SettingsPanel = ({
                         borderRadius: '4px',
                         color: 'var(--text-primary)',
                         fontSize: '12px',
-                        fontFamily: 'JetBrains Mono, monospace',
+                        fontFamily: 'var(--font-mono)',
                         boxSizing: 'border-box',
                       }}
                     />
@@ -4292,7 +4477,7 @@ export const SettingsPanel = ({
                   borderRadius: '4px',
                   color: 'var(--text-primary)',
                   fontSize: '12px',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                   boxSizing: 'border-box',
                 }}
               />
@@ -4561,7 +4746,7 @@ export const SettingsPanel = ({
                       fontSize: '11px',
                       color: 'var(--text-secondary)',
                       textDecoration: 'none',
-                      fontFamily: 'JetBrains Mono, monospace',
+                      fontFamily: 'var(--font-mono)',
                       border: '1px solid transparent',
                       transition: 'all 0.15s',
                     }}
@@ -4729,7 +4914,7 @@ export const SettingsPanel = ({
                           borderRadius: '4px',
                           color: 'var(--accent-cyan)',
                           fontSize: '13px',
-                          fontFamily: 'JetBrains Mono',
+                          fontFamily: 'var(--font-mono)',
                           boxSizing: 'border-box',
                         }}
                       />
@@ -4753,7 +4938,7 @@ export const SettingsPanel = ({
                           borderRadius: '4px',
                           color: 'var(--accent-cyan)',
                           fontSize: '13px',
-                          fontFamily: 'JetBrains Mono',
+                          fontFamily: 'var(--font-mono)',
                           boxSizing: 'border-box',
                         }}
                       />
@@ -5041,6 +5226,8 @@ export const SettingsPanel = ({
                             if (Number.isFinite(p) && p > 0) nextRigPort = p;
                           }
                           setCloudRelaySession('');
+                          // Clear session and configured flag from localStorage
+                          clearRelaySession();
                           onSave({
                             ...config,
                             rigControl: {
@@ -5051,7 +5238,6 @@ export const SettingsPanel = ({
                               tuneEnabled,
                               autoMode,
                               apiToken: rigApiToken.trim(),
-                              cloudRelaySession: '',
                             },
                           });
                         }}
@@ -5101,6 +5287,13 @@ export const SettingsPanel = ({
                             }
 
                             setCloudRelaySession(credData.session);
+                            // Persist in localStorage so all relay-consuming hooks
+                            // (WSJTX, MeshCom, APRS) immediately poll with this ID
+                            // instead of whatever random ID they generated earlier.
+                            setRelaySessionId(credData.session);
+                            // Mark cloud relay as explicitly configured so RigContext
+                            // enters cloud relay mode on next re-render (save triggers it).
+                            setRelayConfigured(true);
 
                             // Copy config to clipboard for easy paste into rig-bridge
                             const configText = JSON.stringify(credData.configPayload, null, 2);
@@ -5272,7 +5465,7 @@ function AudioAlertsTab() {
                   fontSize: '11px',
                   fontWeight: 600,
                   cursor: 'pointer',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                 }}
               >
                 {feedConf.enabled ? 'ON' : 'OFF'}
@@ -5296,7 +5489,7 @@ function AudioAlertsTab() {
                     borderRadius: '4px',
                     padding: '6px 8px',
                     fontSize: '12px',
-                    fontFamily: 'JetBrains Mono, monospace',
+                    fontFamily: 'var(--font-mono)',
                   }}
                 >
                   {Object.entries(TONE_PRESETS).map(([key, preset]) => (

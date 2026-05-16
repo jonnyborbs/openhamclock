@@ -5,7 +5,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useVisibilityRefresh } from './useVisibilityRefresh';
 import { apiFetch } from '../utils/apiFetch';
-import { WGS84ToMaidenhead } from '@hamset/maidenhead-locator';
+import { latLonToMaidenhead } from '../utils/geo';
 import { getBandFromFreq } from '../utils/callsign';
 
 export const useSOTASpots = () => {
@@ -23,7 +23,7 @@ export const useSOTASpots = () => {
         const res = await apiFetch('/api/sota/spots', { cache: 'no-store' });
         if (res?.ok) {
           const spots = await res.json();
-          console.log(`[SOTA] Fetched ${Array.isArray(spots) ? spots.length : 0} spots`);
+          console.info(`[SOTA] Fetched ${Array.isArray(spots) ? spots.length : 0} spots`);
 
           // Only mark as "updated" when data content actually changes
           let newestTime = null;
@@ -93,7 +93,7 @@ export const useSOTASpots = () => {
                       return new Date(ts).toISOString().substr(11, 5) + 'z';
                     })()
                   : '',
-                grid: WGS84ToMaidenhead({ lat: lat, lng: lon }),
+                grid: latLonToMaidenhead({ lat, lon }),
               };
             });
 

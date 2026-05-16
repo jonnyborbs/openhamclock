@@ -35,7 +35,9 @@ import {
   usePSKReporter,
   useWSJTX,
   useAPRS,
+  useMeshCom,
   useEmcommData,
+  useIBP,
 } from './hooks';
 
 import useAppConfig from './hooks/app/useAppConfig';
@@ -234,7 +236,7 @@ const App = () => {
   usePresence({ callsign: config.callsign, locator: config.locator, sharePresence: config.sharePresence !== false });
 
   // Location & map state
-  const { dxLocation, dxLocked, handleToggleDxLock, handleDXChange } = useDXLocation(config.defaultDX);
+  const { dxLocation, dxCallsign, dxLocked, handleToggleDxLock, handleDXChange } = useDXLocation(config.defaultDX);
 
   const {
     mapLayers,
@@ -256,6 +258,7 @@ const App = () => {
     toggleDXNews,
     toggleRotatorBearing,
     toggleAPRS,
+    toggleMeshCom,
   } = useMapLayers();
 
   const {
@@ -320,7 +323,7 @@ const App = () => {
 
   const propagation = usePropagation(config.location, dxLocation, config.propagation);
   const mySpots = useMySpots(config.callsign);
-  const satellites = useSatellites(config.location);
+  const satellites = useSatellites(config.location, config.satellite);
   const localWeather = useWeather(config.location, config.allUnits);
   const dxWeather = useWeather(dxLocation, config.allUnits);
   const localAlerts = useWeatherAlerts(config.location);
@@ -334,6 +337,8 @@ const App = () => {
   });
   const wsjtx = useWSJTX();
   const aprsData = useAPRS();
+  const ibp = useIBP(config.location?.lat ?? null, config.location?.lon ?? null);
+  const meshcomData = useMeshCom();
   const emcommData = useEmcommData({
     location: config.location,
     enabled: config.layout === 'emcomm',
@@ -491,6 +496,7 @@ const App = () => {
     deGrid,
     dxGrid,
     dxLocation,
+    dxCallsign,
     dxLocked,
     handleDXChange,
     handleToggleDxLock,
@@ -520,6 +526,8 @@ const App = () => {
     pskReporter,
     wsjtx,
     aprsData,
+    ibp,
+    meshcomData,
     emcommData,
     filteredPskSpots,
     wsjtxMapSpots,
@@ -556,6 +564,7 @@ const App = () => {
     toggleDXNews,
     toggleRotatorBearing,
     toggleAPRS,
+    toggleMeshCom,
     hoveredSpot,
     setHoveredSpot,
     filteredSatellites,
@@ -658,7 +667,6 @@ const App = () => {
         layoutLocked={layoutLocked}
         onToggleLayoutLock={toggleLayoutLock}
         onResetLayout={handleResetLayout}
-        version={config.version}
       />
 
       <RigProvider rigConfig={config.rigControl || { enabled: false, host: 'http://localhost', port: 5555 }}>
@@ -703,6 +711,7 @@ const App = () => {
         onFilterChange={setDxFilters}
         isOpen={showDXFilters}
         onClose={() => setShowDXFilters(false)}
+        onClearSpots={dxClusterData.clearSpots}
       />
       <PSKFilterManager
         filters={pskFilters}

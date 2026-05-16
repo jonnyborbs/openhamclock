@@ -24,7 +24,7 @@
  *   pushInterval:   number   State push interval in ms (default: 2000)
  *   relayRig:       boolean  Relay rig state (default: true)
  *   relayWsjtx:     boolean  Relay WSJT-X decodes (default: true)
- *   relayAprs:      boolean  Relay APRS packets (default: false)
+ *   relayAprs:      boolean  Relay APRS packets (default: true)
  *   verbose:        boolean  Log all relay activity (default: false)
  */
 
@@ -69,6 +69,7 @@ const descriptor = {
     let lastState = {};
     let pendingDecodes = []; // Batched decodes to push
     let pendingAprs = []; // Batched APRS packets to push
+    let pendingMeshCom = []; // Batched MeshCom packets to push
 
     function makeRequest(urlStr, method, body, callback, timeoutMs) {
       let parsed;
@@ -124,6 +125,7 @@ const descriptor = {
 
       const hasDecodes = pendingDecodes.length > 0;
       const hasAprs = pendingAprs.length > 0;
+      const hasMeshCom = pendingMeshCom.length > 0;
       const stateChanged =
         currentState.freq !== lastState.freq ||
         currentState.mode !== lastState.mode ||
@@ -131,11 +133,11 @@ const descriptor = {
         currentState.connected !== lastState.connected;
 
       // Only push if state changed or there's data to send
-      if (!stateChanged && !hasDecodes && !hasAprs) return;
+      if (!stateChanged && !hasDecodes && !hasAprs && !hasMeshCom) return;
       lastState = { ...currentState };
 
       // Include batched data in the push
-      const payload = { ...currentState };
+      const payload = { ...currentState, session };
       if (hasDecodes) {
         payload.decodes = pendingDecodes.splice(0, 50);
         totalDecodes += payload.decodes.length;
@@ -143,14 +145,19 @@ const descriptor = {
       if (hasAprs) {
         payload.aprsPackets = pendingAprs.splice(0, 50);
       }
+      if (hasMeshCom) {
+        payload.meshcomPackets = pendingMeshCom.splice(0, 50);
+      }
 
-      makeRequest(`${serverUrl}/api/rig-bridge/relay/state`, 'POST', payload, (err, status) => {
+      makeRequest(`${serverUrl}/api/rig-bridge/relay/state`, 'POST', payload, (err, status, data) => {
         if (err) {
           if (serverReachable) console.error(`[CloudRelay] Push error: ${err.message}`);
           serverReachable = false;
           consecutiveErrors++;
-          // Put decodes back if push failed
+          // Restore all batched data so it is retried on the next push cycle
           if (payload.decodes) pendingDecodes.unshift(...payload.decodes);
+          if (payload.aprsPackets) pendingAprs.unshift(...payload.aprsPackets);
+          if (payload.meshcomPackets) pendingMeshCom.unshift(...payload.meshcomPackets);
           return;
         }
         if (status === 200) {
@@ -162,7 +169,12 @@ const descriptor = {
             console.log(`[CloudRelay] Pushed state (${currentState.freq} Hz ${currentState.mode}${decodeInfo})`);
           }
         } else if (status === 401 || status === 403) {
-          console.error(`[CloudRelay] Authentication failed (${status}) — check relay API key`);
+          try {
+            const msg = JSON.parse(data)?.error || data;
+            console.error(`[CloudRelay] Authentication failed (${status}): ${msg}`);
+          } catch {
+            console.error(`[CloudRelay] Authentication failed (${status}) — check relay API key and session`);
+          }
         }
       });
     }
@@ -204,56 +216,50 @@ const descriptor = {
     }
 
     // Execute a command received from the cloud
+    // Uses https when rig-bridge TLS is enabled, http otherwise.
+    // All requests have an error handler to prevent unhandled-error crashes.
     function executeCommand(cmd) {
       totalCommands++;
       if (cfg.verbose) console.log(`[CloudRelay] Command: ${cmd.type} ${JSON.stringify(cmd.payload || {})}`);
 
+      const localMod = config.tls?.enabled ? https : http;
+      const localOptions = (path, body) => ({
+        hostname: '127.0.0.1',
+        port: config.port || 5555,
+        path,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-RigBridge-Token': config.apiToken || '' },
+        // Skip cert verification for loopback self-signed cert
+        rejectUnauthorized: false,
+      });
+
       switch (cmd.type) {
         case 'setFreq':
           if (cmd.payload?.freq) {
-            // Dispatch through the local rig-bridge HTTP API
-            const freqReq = http.request(
-              {
-                hostname: '127.0.0.1',
-                port: config.port || 5555,
-                path: '/freq',
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-RigBridge-Token': config.apiToken || '' },
-              },
-              () => {},
-            );
+            const freqReq = localMod.request(localOptions('/freq'), () => {});
+            freqReq.on('error', (err) => {
+              if (cfg.verbose) console.error(`[CloudRelay] setFreq dispatch error: ${err.message}`);
+            });
             freqReq.write(JSON.stringify({ freq: cmd.payload.freq }));
             freqReq.end();
           }
           break;
         case 'setMode':
           if (cmd.payload?.mode) {
-            const modeReq = http.request(
-              {
-                hostname: '127.0.0.1',
-                port: config.port || 5555,
-                path: '/mode',
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-RigBridge-Token': config.apiToken || '' },
-              },
-              () => {},
-            );
+            const modeReq = localMod.request(localOptions('/mode'), () => {});
+            modeReq.on('error', (err) => {
+              if (cfg.verbose) console.error(`[CloudRelay] setMode dispatch error: ${err.message}`);
+            });
             modeReq.write(JSON.stringify({ mode: cmd.payload.mode }));
             modeReq.end();
           }
           break;
         case 'setPTT':
           if (cmd.payload != null) {
-            const pttReq = http.request(
-              {
-                hostname: '127.0.0.1',
-                port: config.port || 5555,
-                path: '/ptt',
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-RigBridge-Token': config.apiToken || '' },
-              },
-              () => {},
-            );
+            const pttReq = localMod.request(localOptions('/ptt'), () => {});
+            pttReq.on('error', (err) => {
+              if (cfg.verbose) console.error(`[CloudRelay] setPTT dispatch error: ${err.message}`);
+            });
             pttReq.write(JSON.stringify({ ptt: !!cmd.payload.ptt }));
             pttReq.end();
           }
@@ -264,8 +270,8 @@ const descriptor = {
     }
 
     function connect() {
-      if (!serverUrl || !apiKey) {
-        console.error('[CloudRelay] Cannot start: url and apiKey are required');
+      if (!serverUrl || !apiKey || !session) {
+        console.error('[CloudRelay] Cannot start: url, apiKey, and session are required');
         return;
       }
 
@@ -311,26 +317,46 @@ const descriptor = {
       // or the 28 s window expires, so commands are delivered within ~RTT.
       longPollCommands();
 
-      // Subscribe to plugin bus — batch decodes and APRS packets for push
+      // Subscribe to plugin bus — batch decodes, APRS, and MeshCom packets for push.
+      // cfg.relayWsjtx and cfg.relayAprs default to true to preserve existing behaviour.
+      // cfg.relayMeshCom defaults to true.
       if (pluginBus) {
-        pluginBus.on('decode', (msg) => {
-          pendingDecodes.push({
-            source: msg.source,
-            message: msg.message,
-            snr: msg.snr,
-            deltaFreq: msg.deltaFreq,
-            mode: msg.mode,
-            time: msg.time?.formatted,
-            timestamp: msg.timestamp,
+        const relayWsjtx = cfg.relayWsjtx !== false;
+        const relayAprs = cfg.relayAprs !== false;
+        const relayMeshCom = cfg.relayMeshCom !== false;
+        const subscribed = [];
+
+        if (relayWsjtx) {
+          pluginBus.on('decode', (msg) => {
+            pendingDecodes.push({
+              source: msg.source,
+              message: msg.message,
+              snr: msg.snr,
+              deltaFreq: msg.deltaFreq,
+              mode: msg.mode,
+              time: msg.time?.formatted,
+              timestamp: msg.timestamp,
+            });
+            // Cap pending queue
+            if (pendingDecodes.length > 200) pendingDecodes.splice(0, pendingDecodes.length - 200);
           });
-          // Cap pending queue
-          if (pendingDecodes.length > 200) pendingDecodes.splice(0, pendingDecodes.length - 200);
-        });
-        pluginBus.on('aprs', (packet) => {
-          pendingAprs.push(packet);
-          if (pendingAprs.length > 200) pendingAprs.splice(0, pendingAprs.length - 200);
-        });
-        console.log('[CloudRelay] Subscribed to plugin bus (decodes, APRS, status, QSOs)');
+          subscribed.push('WSJT-X');
+        }
+        if (relayAprs) {
+          pluginBus.on('aprs', (packet) => {
+            pendingAprs.push(packet);
+            if (pendingAprs.length > 200) pendingAprs.splice(0, pendingAprs.length - 200);
+          });
+          subscribed.push('APRS');
+        }
+        if (relayMeshCom) {
+          pluginBus.on('meshcom', (packet) => {
+            pendingMeshCom.push(packet);
+            if (pendingMeshCom.length > 200) pendingMeshCom.splice(0, pendingMeshCom.length - 200);
+          });
+          subscribed.push('MeshCom');
+        }
+        console.log(`[CloudRelay] Subscribed to plugin bus (${subscribed.join(', ')})`);
       }
     }
 

@@ -9,7 +9,7 @@ import { useState, useEffect } from 'react';
 // Set to null to hide. Shown at the top of the What's New modal.
 const ANNOUNCEMENT = {
   emoji: '🎪',
-  text: 'OpenHamClock will be at Dayton Hamvention 2026! Come visit us in the Flea Market area — Booth #9518. Say hi, see a live demo, and grab some stickers!\n\nWe are moving from weekly to monthly releases, giving us more time to develop features and improve stability. Look for updates on the first Tuesday of each month.',
+  text: 'Mid-week update before Hamvention. Adds a new Band Activity heatmap panel, a customizable monospace font in Settings, a one-click clear for PSK Reporter spots, plus assorted fixes — including a TV-standby workaround for Display Schedule, an N1MM UDP spot-line direction fix, and a significant satellite TLE resolver overhaul that was occasionally stranding ISS and other birds.\n\nHamvention 2026 is THIS WEEKEND, May 15–17 in Dayton, Ohio! Come visit OpenHamClock in the Flea Market area — Booth #9518. Say hi, see a live demo, and grab some stickers. We look forward to seeing some of you there!',
   color: '#ff6b35',
   bg: 'rgba(255, 107, 53, 0.10)',
   border: 'rgba(255, 107, 53, 0.30)',
@@ -28,6 +28,273 @@ const ANNOUNCEMENT = {
 // The jump to v26 resets the scheme to something meaningful going forward.
 
 const CHANGELOG = [
+  {
+    version: '26.3.3',
+    date: '2026-05-12',
+    heading:
+      'Mid-week follow-up release before Hamvention. Headline addition: a new Band Activity heatmap dockable panel. Also new: a user-selectable monospace font in Settings, and a one-click clear-all button in the PSK Reporter panel. On the fix side: a TV-standby workaround so scheduled-sleep installs stay awake on HDMI, a correction to N1MM UDP spot-line direction, localized "VISIBLE" badge text in the satellite prediction table, and a substantial overhaul of the satellite TLE resolver that was occasionally stranding ISS and a handful of other birds in the cache for hours at a time.',
+    features: [
+      {
+        icon: '📊',
+        title: 'NEW: Band Activity Heatmap Panel',
+        desc: "A new dockable panel modeled on DX-Heat's Band Activity matrix. It plots a continent×band grid with gaussian-blurred SVG heatmap blobs over the last 15, 30, or 60 minutes of DX-cluster spots, so you can see where the bands are alive at a glance. The 'Your continent' picker defaults to whichever continent your callsign belongs to (looked up against the DXCC table) and your override is persisted to localStorage. Open it from the panel picker in any layout — it's not in the default layout yet, but you can drag it in wherever it makes sense.",
+      },
+      {
+        icon: '🔤',
+        title: 'NEW: Customizable Monospace Font',
+        desc: 'Settings → Display now lets you pick the monospace font used across the app — JetBrains Mono (the default, dotted 0), Fira Code (slashed 0), or IBM Plex Mono (slashed 0, slightly wider). One CSS variable drives every monospace surface in the project. Self-hosted users: rerun vendor-download.sh once after this update to fetch the Fira Code and IBM Plex Mono font files, otherwise the new picker falls back to whatever system monospace your browser chooses.',
+      },
+      {
+        icon: '🧹',
+        title: 'PSK Reporter — One-Click Clear All Spots',
+        desc: "The PSK Reporter panel header now has a small trash-can button that wipes all TX and RX spots from local state. Useful when you change bands or rigs and don't want stale dots cluttering the map. Translated into all 16 languages.",
+      },
+      {
+        icon: '📺',
+        title: 'Display Schedule — TV-Standby Workaround',
+        desc: "If you use the Display Schedule feature to schedule the screen to sleep at night, some TVs latched into standby when the OS dropped the HDMI signal and wouldn't come back when the schedule ended. There's now a 'Keep display signal active during sleep' checkbox (default on, in Settings → Display Schedule) that holds the wake lock through the whole sleep window. The TV stays awake but you only see the black overlay you'd see anyway — the signal never drops, so the TV never goes to standby. Opt out if you actually do want the monitor to power down.",
+      },
+      {
+        icon: '🛰️',
+        title: 'Satellite TLE Resolver — Reliability Fix',
+        desc: "Some users intermittently saw ISS, SO-50, AO-91, and a handful of weather geo satellites disappear from the satellite layer for hours at a time. Root cause: when CelesTrak rate-limited us, the resolver poisoned its 12-hour cache with a partial result. The resolver now uses gentler parallelism, won't overwrite a healthy cache with a materially worse one, deduplicates concurrent refresh attempts, and serves the existing cache immediately while refreshing in the background — so a slow upstream fetch can't translate into a blank satellite layer for end users. Reported by Alan.",
+      },
+      {
+        icon: '🐛',
+        title: 'DX Cluster — N1MM UDP Spot Lines Were Pointing the Wrong Way',
+        desc: "If you were receiving spot announcements from N1MM via UDP, the great-circle line was drawing DX → your station instead of DX → the spotter (who actually heard the DX). An April change had added a fallback that filled in your own grid square when the spotter's grid wasn't present, which was wrong for any spot that wasn't a self-spot. The fallback is now restricted to self-spots only, so non-self spots draw from DX to the real spotter as expected. Reported by VK3GA.",
+      },
+      {
+        icon: '🌍',
+        title: 'Satellite Layer — Localized "VISIBLE" Badge',
+        desc: 'The satellite prediction table\'s green "VISIBLE" badge that lights up during a pass was hardcoded in English. It now reads from the language table along with the rest of the satellite UI, with new translations added across all 16 languages. Thanks Michael Wheeley.',
+      },
+      {
+        icon: '📱',
+        title: "What's New — OK Button Reachable on Mobile",
+        desc: "The What's New modal on iOS Safari and some Android browsers had the OK button sitting just below the visible area with no way to scroll to it. Switched the height units from vh to svh (small viewport height, which excludes the browser toolbar) and enabled iOS momentum scrolling inside the modal. The OK button is now always reachable. Thanks Jörg (DO1HOZ).",
+      },
+      {
+        icon: '📐',
+        title: 'Grid Square Display Fix',
+        desc: 'A small regression where the grid-square display was being passed a bare lat/lon pair instead of a location object — the field would render blank in certain layouts. Now passes the proper object so Maidenhead computes correctly. Thanks Jörg (DO1HOZ).',
+      },
+      {
+        icon: '🔧',
+        title: 'Rotator — Configuration Cleanup',
+        desc: "Two dead environment variables (ROTATOR_HOST and ROTATOR_PORT) that were exported but never read by the rotator code have been removed. ROTATOR_PROVIDER now validates against the supported set ({none, pstrotator_udp}) and warns + disables on unknown values instead of silently doing nothing — so a typo like 'pstrotator_http' tells you, instead of leaving you wondering why your rotator isn't responding. The hardcoded 192.168.1.43 fallback in the PSTRotator host config has also been removed; if PSTROTATOR_HOST isn't set, the integration warns and disables rather than trying to reach a random LAN IP.",
+      },
+      {
+        icon: '🌐',
+        title: 'Translation Files — CI Sort Gate',
+        desc: "The 16 language JSON files in src/lang/ are now checked in CI for consistent key ordering using VSCode's native sort. New npm scripts lang:sort (auto-fix) and lang:check (verify) are available for contributors before submitting language changes. Prevents the kind of merge churn that used to happen when two contributors' editors disagreed on sort order. Thanks Michael Wheeley.",
+      },
+    ],
+  },
+  {
+    version: '26.3.2',
+    date: '2026-05-10',
+    heading:
+      'Surprise pre-Hamvention drop. Headline hotfix: VOACAP no longer double-counts TX power and antenna gain — at high power the WASM swap was flooding the chart green. Headline feature: brand-new MeshCom LoRa mesh integration. Also bundled: a Pi update reliability fix, a project-wide Maidenhead grid helper consolidation, an audited satellite tracking list, plus the full set of 26.3.0 and 26.3.1 features and security work that never reached production as standalone releases.',
+    features: [
+      {
+        icon: '🛰️',
+        title: 'NEW: MeshCom LoRa Mesh Integration',
+        desc: "OpenHamClock now talks to MeshCom, the LoRa-based VHF/UHF mesh network popular in Europe. Set up the new MeshCom plugin in rig-bridge and OHC will plot every node it hears on the map, list them in a tab with whatever weather or telemetry they're broadcasting, and let you read and reply to chat traffic right from the panel. Click any message to pop up reply buttons (broadcast, group, or direct), or type any callsign or group name into the To field — known nodes auto-suggest as you go. Works whether your rig-bridge talks straight to your browser or routes through Cloud Relay. Translated into all 16 languages. Big thanks to Jörg (DO1HOZ) for building this.",
+      },
+      {
+        icon: '🐛',
+        title: 'HOTFIX: VOACAP Was Going All Green at High Power',
+        desc: "At higher transmit powers the Propagation panel was lighting every band green — the WASM prediction looked broken. The cause: your TX power and antenna gain were being counted twice (once inside the prediction engine, then again on top of its result). Now they're only counted once, so 1,000 W and 100 W produce the realistic difference you'd expect, and bands above the MUF stop pretending to be open. The dB margin shown next to each band still reflects your real power and antenna advantage — only the math behind the colors changed.",
+      },
+      {
+        icon: '🐛',
+        title: 'Propagation Panel — First-Load Crash Fix',
+        desc: "Fixed a brief red error that could appear in the Propagation panel during the first few seconds after page load if your timezone hadn't resolved yet. The panel now waits patiently and renders normally once your location settles in.",
+      },
+      {
+        icon: '🥧',
+        title: 'Smoother update.sh on Pi and Self-Hosted Installs',
+        desc: "The update.sh script now does a fully clean Node-modules reinstall on each update instead of layering new packages on top of old ones. That fixes a few reported cases where a fresh dependency added in a recent release didn't actually land on disk after running update.sh, leading to a 'Cannot find module' error on next start. Thanks Jörg (DO1HOZ).",
+      },
+      {
+        icon: '🛰️',
+        title: 'Tracked Satellite List Audited',
+        desc: 'Re-curated the satellite list. Removed dead birds (AO-92 reentered Feb 2024, AO-27, RS-15, FO-99, GOES-13 deactivated, plus several decayed CAS / XW satellites and the science-only UVSQ-SAT and MeznSat). Added the new active ham birds AO-123 (ASRTU-1), SO-125 (HADES-ICM), and QMR-KWT-2, plus several active weather satellites (NOAA-20/21, EWS-G1/G2, GK-2A, ELEKTRO-L2/3, HIMAWARI-9). TEVEL constellation NORAD IDs corrected per AMSAT bulletin and ISS consolidated into a single entry. Thanks Michael Wheeley.',
+      },
+      {
+        icon: '🧹',
+        title: 'Lightning Panel — Console Typo Fix',
+        desc: 'Tiny console-log spelling typo in the Lightning code corrected (#963 — thanks Michael Wheeley).',
+      },
+      {
+        icon: '📐',
+        title: 'Behind the Scenes — Grid Locator Cleanup (closes #951)',
+        desc: 'There were several copies of Maidenhead-to-lat/lon code scattered across the project. Everything now uses one shared module that handles every grid precision (DM, DM12, DM12kv, all the way to DM12kv99) and a new bounding-box helper that plugin authors can use to draw grid overlays. The third-party @hamset/maidenhead-locator package has been retired. Thanks Michael Wheeley.',
+      },
+      {
+        icon: '🔒',
+        title: 'Cloud Relay — Credential Overhaul (26.3.1)',
+        desc: "Cloud Relay (the optional setting that lets your home rig-bridge be reached from a remote browser) got a security overhaul. Each rig-bridge now gets its own random one-time token instead of using your shared relay key, and that token survives server restarts and deploys so you don't have to keep re-pairing. Added protections against spoofed hosts and a fix for a TLS-enabled rig-bridge that was crashing on incoming commands. Heads-up: existing Cloud Relay users will need to re-run 'Connect Cloud Relay' in Settings → Rig Bridge once after this update to generate a fresh token.",
+      },
+      {
+        icon: '🔒',
+        title: 'Public-Site Security Tightening (26.3.1)',
+        desc: "Three fixes from a May audit. The Active Users map layer now ties each callsign to its source IP and rate-limits updates to once a minute, so nobody can casually spoof another op's pin. The internal health endpoint stopped exposing internal counters and visitor history to anyone who asked — only basic status and uptime are visible without auth. And the Dial-A-Moon image loader now confirms the URL is on nasa.gov before following it, closing a redirect-chasing vulnerability.",
+      },
+      {
+        icon: '♻️',
+        title: 'Server-Side Memory Leaks Closed (26.3.1)',
+        desc: 'Several server-side caches (NWS alerts, FEMA shelters, disaster declarations, MUF map, error-log dedupe) used to grow forever — invisible on a home Pi but a slow drag on openhamclock.com over weeks of uptime. Each cache now has a hard size cap and periodic cleanup.',
+      },
+      {
+        icon: '🧹',
+        title: 'Cleaner Browser Console (26.3.1)',
+        desc: "Routine status messages from the various map layers and feeds (lightning, WSPR, RBN, weather, spots, etc.) moved to debug-level logging. If you didn't have DevTools open you'll never notice — but anyone who did look saw far more noise than signal before. The verbose lines are still available behind the Debug filter, or by adding ?log=debug to the URL.",
+      },
+      {
+        icon: '📡',
+        title: 'VOACAP-Grade Propagation Predictions (26.3.0)',
+        desc: 'The Propagation panel now runs the actual ITU-R P.533 model — the same engine VOACAP itself uses — directly inside your browser. A small badge in the panel header tells you which engine produced the current view: WASM (the new in-browser P.533), REST (a server-side fallback), or EST (our older fast estimator). Predictions match VOACAP closely on long daylight paths where the older estimator was over-optimistic — for example, US to Kuwait on 80 m at midday is now correctly shown as closed.',
+      },
+      {
+        icon: '🛰️',
+        title: 'Winlink Gateway Map Layer (26.3.0)',
+        desc: "A new map layer plots 4,800+ Winlink gateways worldwide, color-coded by mode (Pactor, VARA-FM, VARA-HF, etc.). Filter by band, service, or mode in a draggable filter panel; press 'k' to toggle. The EmComm layout adds a 'Nearby Winlink Gateways' panel and rings the closest 25 gateways on the EmComm map.",
+      },
+      {
+        icon: '🛰️',
+        title: 'Satellite Next-Pass and Ending Countdown (26.3.0)',
+        desc: "The satellite info window now shows a 'Next Pass:' countdown when a satellite is below your minimum elevation, and an 'Ending:' countdown when one is currently overhead — so you know how long the window stays open. Computed for the next 7 days and refreshed hourly. Also fixed a small off-by-one that was returning one extra pass.",
+      },
+      {
+        icon: '📰',
+        title: 'DX News from Three Sources (26.3.0)',
+        desc: 'The DX News ticker now combines DXNews.com, DX-World, and NG3K into a single 24-hour feed with duplicates removed. The source label rotates so you can tell where each item came from, and clicking opens the article. Stray contest-reminder noise that was leaking into NG3K titles is now cleaned out.',
+      },
+      {
+        icon: '⚡',
+        title: 'Custom TX Power in the Propagation Panel (26.3.0)',
+        desc: "The Propagation panel's VOACAP view now has a 'Custom…' power option that pops up a 0.1–2,000 W input field, so you can model anything from QRP to legal limit without being stuck with the four preset buttons.",
+      },
+      {
+        icon: '🌅',
+        title: 'Local Sunrise/Sunset in the Propagation Panel (26.3.0)',
+        desc: 'The day/night badge in the Propagation panel now uses your actual local sunrise and sunset times instead of a fixed UTC 6 AM–6 PM window. Times are shown in your local timezone with a label (UTC for the DX side). Polar night and midnight sun are handled too.',
+      },
+      {
+        icon: '⛅',
+        title: 'Faster Weather Load (26.3.0)',
+        desc: 'Weather data now appears within a couple of seconds of changing your location instead of waiting 30 seconds for a settle delay. First fetch fires immediately when you set DE or your first DX target. If Open-Meteo rate-limits us, retries are tighter and the error message points to the optional API-key escape hatch.',
+      },
+      {
+        icon: '🛰️',
+        title: 'Satellite TLE Failover Hardening (26.3.0)',
+        desc: "When CelesTrak rate-limits us (which has happened more than once), the per-satellite SatNOGS / CelesTrak-CATNR fallback now runs without an arbitrary cap when the main fetch comes back empty — exactly when the safety net needs to fire hardest. Empty TLE responses also send a no-cache header so a CDN miss doesn't pin failure for an hour.",
+      },
+      {
+        icon: '🔒',
+        title: 'Security and Dependency Updates (26.3.0)',
+        desc: 'rig-bridge moved off the deprecated vercel/pkg packager (which had an unfixable security advisory) to the maintained @yao-pkg/pkg fork; build targets bumped from Node 18 to Node 20. The main project picked up Vite 6 and Vitest 3, closing the rest of the open advisories.',
+      },
+      {
+        icon: '🐛',
+        title: 'Other Bug Fixes (26.3.0)',
+        desc: "DX Favorites dropdown no longer clips off-screen near the edges. Duplicate version label removed from the expanded left sidebar. The MUF readout in the Propagation panel reappears after the engine swap (the previous parser was missing it). NG3K news titles no longer contain stray 'Check here for pericontest' text. ITURHFProp service stopped flooding the server log with noise.",
+      },
+    ],
+  },
+  {
+    version: '26.3.1',
+    date: '2026-05-04',
+    heading:
+      'Server-side security and resource hardening from the May audit — Cloud Relay credential overhaul, presence-spoof protection, /api/health lockdown, Dial-A-Moon SSRF guard, and four cache memory leaks closed. Plus extended grid-locator utilities and a quieter browser console.',
+    features: [
+      {
+        icon: '🔒',
+        title: 'Rig Bridge Cloud Relay — Credential Overhaul',
+        desc: 'Cloud Relay credentials are no longer the raw RIG_BRIDGE_RELAY_KEY — each rig-bridge instance now gets a 256-bit per-session token persisted to data/relay-tokens.json so it survives server restarts and deploys without re-pairing. The /api/rig-bridge/status endpoint now validates the host (preventing SSRF) and connects to the resolved IP to defeat DNS-rebinding. Long-poll connections capped at 10 per IP. Installer-script URL injection closed with new URL() validation. Cloud-relay plugin bumped to v2.1.3 with TLS-aware loopback and proper error handlers so a TLS-enabled rig-bridge no longer crashes when commands arrive. Heads-up: existing Cloud Relay users will need to re-run Connect Cloud Relay in Settings → Rig Bridge once after this update to generate fresh credentials.',
+      },
+      {
+        icon: '🔒',
+        title: 'API Surface Hardening',
+        desc: "/api/presence now binds each callsign to its source IP and rate-limits to 1 update per minute — anyone spoofing a POST with someone else's callsign now gets locked out and the prior pin is removed. /api/health stops leaking endpoint counts, byte totals, MQTT broker state, in-flight upstream counters, and visitor history to unauthenticated requests; only basic status, version, and uptime remain visible without auth. The Dial-A-Moon image fetch now validates that the upstream-supplied URL parses as https://*.nasa.gov before following it, closing the SSRF vector noted in the audit.",
+      },
+      {
+        icon: '♻️',
+        title: 'Server Cache Memory Leaks Closed',
+        desc: 'The error-deduplication map (errorLogState), the EmComm caches (NWS alerts, FEMA open shelters, disaster declarations), and the MUF map cache all now have periodic purges and hard size caps (200 entries each, with TTL-based eviction). Previous behavior left them growing unbounded over weeks of uptime — invisible on small self-hosted instances, but a real slow bleed on the public site over time.',
+      },
+      {
+        icon: '📐',
+        title: 'Extended Maidenhead Grid Utilities',
+        desc: 'src/utils/geo.js now fully supports the Maidenhead standard at all four sizes — field (DM), square (DM12), subsquare (DM12kv), and extended-square (DM12kv99) — plus a new maidenheadToBoundingBox() helper for plugin authors who want to draw grid overlays at any precision. Backed by a new geo.test.js with 169 cases covering both hemispheres. The legacy parseGridSquare and calculateGridSquare entry points still work as thin wrappers, so existing plugins keep working unchanged.',
+      },
+      {
+        icon: '🧹',
+        title: 'Cleaner Browser Console',
+        desc: 'Routine per-event log lines across the client (lightning, WSPR, RBN, weather, wake-lock, version-check, POTA/SOTA/WWFF/WWBOTA spots, earthquake markers, plugin loader, layer states, etc.) moved from console.log to console.debug, with one-shot lifecycle messages going to console.info. Open DevTools at the default level and you now see signal instead of noise — verbose tracing is still available by toggling the Debug filter, or by appending ?log=debug to the URL.',
+      },
+    ],
+  },
+  {
+    version: '26.3.0',
+    date: '2026-05-05',
+    heading:
+      'VOACAP-grade propagation predictions in your browser, Winlink gateway map layer, satellite next-pass countdown, multi-source DX news ticker, custom TX power, faster weather load, and a wave of bug fixes and security updates.',
+    features: [
+      {
+        icon: '📡',
+        title: 'VOACAP-Grade Propagation Predictions (P.533)',
+        desc: 'The Propagation panel now runs the real ITU-R P.533 model directly in your browser using a WebAssembly build of ITURHFProp v14.3 — the same engine VOACAP uses. A small badge in the panel header shows which engine produced the prediction: WASM (full P.533), REST (proppy fallback), or EST (heuristic). Predictions match VOACAP closely on the long-haul daylight paths where the old heuristic over-predicted (e.g. US→Kuwait 80m midday now correctly closed).',
+      },
+      {
+        icon: '🛰️',
+        title: 'Winlink Gateway Map Layer',
+        desc: 'A new map layer plugin shows 4,800+ Winlink gateways worldwide, color-coded by mode family. Draggable filter panel for band, service, and mode; press "k" to toggle. The EmComm layout adds a "Nearby Winlink Gateways" panel and rings the closest 25 gateways on the EmComm map. All powered by a server-side cache so the map renders instantly without hammering Winlink.',
+      },
+      {
+        icon: '🛰️',
+        title: 'Satellite Next Pass and Ending Countdown',
+        desc: 'When a satellite is below your minimum elevation, the info window now shows a "Next Pass:" countdown to its next visible window. When a satellite is currently visible, an "Ending:" countdown shows how much time you have before it drops below minimum elevation. Computed for the next 7 days and refreshed hourly. Also fixes an off-by-one in the orbit prediction that returned one extra pass.',
+      },
+      {
+        icon: '📰',
+        title: 'DX News from Three Sources',
+        desc: 'The DX News ticker now aggregates DXNews.com, DX-World RSS, and NG3K into a single 24-hour feed with callsign-based deduplication. The source label rotates to show where each item came from and links to the source homepage; clicking an item opens its article. NG3K contest-reminder noise that was leaking into entry titles is now cleaned out.',
+      },
+      {
+        icon: '⚡',
+        title: 'Custom TX Power in the Propagation Panel',
+        desc: 'The Propagation panel\'s VOACAP view now offers a "Custom…" power option that reveals an inline 0.1–2000 W input, so you can model anything from QRP to legal-limit and beyond without the four preset buttons. The Settings panel keeps the quick-pick buttons and shows a read-only hint when a custom value is in use.',
+      },
+      {
+        icon: '🌅',
+        title: 'Local Sunrise/Sunset in Propagation Panel',
+        desc: 'The day/night badge in the Propagation panel now uses your actual local sunrise and sunset instead of a fixed UTC 06:00–18:00 window. Sunrise/sunset times display in your local timezone with a label (UTC for DX). Polar night and midnight sun are handled gracefully.',
+      },
+      {
+        icon: '⛅',
+        title: 'Faster Weather Load',
+        desc: 'Weather data now appears within a couple of seconds of changing your location instead of waiting 30 seconds for a settle window. First fetch fires immediately on initial DE / first DX target. When Open-Meteo rate-limits, retries use a tighter backoff and the error UI now shows a "Get higher limits ↗" hint pointing to the optional API key escape hatch.',
+      },
+      {
+        icon: '🛰️',
+        title: 'Satellite TLE Failover Hardening',
+        desc: "When CelesTrak's egress IP is rate-limited (which has happened repeatedly), the per-satellite SatNOGS and CelesTrak-CATNR fallback now runs without an arbitrary cap when the primary group fetch returns nothing — exactly when the safety net needs to fire hardest. Empty TLE responses now also send Cache-Control: no-store so a CDN miss doesn't pin failure for an hour.",
+      },
+      {
+        icon: '🔒',
+        title: 'Security and Dependencies',
+        desc: 'rig-bridge migrated off the deprecated vercel/pkg (which had an unfixable LPE CVE) to the actively-maintained @yao-pkg/pkg fork; build targets bumped from Node 18 to Node 20. Root project picked up Vite 5→6.4 and Vitest 2→3.2, closing the remaining root CVEs. Postcss, path-to-regexp, and picomatch alerts cleared via npm audit fix.',
+      },
+      {
+        icon: '🐛',
+        title: 'Bug Fixes',
+        desc: 'DXFavorites dropdown no longer clips off-screen near viewport edges. Duplicate version label removed from the expanded left sidebar. MUF column is now read by name from ITURHFProp output instead of a fragile regex, restoring the MUF readout after the WASM swap. NG3K news ticker descriptions no longer contain stray "Check here for pericontest" text. ITURHFProp log noise on Staging silenced after one informational line.',
+      },
+    ],
+  },
   {
     version: '26.2.1',
     date: '2026-04-06',
@@ -1152,13 +1419,13 @@ export default function WhatsNew({ showWhatsNew }) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className="whats-new-modal"
         style={{
           background: 'var(--bg-secondary, #1a1a2e)',
           border: '1px solid var(--border-color, #333)',
           borderRadius: '12px',
           maxWidth: '560px',
           width: '100%',
-          maxHeight: '85vh',
           display: 'flex',
           flexDirection: 'column',
           boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
@@ -1176,7 +1443,7 @@ export default function WhatsNew({ showWhatsNew }) {
           <div
             style={{
               fontSize: '13px',
-              fontFamily: "'JetBrains Mono', monospace",
+              fontFamily: 'var(--font-mono)',
               color: 'var(--accent-cyan, #00ffcc)',
               letterSpacing: '0.1em',
               textTransform: 'uppercase',
@@ -1247,6 +1514,8 @@ export default function WhatsNew({ showWhatsNew }) {
             overflowY: 'auto',
             padding: '16px 24px',
             flex: 1,
+            WebkitOverflowScrolling: 'touch',
+            overscrollBehavior: 'contain',
           }}
         >
           {entry.features.map((f, i) => (
@@ -1314,7 +1583,7 @@ export default function WhatsNew({ showWhatsNew }) {
               padding: '10px 32px',
               fontSize: '14px',
               fontWeight: '700',
-              fontFamily: "'JetBrains Mono', monospace",
+              fontFamily: 'var(--font-mono)',
               cursor: 'pointer',
               transition: 'opacity 0.15s',
             }}
@@ -1336,6 +1605,10 @@ export default function WhatsNew({ showWhatsNew }) {
             opacity: 1;
             transform: translateY(0) scale(1);
           }
+        }
+        .whats-new-modal {
+          max-height: 85vh;
+          max-height: calc(100svh - 40px);
         }
       `}</style>
     </div>

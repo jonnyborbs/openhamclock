@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { esc } from '../../utils/escapeHtml.js';
 import { addMinimizeToggle } from './addMinimizeToggle.js';
 import { makeDraggable } from './makeDraggable.js';
+import { maidenheadToLatLon } from '../../utils/geo.js';
 
 /**
  * Reverse Beacon Network (RBN) Plugin v1.0.0
@@ -32,29 +33,6 @@ export const metadata = {
   defaultOpacity: 0.7,
   version: '1.0.0',
 };
-
-// Convert grid square to lat/lon
-function gridToLatLon(grid) {
-  if (!grid || grid.length < 4) return null;
-
-  grid = grid.toUpperCase();
-  const lon = (grid.charCodeAt(0) - 65) * 20 - 180;
-  const lat = (grid.charCodeAt(1) - 65) * 10 - 90;
-  const lon2 = parseInt(grid[2]) * 2;
-  const lat2 = parseInt(grid[3]);
-
-  let longitude = lon + lon2 + 1;
-  let latitude = lat + lat2 + 0.5;
-
-  if (grid.length >= 6) {
-    const lon3 = (grid.charCodeAt(4) - 65) * (2 / 24);
-    const lat3 = (grid.charCodeAt(5) - 65) * (1 / 24);
-    longitude = lon + lon2 + lon3 + 1 / 24;
-    latitude = lat + lat2 + lat3 + 0.5 / 24;
-  }
-
-  return { lat: latitude, lon: longitude };
-}
 
 // Get color based on SNR (signal-to-noise ratio)
 function getSNRColor(snr) {
@@ -254,9 +232,9 @@ export function useLayer({
 
     if (!queryCallsign || queryCallsign === 'N0CALL') {
       if (queryMode === 'spotter') {
-        console.log('[RBN] Spotter mode: enter a skimmer callsign');
+        console.debug('[RBN] Spotter mode: enter a skimmer callsign');
       } else {
-        console.log('[RBN] No valid callsign configured');
+        console.debug('[RBN] No valid callsign configured');
       }
       return;
     }
@@ -277,21 +255,27 @@ export function useLayer({
       if (data && data.spots && Array.isArray(data.spots)) {
         const mySpots = data.spots;
 
-        console.log(`[RBN] Received ${mySpots.length} spots for ${callsign}`);
+        console.info(`[RBN] Received ${mySpots.length} spots for ${callsign}`);
 
         // Log spot details
         if (mySpots.length > 0) {
           mySpots.forEach((spot, idx) => {
-            console.log(
-              `  ${idx + 1}. Skimmer: ${spot.callsign}, Freq: ${spot.freqMHz} MHz, SNR: ${spot.snr} dB, Band: ${spot.band}, Grid: ${spot.grid || 'MISSING'}, Lat: ${spot.skimmerLat || '?'}, Lon: ${spot.skimmerLon || '?'}`,
-            );
+            if (queryMode === 'spotter') {
+              console.debug(
+                `  ${idx + 1}. DX: ${spot.dx}, Skimmer: ${spot.callsign}, Freq: ${spot.freqMHz} MHz, SNR: ${spot.snr} dB, Band: ${spot.band}, dxLat: ${spot.dxLat ?? 'MISSING'}, dxLon: ${spot.dxLon ?? 'MISSING'}, dxGrid: ${spot.dxGrid ?? 'MISSING'}`,
+              );
+            } else {
+              console.debug(
+                `  ${idx + 1}. Skimmer: ${spot.callsign}, Freq: ${spot.freqMHz} MHz, SNR: ${spot.snr} dB, Band: ${spot.band}, Grid: ${spot.grid ?? 'MISSING'}, Lat: ${spot.skimmerLat ?? '?'}, Lon: ${spot.skimmerLon ?? '?'}`,
+              );
+            }
           });
         }
 
         // Client-side location fallback for any spots the server couldn't resolve
         const enrichedSpots = await Promise.all(
           mySpots.map(async (spot) => {
-            if (spot.grid && spot.skimmerLat && spot.skimmerLon) return spot;
+            if (spot.grid && spot.skimmerLat != null && spot.skimmerLon != null) return spot;
             try {
               const locationResponse = await fetch(`/api/rbn/location/${spot.callsign}`);
               if (locationResponse.ok) {
@@ -418,7 +402,7 @@ export function useLayer({
       return true;
     });
 
-    console.log(
+    console.debug(
       `[RBN] Rendering ${filteredSpots.length} spots (within ${timeWindow < 1 ? (timeWindow * 60).toFixed(0) + 's' : timeWindow.toFixed(1) + 'min'} window)`,
     );
 
@@ -426,10 +410,10 @@ export function useLayer({
     let spotterOrigin = null;
     if (queryMode === 'spotter' && filteredSpots.length > 0) {
       const first = filteredSpots[0];
-      if (first.skimmerLat && first.skimmerLon) {
+      if (first.skimmerLat != null && first.skimmerLon != null) {
         spotterOrigin = { lat: first.skimmerLat, lon: first.skimmerLon };
       } else if (first.grid) {
-        spotterOrigin = gridToLatLon(first.grid);
+        spotterOrigin = maidenheadToLatLon(first.grid);
       }
     }
 
@@ -478,7 +462,7 @@ export function useLayer({
         });
 
         marker.bindPopup(`
-          <div style="font-family: 'JetBrains Mono', monospace;">
+          <div style="font-family: var(--font-mono);">
             <strong>${esc(dxCall)}</strong><br>
             Spotted by: <strong>${esc(skimmerCall)}</strong><br>
             SNR: <strong>${snr} dB</strong><br>
@@ -501,10 +485,10 @@ export function useLayer({
         }
 
         let skimmerLoc;
-        if (spot.skimmerLat && spot.skimmerLon) {
+        if (spot.skimmerLat != null && spot.skimmerLon != null) {
           skimmerLoc = { lat: spot.skimmerLat, lon: spot.skimmerLon };
         } else {
-          skimmerLoc = gridToLatLon(skimmerGrid);
+          skimmerLoc = maidenheadToLatLon(skimmerGrid);
         }
 
         if (!skimmerLoc) return;
@@ -535,7 +519,7 @@ export function useLayer({
         });
 
         marker.bindPopup(`
-          <div style="font-family: 'JetBrains Mono', monospace;">
+          <div style="font-family: var(--font-mono);">
             <strong>📡 ${esc(skimmerCall)}</strong><br>
             Heard: <strong>${esc(callsign)}</strong><br>
             SNR: <strong>${snr} dB</strong><br>

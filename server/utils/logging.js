@@ -20,6 +20,19 @@ function logWarn(...args) {
 const errorLogState = {};
 const ERROR_LOG_INTERVAL = 5 * 60 * 1000;
 
+// Periodic cleanup: purge expired cache entries
+setInterval(() => {
+  const now = Date.now();
+  const cutoff = 2 * ERROR_LOG_INTERVAL;
+
+  for (const key of Object.keys(errorLogState)) {
+    const ts = errorLogState[key];
+    if (now - ts > cutoff) {
+      delete errorLogState[key];
+    }
+  }
+}, ERROR_LOG_INTERVAL);
+
 function logErrorOnce(category, message) {
   if (message && (message.includes('aborted') || message.includes('AbortError'))) return false;
   const key = `${category}:${message}`;

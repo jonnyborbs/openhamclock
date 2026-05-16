@@ -14,6 +14,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { validateCustomHost } = require('../utils/ssrf');
 
 module.exports = function (app, ctx) {
   const { ROOT_DIR, logInfo, logWarn, requireWriteAuth, RIG_BRIDGE_RELAY_KEY } = ctx;
@@ -22,6 +23,28 @@ module.exports = function (app, ctx) {
 
   const RIG_BRIDGE_DIR = path.join(ROOT_DIR, 'rig-bridge');
   const RIG_BRIDGE_ENTRY = path.join(RIG_BRIDGE_DIR, 'rig-bridge.js');
+
+  // ─── Relay Token Persistence ──────────────────────────────────────────
+  // Resolve a writable path for relay-tokens.json using the same waterfall
+  // as data/settings.json so tokens survive server restarts.
+  const RELAY_TOKENS_FILE = (() => {
+    const candidates = [
+      process.env.RELAY_TOKENS_FILE,
+      '/data/relay-tokens.json',
+      path.join(ROOT_DIR, 'data', 'relay-tokens.json'),
+      '/tmp/openhamclock-relay-tokens.json',
+    ];
+    for (const p of candidates) {
+      if (!p) continue;
+      try {
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        return p;
+      } catch {
+        continue;
+      }
+    }
+    return '/tmp/openhamclock-relay-tokens.json';
+  })();
 
   // ─── Cloud Relay State Store ──────────────────────────────────────────
   // Per-session relay state and command queues.
@@ -37,6 +60,59 @@ module.exports = function (app, ctx) {
   // When a browser POSTs a command, any waiting rig-bridge poll is resolved
   // immediately instead of waiting up to 250 ms for the next poll tick.
   const relayCommandWaiters = new Map(); // sessionId → Set<{ resolve, timer }>
+
+  // Per-IP long-poll connection counter — caps concurrent waiters to bound resource use.
+  const MAX_LONG_POLL_PER_IP = 10;
+  const relayPollCountByIP = new Map(); // ip → count
+
+  // Issued relay tokens — sessionId → { token, lastUsed }.
+  // Simple server-side lookup avoids any dependency on RIG_BRIDGE_RELAY_KEY being stable across
+  // restarts or deployments (the HMAC approach broke when the key changed between issue and verify).
+  // Tokens are persisted to RELAY_TOKENS_FILE so they survive server restarts.
+  // Entries not used for RELAY_TOKEN_MAX_AGE are pruned on startup (background, non-blocking).
+  const RELAY_TOKEN_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
+  const relayIssuedTokens = new Map(); // sessionId → { token, lastUsed }
+  try {
+    const raw = fs.readFileSync(RELAY_TOKENS_FILE, 'utf8');
+    const obj = JSON.parse(raw);
+    const now = Date.now();
+    for (const [k, v] of Object.entries(obj)) {
+      // Migrate old plain-string format — treat as freshly used so it isn't immediately pruned
+      if (typeof v === 'string') relayIssuedTokens.set(k, { token: v, lastUsed: now });
+      else if (v?.token) relayIssuedTokens.set(k, { token: v.token, lastUsed: v.lastUsed ?? now });
+    }
+    logInfo(`[RigBridge] Loaded ${relayIssuedTokens.size} relay token(s) from ${RELAY_TOKENS_FILE}`);
+  } catch {
+    /* file absent on first run — normal */
+  }
+
+  function saveRelayTokens() {
+    try {
+      fs.writeFileSync(RELAY_TOKENS_FILE, JSON.stringify(Object.fromEntries(relayIssuedTokens), null, 2), 'utf8');
+    } catch (err) {
+      logWarn(`[RigBridge] Could not persist relay tokens: ${err.message}`);
+    }
+  }
+
+  // Flush updated lastUsed timestamps to disk once per hour so they survive restarts
+  setInterval(saveRelayTokens, 3600000);
+
+  // Background startup cleanup — runs 15 s after boot so it never delays request handling.
+  // Removes tokens unused for RELAY_TOKEN_MAX_AGE and persists the trimmed file.
+  setTimeout(() => {
+    const cutoff = Date.now() - RELAY_TOKEN_MAX_AGE;
+    let removed = 0;
+    for (const [k, v] of relayIssuedTokens) {
+      if ((v.lastUsed ?? 0) < cutoff) {
+        relayIssuedTokens.delete(k);
+        removed++;
+      }
+    }
+    if (removed > 0) {
+      saveRelayTokens();
+      logInfo(`[RigBridge] Pruned ${removed} stale relay token(s) (unused > 30 days)`);
+    }
+  }, 15000);
 
   function notifyCommandWaiters(sessionId) {
     const waiters = relayCommandWaiters.get(sessionId);
@@ -106,6 +182,8 @@ module.exports = function (app, ctx) {
           }
           relayStreamClients.delete(k);
         }
+        // Tokens are NOT deleted here — they survive session expiry so rig-bridge
+        // can reconnect after a server restart without re-authenticating.
       }
     }
   }, 300000); // Every 5 minutes
@@ -115,10 +193,20 @@ module.exports = function (app, ctx) {
     if (!RIG_BRIDGE_RELAY_KEY) {
       return res.status(503).json({ error: 'Cloud relay not configured — set RIG_BRIDGE_RELAY_KEY in .env' });
     }
+    const sessionId = req.headers['x-relay-session'] || req.query.session || req.body?.session;
     const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-    if (token !== RIG_BRIDGE_RELAY_KEY) {
-      return res.status(401).json({ error: 'Invalid relay key' });
+    const entry = sessionId ? relayIssuedTokens.get(sessionId) : undefined;
+    if (!sessionId || !token || !entry || token !== entry.token) {
+      logWarn(
+        `[RigBridge] relay auth failed — sessionId: ${sessionId ? sessionId.slice(0, 8) + '…' : '(none)'}, ` +
+          `token ${token ? 'present' : 'missing'}, issued token ${entry ? 'found' : 'not found in store'}`,
+      );
+      return res.status(401).json({
+        error:
+          'Invalid relay credentials — re-run Connect Cloud Relay in OHC Settings → Rig Bridge to generate fresh credentials',
+      });
     }
+    entry.lastUsed = Date.now();
     next();
   }
 
@@ -129,8 +217,11 @@ module.exports = function (app, ctx) {
         return res.json({ error: 'Cloud relay not configured', configured: false });
       }
       const sessionId = req.query.session || crypto.randomBytes(8).toString('hex');
+      const token = crypto.randomBytes(32).toString('hex');
+      relayIssuedTokens.set(sessionId, { token, lastUsed: Date.now() });
+      saveRelayTokens();
       res.json({
-        relayKey: RIG_BRIDGE_RELAY_KEY,
+        relayKey: token,
         session: sessionId,
         serverUrl: `${req.protocol}://${req.get('host')}`,
       });
@@ -165,6 +256,7 @@ module.exports = function (app, ctx) {
           try {
             client.write(msg);
           } catch (e) {
+            logWarn(`[RigBridge] SSE client evicted during state fan-out (session=${sessionId}): ${e.message}`);
             sseClients.delete(client);
           }
         }
@@ -192,6 +284,50 @@ module.exports = function (app, ctx) {
             })
             .catch(() => {});
         } catch (e) {}
+      }
+
+      // Forward MeshCom packets received from the rig-bridge cloud relay.
+      // sessionId is injected so the meshcom route can store data in the
+      // correct per-user session rather than a shared global pool.
+      // Packets are also fanned out to any open SSE stream clients so the
+      // browser panel updates in real-time (same path as WSJTX decodes).
+      if (Array.isArray(req.body.meshcomPackets) && req.body.meshcomPackets.length > 0) {
+        logInfo(`[RigBridge] Relaying ${req.body.meshcomPackets.length} MeshCom packet(s) for session=${sessionId}`);
+        for (const pkt of req.body.meshcomPackets) {
+          const subtype = pkt.subtype;
+          if (subtype !== 'pos' && subtype !== 'msg' && subtype !== 'telem') continue;
+
+          // 1. Persist in server-side session store (history, reconnect recovery)
+          ctx
+            .fetch(`http://localhost:${ctx.PORT}/api/meshcom/local/${subtype}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ...pkt, sessionId }),
+            })
+            .then((r) => {
+              if (!r.ok) {
+                logWarn(`[RigBridge] MeshCom ingest rejected subtype=${subtype} status=${r.status}`);
+              }
+            })
+            .catch((e) => {
+              logWarn(`[RigBridge] MeshCom ingest forward failed subtype=${subtype}: ${e.message}`);
+            });
+
+          // 2. Fan out to SSE stream clients — same { type:'plugin' } envelope
+          //    used by WSJTX decodes; RigContext forwards it as a rig-plugin-data
+          //    window event that useMeshCom listens for.
+          if (sseClients && sseClients.size > 0) {
+            const sseMsg = `data: ${JSON.stringify({ type: 'plugin', event: 'meshcom', data: pkt })}\n\n`;
+            for (const client of sseClients) {
+              try {
+                client.write(sseMsg);
+              } catch (e) {
+                logWarn(`[RigBridge] SSE client evicted during MeshCom fan-out (session=${sessionId}): ${e.message}`);
+                sseClients.delete(client);
+              }
+            }
+          }
+        }
       }
 
       res.json({ ok: true });
@@ -365,16 +501,32 @@ module.exports = function (app, ctx) {
         return res.json({ commands: [] });
       }
 
+      const clientIP = req.ip || req.socket?.remoteAddress || 'unknown';
+      const ipCount = relayPollCountByIP.get(clientIP) ?? 0;
+      if (ipCount >= MAX_LONG_POLL_PER_IP) {
+        return res.status(429).json({ error: 'Too many concurrent long-polls from this IP' });
+      }
+      relayPollCountByIP.set(clientIP, ipCount + 1);
+
       if (!relayCommandWaiters.has(sessionId)) {
         relayCommandWaiters.set(sessionId, new Set());
       }
       const waiterSet = relayCommandWaiters.get(sessionId);
       let resolved = false;
 
+      function releaseIPSlot() {
+        const n = relayPollCountByIP.get(clientIP);
+        if (n != null) {
+          if (n <= 1) relayPollCountByIP.delete(clientIP);
+          else relayPollCountByIP.set(clientIP, n - 1);
+        }
+      }
+
       const waiter = {
         resolve(commands) {
           if (resolved) return;
           resolved = true;
+          releaseIPSlot();
           try {
             res.json({ commands });
           } catch (e) {
@@ -397,6 +549,7 @@ module.exports = function (app, ctx) {
           clearTimeout(waiter.timer);
           waiterSet.delete(waiter);
           if (waiterSet.size === 0) relayCommandWaiters.delete(sessionId);
+          releaseIPSlot();
         }
       });
     } catch (err) {
@@ -413,16 +566,19 @@ module.exports = function (app, ctx) {
       }
       const sessionId = crypto.randomBytes(8).toString('hex');
       const serverUrl = `${req.protocol}://${req.get('host')}`;
+      const token = crypto.randomBytes(32).toString('hex');
+      relayIssuedTokens.set(sessionId, { token, lastUsed: Date.now() });
+      saveRelayTokens();
       res.json({
         ok: true,
         session: sessionId,
         serverUrl,
-        relayKey: RIG_BRIDGE_RELAY_KEY,
+        relayKey: token,
         configPayload: {
           cloudRelay: {
             enabled: true,
             url: serverUrl,
-            apiKey: RIG_BRIDGE_RELAY_KEY,
+            apiKey: token,
             session: sessionId,
           },
         },
@@ -431,6 +587,21 @@ module.exports = function (app, ctx) {
       logWarn(`[RigBridge] relay/configure error: ${err.message}`);
       if (!res.headersSent) res.json({ ok: false, error: 'Internal error' });
     }
+  });
+
+  // ─── Cloud Relay: Revoke credentials ──────────────────────────────────
+  // Invalidates a relay token immediately. Requires OHC write auth.
+  // After revocation the rig-bridge must run Connect Cloud Relay again to get new credentials.
+  app.delete('/api/rig-bridge/relay/revoke/:sessionId', requireWriteAuth, (req, res) => {
+    const { sessionId } = req.params;
+    if (!relayIssuedTokens.has(sessionId)) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+    relayIssuedTokens.delete(sessionId);
+    relaySessions.delete(sessionId);
+    saveRelayTokens();
+    logInfo(`[RigBridge] Relay token revoked for session ${sessionId.slice(0, 8)}…`);
+    res.json({ ok: true });
   });
 
   // ─── Downloads: Platform-specific installer scripts ────────────────────
@@ -443,6 +614,11 @@ module.exports = function (app, ctx) {
     const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
     const host = req.headers['x-forwarded-host'] || req.headers.host;
     const serverURL = (proto + '://' + host).replace(/[^a-zA-Z0-9._\-:\/\@]/g, '');
+    try {
+      new URL(serverURL);
+    } catch {
+      return res.status(400).json({ error: 'Invalid server URL derived from request headers' });
+    }
 
     if (platform === 'windows') {
       const script = [
@@ -456,6 +632,17 @@ module.exports = function (app, ctx) {
         'echo.',
         '',
         'set "RIG_DIR=%USERPROFILE%\\openhamclock-rig-bridge"',
+        '',
+        'set "RB_PORT=5555"',
+        'set "RB_PROTO=http"',
+        'set "RB_HOST=localhost"',
+        'set "RB_CFG=%APPDATA%\\openhamclock\\rig-bridge-config.json"',
+        'if not exist "%RB_CFG%" set "RB_CFG=%USERPROFILE%\\openhamclock-rig-bridge\\rig-bridge-config.json"',
+        'if exist "%RB_CFG%" (',
+        '    for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "try{(Get-Content \'%RB_CFG%\'|ConvertFrom-Json).port}catch{5555}"`) do set "RB_PORT=%%P"',
+        "    for /f \"usebackq delims=\" %%T in (`powershell -NoProfile -Command \"try{if((Get-Content '%RB_CFG%'|ConvertFrom-Json).tls.enabled){'https'}else{'http'}}catch{'http'}\"`) do set \"RB_PROTO=%%T\"",
+        "    for /f \"usebackq delims=\" %%H in (`powershell -NoProfile -Command \"try{$b=(Get-Content '%RB_CFG%'|ConvertFrom-Json).bindAddress;if([string]::IsNullOrEmpty($b)-or $b -eq '0.0.0.0'){$b='localhost'};$b}catch{'localhost'}\"`) do set \"RB_HOST=%%H\"",
+        ')',
         '',
         'set "UPDATE_MODE=0"',
         'for %%A in (%*) do (',
@@ -490,10 +677,10 @@ module.exports = function (app, ctx) {
         '',
         'if "%UPDATE_MODE%"=="1" (',
         '    echo   Checking for running rig-bridge...',
-        '    netstat -ano 2>nul | findstr ":5555 " | findstr "LISTENING" >nul 2>nul',
+        '    netstat -ano 2>nul | findstr ":%RB_PORT% " | findstr "LISTENING" >nul 2>nul',
         '    if not errorlevel 1 (',
-        '        echo   Stopping running rig-bridge on port 5555...',
-        '        for /f "tokens=5" %%P in (\'netstat -ano ^| findstr ":5555 " ^| findstr "LISTENING"\') do (',
+        '        echo   Stopping running rig-bridge on port %RB_PORT%...',
+        '        for /f "tokens=5" %%P in (\'netstat -ano ^| findstr ":%RB_PORT% " ^| findstr "LISTENING"\') do (',
         '            taskkill /PID %%P /F >nul 2>nul',
         '        )',
         '        timeout /t 2 /nobreak >nul',
@@ -510,6 +697,9 @@ module.exports = function (app, ctx) {
         '        if exist "%RIG_DIR%\\rig-bridge-config.json" copy /Y "%RIG_DIR%\\rig-bridge-config.json" "%TEMP%\\rig-bridge-config.bak" >nul',
         '        for /f "delims=" %%F in (\'dir /b /a-d "%RIG_DIR%"\') do (',
         '            if /I not "%%F"==".update-staging" if /I not "%%F"=="node_modules" del /F /Q "%RIG_DIR%\\%%F" >nul 2>nul',
+        '        )',
+        '        for /d %%D in ("%RIG_DIR%\\*") do (',
+        '            if /I not "%%~nxD"==".update-staging" if /I not "%%~nxD"=="node_modules" rmdir /S /Q "%%D" >nul 2>nul',
         '        )',
         '        xcopy /E /Y /I "%RIG_DIR%\\.update-staging\\rig-bridge" "%RIG_DIR%"',
         '        cd /d "%RIG_DIR%"',
@@ -544,20 +734,17 @@ module.exports = function (app, ctx) {
         '',
         'echo.',
         'if "%UPDATE_MODE%"=="1" (',
-        '    echo   Restarting Rig Bridge (updated)...',
+        '    echo   Rig Bridge updated - restarting...',
         ') else (',
         '    echo   Starting Rig Bridge...',
         ')',
-        'set "RB_PORT=5555"',
-        'set "RB_PROTO=http"',
-        'set "RB_CFG=%APPDATA%\\openhamclock\\rig-bridge-config.json"',
-        'if not exist "%RB_CFG%" set "RB_CFG=%USERPROFILE%\\openhamclock-rig-bridge\\rig-bridge-config.json"',
-        'if exist "%RB_CFG%" (',
-        '    for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "try{(Get-Content \'%RB_CFG%\'|ConvertFrom-Json).port}catch{5555}"`) do set "RB_PORT=%%P"',
-        "    for /f \"usebackq delims=\" %%T in (`powershell -NoProfile -Command \"try{if((Get-Content '%RB_CFG%'|ConvertFrom-Json).tls.enabled){'https'}else{'http'}}catch{'http'}\"`) do set \"RB_PROTO=%%T\"",
-        ')',
-        'echo   Setup UI: %RB_PROTO%://localhost:%RB_PORT%',
         'echo.',
+        'echo   Before continuing, read rig-bridge/README.md for radio-specific setup requirements.',
+        'echo.',
+        'echo   Setup UI: %RB_PROTO%://%RB_HOST%:%RB_PORT%',
+        'echo   Opening in your browser now. Press Ctrl+C in this window to stop Rig Bridge.',
+        'echo.',
+        'start "" %RB_PROTO%://%RB_HOST%:%RB_PORT%',
         'node rig-bridge.js',
         'pause',
       ].join('\r\n');
@@ -570,11 +757,16 @@ module.exports = function (app, ctx) {
     // Mac / Linux
     const isMac = platform === 'mac';
     const script = [
-      '#!/bin/bash',
+      '#!/usr/bin/env bash',
       '# OpenHamClock Rig Bridge — Installer',
       'set -e',
       '',
       'RIG_DIR="$HOME/openhamclock-rig-bridge"',
+      '',
+      'RB_CFG="$HOME/.config/openhamclock/rig-bridge-config.json"',
+      '[ ! -f "$RB_CFG" ] && RB_CFG="$HOME/Library/Application Support/openhamclock/rig-bridge-config.json"',
+      '[ ! -f "$RB_CFG" ] && RB_CFG="$HOME/openhamclock-rig-bridge/rig-bridge-config.json"',
+      'read -r RB_PORT SETUP_URL < <(RB_CFG="$RB_CFG" node -e \'try{const c=require(process.env.RB_CFG);const p=c.port||5555;const s=c.tls&&c.tls.enabled;const b=c.bindAddress&&c.bindAddress!=="0.0.0.0"?c.bindAddress:"localhost";const u=(s?"https":"http")+"://"+b+":"+p;process.stdout.write(p+" "+u+"\\n")}catch(e){process.stdout.write("5555 http://localhost:5555\\n")}\' 2>/dev/null || echo "5555 http://localhost:5555")',
       '',
       'UPDATE_MODE=0',
       'while [[ $# -gt 0 ]]; do',
@@ -608,7 +800,7 @@ module.exports = function (app, ctx) {
       '',
       'if [ "$UPDATE_MODE" -eq 1 ]; then',
       '    echo "Checking for running rig-bridge..."',
-      '    RB_PID=$(lsof -ti tcp:5555 2>/dev/null || fuser 5555/tcp 2>/dev/null | tr -d " " || true)',
+      '    RB_PID=$(lsof -ti tcp:$RB_PORT 2>/dev/null || fuser $RB_PORT/tcp 2>/dev/null | tr -d " " || true)',
       '    if [ -n "$RB_PID" ]; then',
       '        echo "Stopping running rig-bridge (PID $RB_PID)..."',
       '        kill "$RB_PID" 2>/dev/null || true',
@@ -624,7 +816,7 @@ module.exports = function (app, ctx) {
       '    if [ -d "$STAGING" ]; then',
       '        cd "$STAGING" && git sparse-checkout set rig-bridge',
       '        [ -f "$RIG_DIR/rig-bridge-config.json" ] && cp "$RIG_DIR/rig-bridge-config.json" /tmp/rig-bridge-config.bak',
-      '        find "$RIG_DIR" -maxdepth 1 ! -name ".update-staging" ! -name "node_modules" ! -path "$RIG_DIR" -delete',
+      '        find "$RIG_DIR" -mindepth 1 -maxdepth 1 ! -name ".update-staging" ! -name "node_modules" -exec rm -rf {} +',
       '        cp -r "$STAGING/rig-bridge/"* "$RIG_DIR/"',
       '        rm -rf "$STAGING"',
       '        [ -f /tmp/rig-bridge-config.bak ] && cp /tmp/rig-bridge-config.bak "$RIG_DIR/rig-bridge-config.json"',
@@ -655,12 +847,39 @@ module.exports = function (app, ctx) {
       'else',
       '    echo "Starting Rig Bridge..."',
       'fi',
-      'RB_CFG="$HOME/.config/openhamclock/rig-bridge-config.json"',
-      '[ ! -f "$RB_CFG" ] && RB_CFG="$HOME/openhamclock-rig-bridge/rig-bridge-config.json"',
-      'SETUP_URL=$(RB_CFG="$RB_CFG" node -e \'try{const c=require(process.env.RB_CFG);const p=c.port||5555;const s=c.tls&&c.tls.enabled;console.log((s?"https":"http")+"://localhost:"+p)}catch(e){console.log("http://localhost:5555")}\' 2>/dev/null || echo "http://localhost:5555")',
-      'echo "Setup UI: $SETUP_URL"',
+      'node rig-bridge.js &',
+      'NODE_PID=$!',
+      '',
+      'echo "Waiting for Rig Bridge to start..."',
+      'RB_WAIT=0',
+      'while ! lsof -ti "tcp:$RB_PORT" > /dev/null 2>&1 && ! fuser "$RB_PORT/tcp" > /dev/null 2>&1; do',
+      '    if ! kill -0 "$NODE_PID" 2>/dev/null; then',
+      '        echo "ERROR: Rig Bridge exited unexpectedly. Check the output above."',
+      '        exit 1',
+      '    fi',
+      '    sleep 1',
+      '    RB_WAIT=$((RB_WAIT + 1))',
+      '    if [ "$RB_WAIT" -ge 30 ]; then',
+      '        echo "ERROR: Rig Bridge did not start within 30 seconds."',
+      '        kill "$NODE_PID" 2>/dev/null || true',
+      '        exit 1',
+      '    fi',
+      'done',
+      '',
       'echo ""',
-      'node rig-bridge.js',
+      'echo "Before continuing, read rig-bridge/README.md for radio-specific setup requirements."',
+      'echo ""',
+      'if [ -t 0 ] && [ "${NONINTERACTIVE:-0}" != "1" ]; then',
+      '    read -rp "Press Enter to open the Setup UI in your browser... " dummy',
+      'fi',
+      '',
+      'if command -v xdg-open &> /dev/null; then',
+      '    xdg-open "$SETUP_URL" 2>/dev/null &',
+      'elif [[ "$(uname)" == "Darwin" ]]; then',
+      '    open "$SETUP_URL" &',
+      'fi',
+      '',
+      'wait $NODE_PID',
     ].join('\n');
 
     res.setHeader('Content-Type', 'application/x-shellscript');
@@ -710,15 +929,24 @@ module.exports = function (app, ctx) {
     }
   });
 
-  app.get('/api/rig-bridge/status', async (req, res) => {
-    const host = req.query.host || 'http://localhost';
+  app.get('/api/rig-bridge/status', requireWriteAuth, async (req, res) => {
+    const rawHost = (req.query.host || 'localhost').replace(/^https?:\/\//i, '');
+    const proto = (req.query.host || '').startsWith('https') ? 'https' : 'http';
     const port = req.query.port || '5555';
-    const url = `${host}:${port}/health`;
 
+    const validation = await validateCustomHost(rawHost);
+    if (!validation.ok) {
+      return res.status(400).json({ reachable: false, error: `Invalid host: ${validation.reason}` });
+    }
+
+    const url = `${proto}://${validation.resolvedIP}:${port}/health`;
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3000);
-      const response = await ctx.fetch(url, { signal: controller.signal });
+      const response = await ctx.fetch(url, {
+        signal: controller.signal,
+        headers: { Host: rawHost },
+      });
       clearTimeout(timeout);
       if (!response.ok) {
         return res.json({ reachable: false, error: `HTTP ${response.status}` });

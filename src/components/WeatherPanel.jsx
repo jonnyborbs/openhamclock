@@ -81,7 +81,7 @@ export const WeatherPanel = ({
             style={{
               fontSize: '14px',
               color: 'var(--text-muted)',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
               animation: 'pulse 1.5s ease-in-out infinite',
             }}
           >
@@ -107,6 +107,15 @@ export const WeatherPanel = ({
     }
   };
 
+  // Tooltip explains the localStorage workflow for setting an Open-Meteo API key.
+  // Shown when 429s persist (2+ in a row) — points users at the paid-tier escape hatch.
+  const apiKeyTooltip = t('weather.error.rateLimitedTooltip', {
+    defaultValue:
+      "Get a free API key at open-meteo.com, then in your browser console (F12) run: localStorage.setItem('ohc_openmeteo_apikey', 'YOUR_KEY')",
+  });
+  const apiKeyHintText = t('weather.error.rateLimitedHint', { defaultValue: 'Get higher limits ↗' });
+  const showApiKeyHint = error?.persistent && error?.rateLimited;
+
   // --- Error state (no data at all) ---
   if (!w && error) {
     return (
@@ -116,11 +125,29 @@ export const WeatherPanel = ({
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '16px', lineHeight: 1 }}>⚠️</span>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
             {getErrorMessage(error.message)}
             {error.retryIn ? t('weather.error.retry', { seconds: error.retryIn }) : ''}
           </span>
         </div>
+        {showApiKeyHint && (
+          <div style={{ marginTop: '6px', paddingLeft: '24px' }}>
+            <a
+              href="https://open-meteo.com/en/pricing"
+              target="_blank"
+              rel="noopener noreferrer"
+              title={apiKeyTooltip}
+              style={{
+                fontSize: '10px',
+                color: 'var(--accent-amber)',
+                fontFamily: 'var(--font-mono)',
+                textDecoration: 'underline',
+              }}
+            >
+              {apiKeyHintText}
+            </a>
+          </div>
+        )}
       </div>
     );
   }
@@ -178,7 +205,7 @@ export const WeatherPanel = ({
           >
             {t(`weather.condition.${w.weatherCode}`, { defaultValue: w.description })}
           </span>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
             💨{w.windSpeed}
           </span>
           <span
@@ -200,13 +227,27 @@ export const WeatherPanel = ({
           style={{
             fontSize: '9px',
             color: 'var(--accent-amber)',
-            fontFamily: 'JetBrains Mono, monospace',
+            fontFamily: 'var(--font-mono)',
             marginTop: '4px',
             opacity: 0.7,
           }}
         >
           ⚠ {getErrorMessage(error.message)}
           {error.retryIn ? t('weather.error.retry', { seconds: error.retryIn }) : ''}
+          {showApiKeyHint && (
+            <>
+              {' · '}
+              <a
+                href="https://open-meteo.com/en/pricing"
+                target="_blank"
+                rel="noopener noreferrer"
+                title={apiKeyTooltip}
+                style={{ color: 'var(--accent-amber)', textDecoration: 'underline' }}
+              >
+                {apiKeyHintText}
+              </a>
+            </>
+          )}
         </div>
       )}
 
@@ -236,7 +277,7 @@ export const WeatherPanel = ({
                   border: `1px solid ${alert.color}40`,
                   borderRadius: '4px',
                   fontSize: '10px',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                   lineHeight: 1.3,
                 }}
                 title={alert.headline || alert.event}
@@ -301,7 +342,7 @@ export const WeatherPanel = ({
               justifyContent: 'space-between',
               fontSize: '11px',
               marginBottom: '8px',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
             }}
           >
             {w.feelsLike !== w.temp && (
@@ -324,7 +365,7 @@ export const WeatherPanel = ({
               gridTemplateColumns: '1fr 1fr',
               gap: '6px 12px',
               fontSize: '11px',
-              fontFamily: 'JetBrains Mono, monospace',
+              fontFamily: 'var(--font-mono)',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -422,7 +463,7 @@ export const WeatherPanel = ({
                       {i === 0 ? t('weather.today') : t('weather.dayName.' + day.date)}
                     </div>
                     <div style={{ fontSize: '16px', lineHeight: 1.2 }}>{day.icon}</div>
-                    <div style={{ fontFamily: 'JetBrains Mono, monospace', marginTop: '2px' }}>
+                    <div style={{ fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
                       <span style={{ color: 'var(--accent-amber)' }}>{day.high}°</span>
                       <span style={{ color: 'var(--text-muted)' }}>/</span>
                       <span style={{ color: 'var(--accent-blue)' }}>{day.low}°</span>

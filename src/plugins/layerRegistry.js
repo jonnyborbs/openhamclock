@@ -26,6 +26,8 @@ import * as MUFMapPlugin from './layers/useMUFMap.js';
 import * as SatellitePlugin from './layers/useSatelliteLayer.js';
 import * as MeshtasticPlugin from './layers/useMeshtastic.js';
 import * as ActiveUsersPlugin from './layers/useActiveUsers.js';
+import * as IBPLayerPlugin from './layers/useIBPLayer.js';
+import * as WinlinkGatewaysPlugin from './layers/useWinlinkGateways.js';
 
 // Auto-discover local/custom plugins (gitignored — survive updates)
 const localPluginModules = import.meta.glob('./local/*.js', { eager: true });
@@ -38,7 +40,7 @@ const localPlugins = Object.entries(localPluginModules)
   .filter(Boolean);
 
 if (localPlugins.length > 0) {
-  console.log(
+  console.info(
     `[Plugins] Loaded ${localPlugins.length} local plugin(s):`,
     localPlugins.map((p) => p.metadata.id).join(', '),
   );
@@ -65,6 +67,8 @@ const layerPlugins = [
   MUFMapPlugin,
   MeshtasticPlugin,
   ActiveUsersPlugin,
+  IBPLayerPlugin,
+  WinlinkGatewaysPlugin,
   ...localPlugins,
 ];
 
@@ -94,6 +98,7 @@ const PINNED_SHORTCUTS = {
   wspr: 'p',
   floods: 'i',
   'active-users': 'u',
+  'winlink-gateways': 'k',
 };
 
 export function getAllLayers() {

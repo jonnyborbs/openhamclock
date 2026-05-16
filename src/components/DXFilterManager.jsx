@@ -4,7 +4,7 @@
  */
 import React, { useState } from 'react';
 
-export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) => {
+export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose, onClearSpots }) => {
   const [activeTab, setActiveTab] = useState('zones');
   const [newWatchlistCall, setNewWatchlistCall] = useState('');
   const [newDXExcludeCall, setNewDXExcludeCall] = useState('');
@@ -103,7 +103,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) =>
     color: selected ? '#000' : 'var(--text-secondary)',
     fontSize: '12px',
     cursor: 'pointer',
-    fontFamily: 'JetBrains Mono, monospace',
+    fontFamily: 'var(--font-mono)',
     fontWeight: selected ? '600' : '400',
   });
 
@@ -119,7 +119,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) =>
     color: selected ? '#000' : 'var(--text-secondary)',
     fontSize: '12px',
     cursor: 'pointer',
-    fontFamily: 'JetBrains Mono, monospace',
+    fontFamily: 'var(--font-mono)',
     fontWeight: selected ? '600' : '400',
   });
 
@@ -406,7 +406,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) =>
               borderRadius: '4px',
               color: 'var(--text-primary)',
               fontSize: '13px',
-              fontFamily: 'JetBrains Mono',
+              fontFamily: 'var(--font-mono)',
             }}
           />
           <button
@@ -643,7 +643,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) =>
                 borderRadius: '4px',
                 color: 'var(--text-primary)',
                 fontSize: '13px',
-                fontFamily: 'JetBrains Mono',
+                fontFamily: 'var(--font-mono)',
               }}
             />
             <button
@@ -723,7 +723,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) =>
                 borderRadius: '4px',
                 color: 'var(--text-primary)',
                 fontSize: '13px',
-                fontFamily: 'JetBrains Mono',
+                fontFamily: 'var(--font-mono)',
               }}
             />
             <button
@@ -802,7 +802,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) =>
               borderRadius: '4px',
               color: 'var(--text-primary)',
               fontSize: '13px',
-              fontFamily: 'JetBrains Mono',
+              fontFamily: 'var(--font-mono)',
             }}
           />
           <button
@@ -898,7 +898,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) =>
                 padding: '8px 12px',
                 background: 'var(--bg-tertiary)',
                 borderRadius: '4px',
-                fontFamily: 'JetBrains Mono',
+                fontFamily: 'var(--font-mono)',
                 fontSize: '14px',
                 fontWeight: '600',
                 color: 'var(--accent-cyan)',
@@ -938,7 +938,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) =>
                   color: retentionMinutes === mins ? 'var(--accent-cyan)' : 'var(--text-secondary)',
                   fontSize: '13px',
                   cursor: 'pointer',
-                  fontFamily: 'JetBrains Mono',
+                  fontFamily: 'var(--font-mono)',
                 }}
               >
                 {mins} min
@@ -1006,6 +1006,20 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose }) =>
               }}
             >
               Clear All
+            </button>
+            <button
+              onClick={onClearSpots}
+              style={{
+                padding: '8px 16px',
+                background: 'color-mix(in srgb, var(--accent-amber) 20%, transparent)',
+                border: '1px solid var(--accent-amber)',
+                borderRadius: '6px',
+                color: 'var(--accent-amber)',
+                fontSize: '13px',
+                cursor: 'pointer',
+              }}
+            >
+              Clear Spots
             </button>
             <button
               onClick={onClose}

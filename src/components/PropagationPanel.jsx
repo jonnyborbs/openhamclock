@@ -2,7 +2,7 @@
  * PropagationPanel Component (VOACAP)
  * Toggleable between heatmap chart, bar chart, and band conditions view
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatDistance } from '../utils/geo.js';
 import { saveConfig, loadConfig } from '../utils/config.js';
@@ -21,6 +21,9 @@ export const PropagationPanel = ({
   propConfig = {},
   dxSpots,
   clusterFilters,
+  deSunTimes,
+  currentTime,
+  timeZone,
 }) => {
   const { t } = useTranslation();
 
@@ -28,13 +31,23 @@ export const PropagationPanel = ({
   const [localMode, setLocalMode] = useState(propConfig.mode || 'SSB');
   const [localPower, setLocalPower] = useState(propConfig.power || 100);
   const [localAntenna, setLocalAntenna] = useState(propConfig.antenna || 'isotropic');
+  // Whether the user has explicitly opened the custom-power input field. This is
+  // independent of `localPower`: if the saved power happens to match a preset,
+  // we still want to keep showing the input once the user opens it, so they can
+  // type freely without the input disappearing under them on every keystroke.
+  const [customPowerRevealed, setCustomPowerRevealed] = useState(() => !POWERS.includes(propConfig.power || 100));
 
   // Keep local state in sync if parent config changes (e.g. settings panel update)
   useEffect(() => {
     if (propConfig.mode && propConfig.mode !== localMode) setLocalMode(propConfig.mode);
   }, [propConfig.mode]);
   useEffect(() => {
-    if (propConfig.power && propConfig.power !== localPower) setLocalPower(propConfig.power);
+    if (propConfig.power && propConfig.power !== localPower) {
+      setLocalPower(propConfig.power);
+      // External update from Settings: open the custom field iff the new value
+      // isn't a preset (so non-preset values from saved config are visible/editable).
+      if (!POWERS.includes(propConfig.power)) setCustomPowerRevealed(true);
+    }
   }, [propConfig.power]);
   useEffect(() => {
     if (propConfig.antenna && propConfig.antenna !== localAntenna) setLocalAntenna(propConfig.antenna);
@@ -111,6 +124,18 @@ export const PropagationPanel = ({
   // Auto-rotate through views on a timer
   const rotate = useAutoRotate('propPanel', { onTick: cycleViewMode, itemCount: modes.length });
 
+  // Empty/invalid `timeZone` (e.g. fresh installs default to '') would make
+  // toLocaleString throw RangeError on every render — fall back to browser TZ.
+  const safeTimeZone = useMemo(() => {
+    if (!timeZone) return undefined;
+    try {
+      new Intl.DateTimeFormat(undefined, { timeZone });
+      return timeZone;
+    } catch {
+      return undefined;
+    }
+  }, [timeZone]);
+
   const getBandStyle = (condition) =>
     ({
       GOOD: { bg: 'rgba(0,255,136,0.2)', color: '#00ff88', border: 'rgba(0,255,136,0.4)' },
@@ -131,7 +156,18 @@ export const PropagationPanel = ({
 
   const { solarData, distance, currentBands, hourlyPredictions, muf, luf, dataSource } = propagation;
   const currentHour = propagation.currentHour ?? new Date().getUTCHours();
-  const isDaytime = new Date().getUTCHours() >= 6 && new Date().getUTCHours() <= 18;
+  const currentLocalMin = function () {
+    const opts = { hour12: false, hour: 'numeric', minute: 'numeric' };
+    if (safeTimeZone) opts.timeZone = safeTimeZone;
+    let [hr, mn] = currentTime.toLocaleString('en-US', opts).split(':').map(Number);
+    return (hr % 24) * 60 + mn;
+  };
+  const isDaytime =
+    deSunTimes.sunset === ''
+      ? deSunTimes.sunrise === 'Midnight sun'
+      : deSunTimes.local.sunsetMin > deSunTimes.local.sunriseMin
+        ? currentLocalMin() >= deSunTimes.local.sunriseMin && currentLocalMin() < deSunTimes.local.sunsetMin
+        : !(currentLocalMin() >= deSunTimes.local.sunsetMin && currentLocalMin() < deSunTimes.local.sunriseMin);
 
   // Heat map colors - supports both schemes
   // Stoplight: green=good, red=bad (intuitive)
@@ -232,6 +268,50 @@ export const PropagationPanel = ({
                   }}
                 >
                   {t('band.conditions.stale.label', { mins })}
+                </span>
+              );
+            })()}
+          {viewMode !== 'bands' &&
+            viewMode !== 'health' &&
+            (() => {
+              // Engine badge — tells users (and us, during B5 rollout) which
+              // prediction engine served the numbers currently on screen.
+              const engine = propagation?.engine;
+              if (!engine) return null;
+              const badge =
+                engine === 'wasm'
+                  ? {
+                      label: 'WASM',
+                      color: 'var(--accent-cyan)',
+                      title: 'ITU-R P.533-14 — VOACAP-grade, computed in your browser',
+                    }
+                  : engine === 'rest'
+                    ? {
+                        label: 'REST',
+                        color: 'var(--accent-green)',
+                        title: 'ITU-R P.533-14 — computed by our propagation service',
+                      }
+                    : {
+                        label: 'EST',
+                        color: 'var(--accent-amber)',
+                        title: 'Solar-indices estimation — fallback when P.533 is unavailable',
+                      };
+              return (
+                <span
+                  title={badge.title}
+                  style={{
+                    fontSize: '9px',
+                    fontWeight: '600',
+                    color: badge.color,
+                    background: 'transparent',
+                    border: `1px solid ${badge.color}`,
+                    borderRadius: '4px',
+                    padding: '1px 5px',
+                    letterSpacing: '0.5px',
+                    cursor: 'help',
+                  }}
+                >
+                  {badge.label}
                 </span>
               );
             })()}
@@ -550,7 +630,7 @@ export const PropagationPanel = ({
                 borderRadius: '3px',
                 padding: '2px 4px',
                 fontSize: '10px',
-                fontFamily: 'JetBrains Mono, monospace',
+                fontFamily: 'var(--font-mono)',
               }}
             >
               {MODES.map((m) => (
@@ -560,10 +640,18 @@ export const PropagationPanel = ({
               ))}
             </select>
 
-            {/* Power */}
+            {/* Power — preset select + revealable custom-watts input */}
             <select
-              value={localPower}
-              onChange={(e) => updatePropConfig({ power: parseInt(e.target.value) })}
+              value={customPowerRevealed || !POWERS.includes(localPower) ? 'custom' : localPower}
+              onChange={(e) => {
+                if (e.target.value === 'custom') {
+                  setCustomPowerRevealed(true);
+                  // keep current localPower so the revealed input is pre-filled
+                } else {
+                  setCustomPowerRevealed(false);
+                  updatePropConfig({ power: parseInt(e.target.value) });
+                }
+              }}
               style={{
                 background: 'var(--bg-tertiary)',
                 color: 'var(--text-primary)',
@@ -571,7 +659,7 @@ export const PropagationPanel = ({
                 borderRadius: '3px',
                 padding: '2px 4px',
                 fontSize: '10px',
-                fontFamily: 'JetBrains Mono, monospace',
+                fontFamily: 'var(--font-mono)',
               }}
             >
               {POWERS.map((p) => (
@@ -579,7 +667,35 @@ export const PropagationPanel = ({
                   {p}W
                 </option>
               ))}
+              <option value="custom">Custom…</option>
             </select>
+            {(customPowerRevealed || !POWERS.includes(localPower)) && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                <input
+                  type="number"
+                  value={localPower}
+                  min="0.1"
+                  max="2000"
+                  step="1"
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (Number.isFinite(v) && v > 0 && v <= 2000) updatePropConfig({ power: v });
+                  }}
+                  style={{
+                    width: '52px',
+                    background: 'var(--bg-tertiary)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '3px',
+                    padding: '2px 4px',
+                    fontSize: '10px',
+                    fontFamily: 'var(--font-mono)',
+                    textAlign: 'right',
+                  }}
+                />
+                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>W</span>
+              </span>
+            )}
 
             {/* Antenna */}
             {antennaProfiles && (
@@ -593,7 +709,7 @@ export const PropagationPanel = ({
                   borderRadius: '3px',
                   padding: '2px 4px',
                   fontSize: '10px',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                   maxWidth: '110px',
                 }}
               >
@@ -625,7 +741,7 @@ export const PropagationPanel = ({
                   gridTemplateRows: `repeat(${bands.length}, 12px)`,
                   gap: '1px',
                   fontSize: '12px',
-                  fontFamily: 'JetBrains Mono, monospace',
+                  fontFamily: 'var(--font-mono)',
                 }}
               >
                 {bands.map((band) => (
@@ -782,7 +898,7 @@ export const PropagationPanel = ({
                 >
                   <span
                     style={{
-                      fontFamily: 'JetBrains Mono, monospace',
+                      fontFamily: 'var(--font-mono)',
                       fontSize: '12px',
                       color: band.reliability >= 50 ? 'var(--accent-green)' : 'var(--text-muted)',
                     }}

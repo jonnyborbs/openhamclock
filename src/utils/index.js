@@ -19,7 +19,10 @@ export {
 
 // Geographic calculations
 export {
-  calculateGridSquare,
+  validateGridLocator,
+  latLonToMaidenhead,
+  maidenheadToLatLon,
+  maidenheadToBoundingBox,
   calculateBearing,
   calculateDistance,
   getSunPosition,

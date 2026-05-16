@@ -16,12 +16,13 @@ It also connects FT8/FT4 decoding software (WSJT-X, JTDX, MSHV, JS8Call) to Open
 4. [Connecting Your Radio](#connecting-your-radio)
 5. [Connecting to OpenHamClock](#connecting-to-openhamclock)
 6. [Digital Mode Software (FT8, JS8, etc.)](#digital-mode-software)
-7. [APRS via Local TNC](#aprs-via-local-tnc)
-8. [Antenna Rotator](#antenna-rotator)
-9. [HTTPS Setup (needed for openhamclock.com)](#https-setup)
-10. [Troubleshooting](#troubleshooting)
-11. [Glossary](#glossary)
-12. [Advanced Topics](#advanced-topics)
+7. [APRS via Local TNC _(Beta)_](#aprs-via-local-tnc-beta)
+8. [MeshCom UDP _(Beta)_](#meshcom-udp-plugin-beta)
+9. [Antenna Rotator](#antenna-rotator-alpha)
+10. [HTTPS Setup (needed for openhamclock.com)](#https-setup)
+11. [Troubleshooting](#troubleshooting)
+12. [Glossary](#glossary)
+13. [Advanced Topics](#advanced-topics)
 
 ---
 
@@ -69,41 +70,47 @@ Select **Simulated Radio** in the setup screen. A fake radio will drift through 
 
 ### Step 1 — Download and run Rig Bridge
 
-**Option A — Installer from the OpenHamClock Settings tab (recommended)**
+#### Prerequisites
 
-> Requires **Node.js** and **git** to be installed on your computer.
+The installer script requires **Node.js** and **Git**. Install them once before continuing:
+
+- **Node.js:** Download and install the LTS version from [nodejs.org](https://nodejs.org/).
+- **Git:** Download from [git-scm.com](https://git-scm.com/). On Windows use Git for Windows; on macOS you may be prompted to install Xcode command line tools; on Linux install via your package manager (e.g. `sudo apt install git`).
+
+#### Option A — Installer from the OpenHamClock Settings tab (recommended)
 
 1. In OpenHamClock, open **Settings → Rig Bridge**.
 2. Tick **Enable Rig Bridge**.
 3. Click the download button for your operating system — **Windows**, **Mac**, or **Linux**.
+4. Install Rig Bridge
+   - **Windows**
 
-**Windows**
+     Open your Downloads folder and double-click `install-rig-bridge.bat`.
+     A Command Prompt window will open, download Rig Bridge, and then prompt you to press Enter to open the Setup UI in your browser. Leave this window open.
 
-4. Open your Downloads folder and double-click `install-rig-bridge.bat`.
-   A Command Prompt window will open, download Rig Bridge, and start it automatically.
+   - **macOS**
 
-**macOS**
+     Open **Terminal** (Applications → Utilities → Terminal) and run:
 
-4. Open **Terminal** (Applications → Utilities → Terminal) and run:
-   ```bash
-   chmod +x ~/Downloads/install-rig-bridge.sh
-   ~/Downloads/install-rig-bridge.sh
-   ```
-   The script downloads Rig Bridge and starts it. Leave the Terminal window open.
+     ```bash
+     chmod +x ~/Downloads/install-rig-bridge.sh
+     ~/Downloads/install-rig-bridge.sh
+     ```
 
-**Linux**
+     The script downloads Rig Bridge and then prompts you to press Enter to open the Setup UI in your browser. Leave the Terminal window open.
 
-4. Open a terminal and run:
-   ```bash
-   chmod +x ~/Downloads/install-rig-bridge.sh
-   ~/Downloads/install-rig-bridge.sh
-   ```
-   The script downloads Rig Bridge and starts it. Leave the terminal open.
+   - **Linux**
 
----
+     Open a terminal and run:
 
-5. Once Rig Bridge is running, return to OpenHamClock **Settings → Rig Bridge** and click
-   **Open Setup UI** — this opens **http://localhost:5555** in a new tab.
+     ```bash
+     chmod +x ~/Downloads/install-rig-bridge.sh
+     ~/Downloads/install-rig-bridge.sh
+     ```
+
+     The script downloads Rig Bridge and then prompts you to press Enter to open the Setup UI in your browser. Leave the terminal open.
+
+5. The installation script will automatically open the Setup UI (e.g., **http://localhost:5555**, or **https://localhost:5555** if you enabled TLS) in your web browser. _(If it doesn't, you can click **Open Setup UI** in OpenHamClock's Settings tab)._
 6. Copy the **API Token** shown at the top of that page.
 7. Back in OpenHamClock **Settings → Rig Bridge**, paste the token into the **API Token** field.
 8. Confirm **Host** is `http://localhost` and **Port** is `5555`.
@@ -113,9 +120,11 @@ Now configure your radio in the Rig Bridge Setup UI — see [Connecting Your Rad
 
 To update Rig Bridge in the future, see [Updating Rig Bridge](#updating-rig-bridge).
 
-**Option B — Run from source with Node.js**
+#### Option B — Run from source with Node.js
 
-If you have Node.js installed:
+"Running from source" means you manually download the raw source code of OpenHamClock (for instance, using `git clone` or downloading the ZIP from GitHub) and execute the program directly from your command line, rather than using an automated installer.
+
+If you have downloaded the code repository and have **Node.js** installed, open a terminal in the project directory and run:
 
 ```bash
 cd rig-bridge
@@ -127,7 +136,7 @@ node rig-bridge.js
 
 Once Rig Bridge is running, open your web browser and go to:
 
-**http://localhost:5555**
+**<http://localhost:5555>**
 
 > **What is localhost:5555?** `localhost` means "this computer" — Rig Bridge is running on your own machine, not on the internet. `5555` is just the "door number" (port) it listens on. Nothing is sent to the internet.
 
@@ -150,7 +159,7 @@ See [Connecting to OpenHamClock](#connecting-to-openhamclock) below.
 To update to the latest version, re-run the installer script you downloaded during setup
 with the `--update` flag. Your radio configuration is preserved automatically.
 
-**Windows**
+### Windows
 
 Open Command Prompt, navigate to your Downloads folder, and run:
 
@@ -158,10 +167,9 @@ Open Command Prompt, navigate to your Downloads folder, and run:
 install-rig-bridge.bat --update
 ```
 
-> You cannot pass arguments by double-clicking a `.bat` file — open Command Prompt first
-> (`Win + R` → type `cmd` → Enter), then run the command above.
+> You cannot pass arguments by double-clicking a `.bat` file — open Command Prompt first (`Win + R` → type `cmd` → Enter), then run the command above.
 
-**macOS / Linux**
+### macOS / Linux
 
 ```bash
 ~/Downloads/install-rig-bridge.sh --update
@@ -200,7 +208,7 @@ all source files.
 | FT-710  | Menu → CAT RATE                     | **38400** |
 | FT-DX10 | Menu → CAT RATE                     | **38400** |
 
-**In Rig Bridge setup (http://localhost:5555):**
+**In Rig Bridge setup (<http://localhost:5555>):**
 
 1. Radio Type → **Yaesu**
 2. Serial Port → select your radio's COM port (see tip below)
@@ -230,13 +238,13 @@ all source files.
 4. Stop Bits → **1**
 5. CI-V Address → use the value for your model:
 
-| Radio   | CI-V Address |
-| ------- | ------------ |
-| IC-7300 | 0x94         |
-| IC-7610 | 0x98         |
-| IC-9700 | 0xA2         |
-| IC-705  | 0xA4         |
-| IC-7851 | 0x8E         |
+   | Radio   | CI-V Address |
+   | ------- | ------------ |
+   | IC-7300 | 0x94         |
+   | IC-7610 | 0x98         |
+   | IC-9700 | 0xA2         |
+   | IC-705  | 0xA4         |
+   | IC-7851 | 0x8E         |
 
 6. Click **Save & Connect**
 
@@ -258,12 +266,12 @@ all source files.
 
 These connect over your local network using the TCI protocol — no USB cable needed.
 
-**Step 1 — Enable TCI in your SDR software**
+#### Step 1 — Enable TCI in your SDR software
 
 - **Thetis:** Setup → CAT Control → tick **Enable TCI Server** (default port: 40001)
 - **ExpertSDR:** Settings → TCI → Enable (default port: 40001)
 
-**Step 2 — In Rig Bridge setup:**
+#### Step 2 — In Rig Bridge setup
 
 1. Radio Type → **TCI / SDR**
 2. Host → `localhost` (or the IP address of the machine running the SDR software if it is on a different computer)
@@ -272,7 +280,7 @@ These connect over your local network using the TCI protocol — no USB cable ne
 
 You should see in the Rig Bridge log:
 
-```
+```text
 [TCI] ✅ Connected to ws://localhost:40001
 [TCI] Device: Thetis
 ```
@@ -293,7 +301,7 @@ Rig Bridge will automatically reconnect if the SDR software is restarted.
 
 You should see:
 
-```
+```text
 [SmartSDR] ✅ Connected — Slice A on 14.074 MHz
 ```
 
@@ -303,13 +311,13 @@ You should see:
 
 If you already have flrig or rigctld (Hamlib) controlling your radio, Rig Bridge can connect to them. This way you do not need to change anything in your existing workflow.
 
-**flrig:**
+#### flrig
 
 1. Radio Type → **flrig**
 2. Host → `127.0.0.1` (or the IP where flrig runs)
 3. Port → **12345**
 
-**rigctld:**
+#### rigctld
 
 1. Radio Type → **rigctld**
 2. Host → `127.0.0.1`
@@ -362,28 +370,28 @@ For example: Rig Bridge runs on a Raspberry Pi or shack PC connected to the radi
 
 This lets you control your radio at home from anywhere in the world through the openhamclock.com website.
 
-**Step 1 — Install Rig Bridge on your home computer**
+#### Step 1 — Install Rig Bridge on your home computer
 
 Download and run Rig Bridge on the computer that is connected to your radio (see [Getting Started](#getting-started)).
 
-**Step 2 — Configure your radio**
+#### Step 2 — Configure your radio
 
-Open http://localhost:5555 and set up your radio. Make sure the green "connected" dot appears.
+Open <http://localhost:5555> and set up your radio. Make sure the green "connected" dot appears.
 
-**Step 3 — Enable HTTPS on Rig Bridge**
+#### Step 3 — Enable HTTPS on Rig Bridge
 
 The openhamclock.com website uses a secure connection (HTTPS), and browsers will not allow it to talk to a non-secure Rig Bridge. You need to enable HTTPS first — see the [HTTPS Setup](#https-setup) section for the full walkthrough.
 
-**Step 4 — Connect from OpenHamClock**
+#### Step 4 — Connect from OpenHamClock
 
-1. Go to https://openhamclock.com → **Settings → Rig Bridge**
+1. Go to <https://openhamclock.com> → **Settings → Rig Bridge**
 2. Host: `https://localhost` — Port: `5555`
 3. Paste your API Token
 4. Click **Connect Cloud Relay**
 
 How it works behind the scenes:
 
-```
+```text
 Your shack                              openhamclock.com
 ────────────                            ────────────────
 Radio (USB) ←→ Rig Bridge ──HTTPS──→  Your browser
@@ -420,7 +428,7 @@ All of these are **bidirectional** — OpenHamClock can also send replies, stop 
 
 **Step 2 — In Rig Bridge:**
 
-1. Open http://localhost:5555 → **Plugins** tab
+1. Open <http://localhost:5555> → **Plugins** tab
 2. Find **WSJT-X Relay** and tick **Enable**
 3. Click **Save**
 
@@ -437,6 +445,17 @@ By default, WSJT-X sends its decoded packets only to one listener. If you want b
 1. In WSJT-X: **File → Settings → Reporting → UDP Server** — set the address to `224.0.0.1`
 2. In Rig Bridge → Plugins → WSJT-X Relay → tick **Enable Multicast**, group address `224.0.0.1`
 3. Click **Save**
+
+### HamQTH callsign lookup (optional)
+
+When **HamQTH callsign lookup** is enabled in the WSJT-X Relay settings, Rig Bridge resolves unknown callsigns to country-level coordinates via the public [HamQTH DXCC API](https://www.hamqth.com/dxcc.php). This places map pins for stations whose FT8 message did not include a grid square.
+
+**What to know before enabling it:**
+
+- Lookups use the unauthenticated `dxcc.php` endpoint, which is intended for lookup tools. Rig Bridge caps requests at 2 per second globally and waits at least 60 seconds before retrying any individual callsign, so the traffic volume is modest even on a busy 20m FT8 band.
+- Results are cached for 24 hours in `hamqth-cache.json` (stored alongside `rig-bridge-config.json`) and survive restarts, so each callsign is typically looked up only once per day.
+- Lookups require outbound internet access (port 443) from the machine running Rig Bridge.
+- If HamQTH is unreachable, decodes simply show no lat/lon for unresolved callsigns — no errors are shown and operation is otherwise unaffected.
 
 ---
 
@@ -457,13 +476,197 @@ This works alongside the regular internet-based APRS-IS feed. When the internet 
 
 APRS packets from nearby stations on RF will now appear alongside internet-sourced APRS stations on the map.
 
-### Hardware TNC (serial port)
+### MeshCom UDP Plugin _(Beta)_
+
+Receives MeshCom LoRa mesh network packets and forwards them to OHC. See [MeshCom UDP Plugin](#meshcom-udp-plugin) for full setup instructions.
+
+| Setting   | Default   | Description                     |
+| --------- | --------- | ------------------------------- |
+| UDP Port  | `1799`    | Port MeshCom nodes broadcast to |
+| Bind Host | `0.0.0.0` | Network interface to listen on  |
+
+### APRS TNC Plugin
 
 If you have a traditional hardware TNC connected via serial port:
 
-1. Protocol → **KISS Serial**
-2. Serial Port → select your TNC's COM port
-3. Baud Rate → **9600** (check your TNC's documentation)
+| Setting         | Default     | Description                                             |
+| --------------- | ----------- | ------------------------------------------------------- |
+| Protocol        | `kiss-tcp`  | `kiss-tcp` for Direwolf, `kiss-serial` for hardware TNC |
+| Host            | `127.0.0.1` | Direwolf KISS TCP host                                  |
+| Port            | `8001`      | Direwolf KISS TCP port                                  |
+| Callsign        | (required)  | Your callsign for TX                                    |
+| SSID            | `0`         | APRS SSID                                               |
+| Beacon Interval | `600`       | Seconds between position beacons (0 = disabled)         |
+
+**With Direwolf:**
+
+1. Start Direwolf with KISS enabled (default port 8001)
+2. Enable the APRS TNC plugin in rig-bridge
+3. Set your callsign
+4. APRS packets from nearby stations appear in OHC's APRS panel
+
+The APRS TNC runs alongside APRS-IS (internet) for dual-path coverage. When internet goes down, local RF keeps working.
+
+### MeshCom UDP Plugin _(Beta)_
+
+Receives JSON packets broadcast by [MeshCom](https://github.com/icssw-org/MeshCom-Firmware) LoRa mesh network nodes over UDP and forwards them to OpenHamClock. MeshCom nodes appear on the OHC world map and in the dedicated MeshCom panel with live positions, battery levels, weather/telemetry, and text messages.
+
+#### How it works
+
+MeshCom firmware can broadcast its status packets as UDP JSON to the local network (`--extudp on`). Rig Bridge binds a UDP socket on port 1799, receives those packets, deduplicates them (the mesh rebroadcasts each packet via multiple paths), and forwards them to OpenHamClock via the Cloud Relay plugin — no direct HTTP connection from the plugin itself is needed.
+
+```
+MeshCom node (LoRa)
+      │ UDP JSON broadcast (port 1799)
+      ▼
+Rig Bridge — meshcom-udp plugin
+      │ dedup → normalise → bus.emit('meshcom')
+      ▼
+cloud-relay plugin ──HTTPS──→ OpenHamClock server
+                                    │ POST /api/rig-bridge/relay/state
+                                    ▼
+                              meshcom route
+                                    │ POST /api/meshcom/local/{pos|msg|telem}
+                                    ▼
+                              in-memory store
+                                    │ GET /api/meshcom/nodes|messages|weather
+                                    ▼
+                              MeshCom panel + map
+```
+
+#### MeshCom firmware setup
+
+Enable UDP output in your MeshCom node firmware. The exact method depends on your firmware version and hardware — typical options:
+
+- **Serial/USB console:** `--extudp on` and `--extudpip 255.255.255.255`
+- **Web config UI:** Enable _External UDP_, set IP to `255.255.255.255` (broadcast) or the specific IP of the machine running rig-bridge
+
+The node will broadcast JSON packets to UDP port 1799 on the local network.
+
+#### Rig Bridge setup
+
+1. Open **http://localhost:5555** → **Plugins** tab
+2. Enable **MeshCom UDP Receiver**
+3. Set the **UDP Listen Port** (default `1799`) — must match the firmware's UDP destination port
+4. Click **Save**
+
+You should see in the console:
+
+```
+[MeshCom-UDP] Listening on 0.0.0.0:1799
+```
+
+When packets arrive:
+
+```
+[MeshCom-UDP] RX: {"type":"pos","src":"OE1XYZ-12","lat":48.2,"lat_dir":"N",...}
+```
+
+#### Config reference
+
+| Field      | Description                                 | Default           |
+| ---------- | ------------------------------------------- | ----------------- |
+| `enabled`  | Activate the plugin on startup              | `false`           |
+| `bindPort` | UDP port to listen on                       | `1799`            |
+| `bindHost` | Network interface to bind (`0.0.0.0` = all) | `0.0.0.0`         |
+| `sendHost` | Destination IP for outgoing messages        | `255.255.255.255` |
+| `sendPort` | Destination UDP port for outgoing messages  | `1799`            |
+| `verbose`  | Log every received packet to the console    | `false`           |
+
+Manual config in `rig-bridge-config.json`:
+
+```json
+{
+  "meshcom": {
+    "enabled": true,
+    "bindPort": 1799,
+    "bindHost": "0.0.0.0",
+    "sendHost": "255.255.255.255",
+    "sendPort": 1799,
+    "verbose": false
+  }
+}
+```
+
+#### Packet types
+
+| Type    | Description                                                                                                                        |
+| ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `pos`   | Node position — callsign, lat/lon, altitude, battery                                                                               |
+| `msg`   | Text message — source, destination (callsign, group, or `*` for broadcast)                                                         |
+| `telem` | Weather/sensor data — temperature (`temp`→`tempC`), humidity, pressure (`pressure`→`pressureHpa`), CO₂ (`co2`→`co2ppm`), RSSI, SNR |
+
+Altitude is converted from feet (MeshCom GPS) to metres automatically. Firmware version strings are normalised across local-node and relay-hop encoding variants.
+
+#### Deduplication
+
+LoRa mesh networks rebroadcast each packet via multiple paths, so the same packet can arrive many times within seconds. The plugin deduplicates by `hw_id + msg_id` with a 60-second TTL — only the first copy is forwarded.
+
+#### OpenHamClock data retention
+
+On the OHC server, received data is held in memory:
+
+| Data     | Retention                                                        | Env override                    |
+| -------- | ---------------------------------------------------------------- | ------------------------------- |
+| Nodes    | 60 minutes after last packet (stale nodes removed automatically) | `MESHCOM_NODE_MAX_AGE_MINUTES`  |
+| Messages | 8 hours (oldest messages pruned every minute)                    | `MESHCOM_MESSAGE_MAX_AGE_HOURS` |
+
+#### Troubleshooting
+
+| Problem                          | Solution                                                                                                                                                 |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No packets arriving              | Verify `--extudp on` is set in MeshCom firmware; check UDP destination IP reaches the rig-bridge host                                                    |
+| Port already in use              | Another app is listening on 1799 — change `bindPort` in rig-bridge and in firmware                                                                       |
+| Duplicate packets in OHC         | Normal — dedup is active; if you see duplicates, check that `hw_id` is present in firmware packets                                                       |
+| Nodes appear but no map marker   | Node has no GPS fix yet — position packets without valid coordinates are stored but not mapped                                                           |
+| Altitude shows wrong value       | Plugin converts MeshCom GPS feet → metres automatically; values should be correct                                                                        |
+| MeshCom panel not visible in OHC | Works in both local/direct mode and Cloud Relay mode. Check that the `meshcom` plugin is enabled in rig-bridge config and that OHC can reach rig-bridge. |
+
+---
+
+### Rotator Plugin
+
+Controls antenna rotators via Hamlib's `rotctld`.
+
+1. Start rotctld: `rotctld -m 202 -r /dev/ttyUSB1 -t 4533`
+2. Enable the Rotator plugin in rig-bridge
+3. Set host and port (default: `127.0.0.1:4533`)
+
+### Winlink Plugin
+
+Two features:
+
+- **Gateway Discovery** — shows nearby Winlink RMS gateways on the map (requires API key from winlink.org)
+- **Pat Client** — integrates with [Pat](https://getpat.io/) for composing and sending Winlink messages over RF
+
+### Cloud Relay Plugin
+
+Bridges a locally-running rig-bridge to a cloud-hosted OpenHamClock instance so cloud users get the same rig control as local users — click-to-tune, PTT, WSJT-X decodes, APRS packets.
+
+See [Scenario 3](#scenario-3-cloud-relay-ohc-on-openhamclockcom-radio-at-home) for setup instructions.
+
+**How latency is minimised:**
+
+| Path                  | Mechanism                                              | Typical latency |
+| --------------------- | ------------------------------------------------------ | --------------- |
+| Rig state → browser   | Event-driven push + SSE fan-out                        | < 100 ms        |
+| Browser command → rig | Long-poll (server wakes rig-bridge on command arrival) | ~RTT (< 100 ms) |
+
+The rig-bridge holds a persistent long-poll connection to the server. The moment you click PTT or a DX spot, the server wakes that connection and delivers the command — no fixed poll tick to wait for.
+
+**Config reference:**
+
+| Field          | Description                                     | Default |
+| -------------- | ----------------------------------------------- | ------- |
+| `enabled`      | Activate the relay on startup                   | `false` |
+| `url`          | Cloud OHC server URL                            | —       |
+| `apiKey`       | Relay authentication key (from your OHC server) | —       |
+| `session`      | Browser session ID for per-user isolation       | —       |
+| `pushInterval` | Fallback push interval for batched data (ms)    | `2000`  |
+| `relayRig`     | Relay rig state (freq, mode, PTT)               | `true`  |
+| `relayWsjtx`   | Relay WSJT-X decodes                            | `true`  |
+| `relayAprs`    | Relay APRS packets from local TNC               | `false` |
+| `verbose`      | Log all relay activity to the console           | `false` |
 
 ---
 
@@ -472,9 +675,11 @@ If you have a traditional hardware TNC connected via serial port:
 Rig Bridge can control antenna rotators via [Hamlib's](https://hamlib.github.io/) `rotctld` daemon.
 
 1. Start rotctld for your rotator model, for example:
-   ```
+
+   ```bash
    rotctld -m 202 -r /dev/ttyUSB1 -t 4533
    ```
+
 2. In Rig Bridge → Plugins tab → find **Rotator** → tick **Enable**
 3. Host → `127.0.0.1`, Port → `4533`
 4. Click **Save**
@@ -487,7 +692,7 @@ Rig Bridge can control antenna rotators via [Hamlib's](https://hamlib.github.io/
 
 **Yes**, if you use openhamclock.com or any other HTTPS-hosted version of OpenHamClock.
 
-**No**, if you run OpenHamClock locally on your own computer (e.g. http://localhost:3000) — you can skip this section.
+**No**, if you run OpenHamClock locally on your own computer (e.g. <http://localhost:3000>) — you can skip this section.
 
 ### Why is HTTPS needed?
 
@@ -499,16 +704,16 @@ Rig Bridge solves this by generating its own security certificate — a small fi
 
 #### Step 1 — Enable HTTPS in Rig Bridge
 
-1. Open **http://localhost:5555** in your browser
+1. Open **h<ttp://localhost:5555>** in your browser
 2. Click the **🔒 Security** tab
 3. Tick **Enable HTTPS**
 4. Rig Bridge will generate a certificate automatically (takes a few seconds)
 5. **Quit and restart Rig Bridge**
-6. From now on, open **https://localhost:5555** (note the `s` in `https`)
+6. From now on, open **<https://localhost:5555>** (note the `s` in `https`)
 
 #### Step 2 — Deal with the browser warning
 
-The first time you open https://localhost:5555 after enabling HTTPS, your browser will show a security warning. This is expected — the certificate is genuine, but your browser does not yet trust it.
+The first time you open <https://localhost:5555> after enabling HTTPS, your browser will show a security warning. This is expected — the certificate is genuine, but your browser does not yet trust it.
 
 **Chrome / Edge:**
 
@@ -534,7 +739,7 @@ Installing the certificate permanently tells your computer to trust Rig Bridge's
 
 **Easiest way — use the Install button:**
 
-1. Make sure you are on **https://localhost:5555** (accepted the warning in Step 2)
+1. Make sure you are on **<https://localhost:5555>** (accepted the warning in Step 2)
 2. Go to the **🔒 Security** tab
 3. Click **⬇ Download Certificate** — save the file `rig-bridge.crt`
 4. Click **Install Certificate** — Rig Bridge will try to install it automatically
@@ -587,10 +792,10 @@ certutil -addstore -f ROOT %APPDATA%\openhamclock\certs\rig-bridge.crt
 1. Download the certificate from the Security tab
 2. Open a terminal and run:
 
-```bash
-sudo cp ~/Downloads/rig-bridge.crt /usr/local/share/ca-certificates/
-sudo update-ca-certificates
-```
+   ```bash
+   sudo cp ~/Downloads/rig-bridge.crt /usr/local/share/ca-certificates/
+   sudo update-ca-certificates
+   ```
 
 3. Import the certificate into your browser:
    - **Chrome / Chromium:** Settings → Privacy & Security → Manage Certificates → Authorities → Import
@@ -609,7 +814,7 @@ Now that Rig Bridge is running on HTTPS, update the address in OpenHamClock:
 
 #### Step 5 — Verify everything works
 
-- The padlock icon appears in your browser's address bar when visiting https://localhost:5555 ✓
+- The padlock icon appears in your browser's address bar when visiting <https://localhost:5555> ✓
 - The status bar in OpenHamClock shows Rig Bridge as connected ✓
 - Clicking a spot tunes your radio ✓
 
@@ -617,10 +822,10 @@ Now that Rig Bridge is running on HTTPS, update the address in OpenHamClock:
 
 If you ever want to go back to plain HTTP (for example, if you stop using openhamclock.com):
 
-1. Open https://localhost:5555 → **🔒 Security** tab
+1. Open <https://localhost:5555> → **🔒 Security** tab
 2. Untick **Enable HTTPS**
 3. Restart Rig Bridge
-4. Open **http://localhost:5555** again and update OpenHamClock settings to `http://localhost`
+4. Open **<http://localhost:5555>** again and update OpenHamClock settings to `http://localhost`
 
 ### Certificate storage location
 
@@ -730,7 +935,7 @@ Rig Bridge exposes a simple HTTP API — compatible with the original rig-daemon
 
 ### Project structure
 
-```
+```text
 rig-bridge/
 ├── rig-bridge.js          # Entry point
 ├── core/
@@ -746,19 +951,26 @@ rig-bridge/
 │   ├── wsjtx-protocol.js  # WSJT-X UDP protocol parser
 │   └── aprs-parser.js     # APRS packet decoder
 └── plugins/
-    ├── usb/               # Direct USB CAT (Yaesu, Kenwood, Icom)
-    ├── tci.js             # TCI/SDR WebSocket (Thetis, ExpertSDR)
-    ├── smartsdr.js        # FlexRadio SmartSDR
-    ├── rtl-tcp.js         # RTL-SDR via rtl_tcp
-    ├── rigctld.js         # Hamlib rigctld
-    ├── flrig.js           # flrig XML-RPC
-    ├── mock.js            # Simulated radio (for testing)
-    ├── wsjtx-relay.js     # WSJT-X / JTDX / MSHV relay
-    ├── js8call.js         # JS8Call messaging
-    ├── aprs-tnc.js        # APRS KISS TNC (Direwolf / hardware)
-    ├── rotator.js         # Antenna rotator via rotctld
-    ├── winlink-gateway.js # Winlink RMS gateway discovery
-    └── cloud-relay.js     # Cloud relay to hosted OpenHamClock
+    ├── usb/
+    │   ├── index.js            # USB serial lifecycle (open, reconnect, poll)
+    │   ├── protocol-yaesu.js   # Yaesu CAT ASCII protocol
+    │   ├── protocol-kenwood.js # Kenwood ASCII protocol
+    │   └── protocol-icom.js    # Icom CI-V binary protocol
+    ├── tci.js             # TCI/SDR WebSocket plugin (Thetis, ExpertSDR, etc.)
+    ├── smartsdr.js        # FlexRadio SmartSDR native TCP API plugin
+    ├── rtl-tcp.js         # RTL-SDR via rtl_tcp binary protocol (receive-only)
+    ├── rigctld.js         # rigctld TCP plugin
+    ├── flrig.js           # flrig XML-RPC plugin
+    ├── mock.js            # Simulated radio for testing (no hardware needed)
+    ├── wsjtx-relay.js     # WSJT-X UDP listener → OpenHamClock relay
+    ├── mshv.js            # MSHV UDP listener (multi-stream digital modes)
+    ├── jtdx.js            # JTDX UDP listener (FT8/JT65 enhanced decoding)
+    ├── js8call.js         # JS8Call UDP listener (JS8 keyboard messaging)
+    ├── aprs-tnc.js        # APRS KISS TNC plugin (Direwolf / hardware TNC)
+    ├── meshcom-udp.js     # MeshCom LoRa mesh UDP receiver (port 1799)
+    ├── rotator.js         # Antenna rotator via rotctld (Hamlib)
+    ├── winlink-gateway.js # Winlink RMS gateway discovery + Pat client
+    └── cloud-relay.js     # Cloud relay — bridges local rig-bridge to cloud OHC
 ```
 
 ### Writing a plugin

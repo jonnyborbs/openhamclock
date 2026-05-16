@@ -1,5 +1,6 @@
-# Claude Code local config
+# Claude Code local config — AI assistant instructions, not part of the project source
 .claude/
+CLAUDE.md
 
 # Dependencies
 node_modules/
@@ -9,6 +10,10 @@ dist/
 dist-electron/
 build/
 out/
+
+# WASM build (P.533) — source and compiled outputs rebuilt in CI, never committed
+wasm-build/src/
+wasm-build/dist/
 
 # Electron
 *.asar
@@ -112,3 +117,6 @@ src/plugins/local/*.jsx
 
 # Self-hosted vendor assets (downloaded by scripts/vendor-download.sh)
 public/vendor/
+
+# P.533 WASM fetched from CI artifact by scripts/fetch-wasm.sh
+public/wasm/
