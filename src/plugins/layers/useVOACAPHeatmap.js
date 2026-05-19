@@ -396,8 +396,36 @@ export function useLayer({ map, enabled, opacity, locator }) {
 
     if (!data?.cells?.length) return;
 
-    const half = (data.gridSize || 10) / 2;
+    const grid = data.gridSize || 10;
+    const half = grid / 2;
     const newLayers = [];
+
+    // ─── Spatial blur of the reliability grid (#990 round 4) ──────────────
+    // VOACAP's output has a real discontinuity where the short-path prediction
+    // gives up and long-path becomes shorter — adjacent cells can jump from
+    // r=5 to r=52, which renders as a visual cliff regardless of how smooth
+    // the alpha taper is. A 3×3 box average over the cell grid feathers that
+    // discontinuity over a couple of cells visually, without claiming the
+    // underlying physics is wrong (the data is preserved everywhere else).
+    // Longitude wraps at ±180; latitude doesn't.
+    const cellMap = new Map();
+    for (const c of data.cells) cellMap.set(`${c.lat},${c.lon}`, c);
+    const wrapLon = (lon) => ((lon + 540) % 360) - 180;
+    const smoothedR = new Map();
+    for (const c of data.cells) {
+      let sum = 0;
+      let count = 0;
+      for (const dlat of [-grid, 0, grid]) {
+        for (const dlon of [-grid, 0, grid]) {
+          const n = cellMap.get(`${c.lat + dlat},${wrapLon(c.lon + dlon)}`);
+          if (n) {
+            sum += n.r || 0;
+            count++;
+          }
+        }
+      }
+      smoothedR.set(c, count > 0 ? sum / count : c.r);
+    }
 
     // Use a shared canvas renderer for all cells — avoids SVG anti-aliasing
     // seams and is significantly faster for hundreds of rectangles
@@ -437,7 +465,8 @@ export function useLayer({ map, enabled, opacity, locator }) {
     };
 
     data.cells.forEach((cell) => {
-      const { color, alpha } = reliabilityColor(cell.r);
+      const r = smoothedR.get(cell) ?? cell.r;
+      const { color, alpha } = reliabilityColor(r);
 
       // Scale alpha by the user opacity slider (slider default 0.6 = 60%)
       const cellAlpha = alpha * (opacity / 0.6);
