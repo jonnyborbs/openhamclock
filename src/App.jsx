@@ -328,8 +328,34 @@ const App = () => {
   const dxWeather = useWeather(dxLocation, config.allUnits);
   const localAlerts = useWeatherAlerts(config.location);
   const dxAlerts = useWeatherAlerts(dxLocation);
+  // User-selectable PSK retention window (issue #991). PSKReporterPanel writes
+  // `ohc_psk_age` to localStorage and fires `ohc-psk-age-changed`; we mirror it
+  // here so the hook re-runs with the new window and both the map dots and the
+  // panel list reflect the user's choice in lockstep.
+  const [pskAge, setPskAge] = useState(() => {
+    try {
+      return parseInt(localStorage.getItem('ohc_psk_age')) || 15;
+    } catch {
+      return 15;
+    }
+  });
+  useEffect(() => {
+    const sync = () => {
+      try {
+        const v = parseInt(localStorage.getItem('ohc_psk_age'));
+        if (Number.isFinite(v) && v > 0) setPskAge(v);
+      } catch {}
+    };
+    window.addEventListener('ohc-psk-age-changed', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('ohc-psk-age-changed', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+
   const pskReporter = usePSKReporter(config.callsign, {
-    minutes: config.lowMemoryMode ? 5 : 30,
+    minutes: config.lowMemoryMode ? Math.min(pskAge, 5) : pskAge,
     enabled: pskFilters?.filterMode === 'grid' ? !!config.locator : config.callsign !== 'N0CALL',
     maxSpots: config.lowMemoryMode ? 50 : 500,
     filterMode: pskFilters?.filterMode || 'call',
