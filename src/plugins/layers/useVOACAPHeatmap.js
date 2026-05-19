@@ -39,52 +39,60 @@ const BANDS = [
 
 // Reliability to color: HamClock-style wide spectrum
 // magenta (0%) → red → orange → yellow → green (100%)
+// Cubic smoothstep — smooth interpolation between edge0 and edge1, with zero
+// first-derivative at both ends. Eliminates the visible "step" you'd get from
+// a linear ramp between bands.
+function smoothstep(edge0, edge1, x) {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
 function reliabilityColor(r) {
   if (r >= 99) return { color: 'rgb(0,220,0)', alpha: 0.85 };
 
-  let red, green, blue, alpha;
-  if (r < 10) {
-    // Very poor: subtle dark blue-gray tint so map stays visible
-    red = 40;
-    green = 30;
-    blue = 80;
-    alpha = 0.25;
-  } else if (r < 25) {
-    // Poor: dark red-purple, fading in
-    const t = (r - 10) / 15;
+  let red, green, blue;
+  if (r < 25) {
+    // Below VOACAP's usefully-modelled range. Color stays as a dim
+    // red-purple but the alpha will be tapered to ~0 (see below), so the
+    // exact RGB barely matters — it just sets the hue you see at the very
+    // edge of the predicted region.
+    const t = r / 25;
     red = 40 + Math.round(t * 180);
     green = 30;
     blue = 80 - Math.round(t * 80);
-    alpha = 0.25 + t * 0.35;
   } else if (r < 40) {
     // Low: Red → Orange
     const t = (r - 25) / 15;
     red = 220 + Math.round(t * 35);
     green = Math.round(t * 120);
     blue = 0;
-    alpha = 0.6 + t * 0.15;
   } else if (r < 60) {
     // Fair: Orange → Yellow
     const t = (r - 40) / 20;
     red = 255;
     green = 120 + Math.round(t * 135);
     blue = 0;
-    alpha = 0.75 + t * 0.05;
   } else if (r < 80) {
     // Good: Yellow → Yellow-Green
     const t = (r - 60) / 20;
     red = 255 - Math.round(t * 140);
     green = 255;
     blue = 0;
-    alpha = 0.8;
   } else {
     // Excellent: Yellow-Green → Green
     const t = (r - 80) / 20;
     red = 115 - Math.round(t * 115);
     green = 220 + Math.round(t * 35);
     blue = 0;
-    alpha = 0.85;
   }
+
+  // Smooth alpha taper from 0 → 0.85 across r=0..40 (#990 round 3).
+  // Previously the alpha jumped from 0.25 at r<10 to 0.75 at r=40 in
+  // discrete bands, which read as a hard vertical cliff at VOACAP's
+  // useful-range boundary. A cubic smoothstep makes the edge fade
+  // gradually into the base map — visually a real propagation map rather
+  // than a stamped-out region.
+  const alpha = smoothstep(0, 40, r) * 0.85;
   return { color: `rgb(${red},${green},${blue})`, alpha };
 }
 
