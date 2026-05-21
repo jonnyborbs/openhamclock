@@ -381,6 +381,21 @@ const App = () => {
     }
   }, [wsjtx.dxTarget, handleDXChange]);
 
+  // ── N3FJP → DX Target ──
+  // The N3FJP Logged QSOs layer emits this on its own channel when the operator
+  // types a callsign in the logger, so propagation + beam heading follow the
+  // previewed station. handleDXChange honours the DX Lock toggle.
+  useEffect(() => {
+    const handler = (e) => {
+      const { lat, lon } = e.detail || {};
+      if (lat != null && lon != null) {
+        handleDXChange({ lat, lon });
+      }
+    };
+    window.addEventListener('ohc-n3fjp-dx-target', handler);
+    return () => window.removeEventListener('ohc-n3fjp-dx-target', handler);
+  }, [handleDXChange]);
+
   const { satelliteFilters, setSatelliteFilters, filteredSatellites } = useSatellitesFilters(satellites.data);
 
   const {

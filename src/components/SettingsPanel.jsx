@@ -146,6 +146,13 @@ export const SettingsPanel = ({
       return '#3388ff';
     }
   });
+  const [n3fjpPreviewLineColor, setN3fjpPreviewLineColor] = useState(() => {
+    try {
+      return localStorage.getItem('n3fjp_preview_line_color') || '#ffaa00';
+    } catch {
+      return '#ffaa00';
+    }
+  });
 
   // Monospace font for panels/data displays (#923 — 0/8 readability)
   const [monoFont, setMonoFont] = useState(() => {
@@ -257,10 +264,12 @@ export const SettingsPanel = ({
       const v = parseInt(localStorage.getItem('n3fjp_display_minutes') || '15', 10);
       setN3fjpDisplayMinutes(Number.isFinite(v) ? v : 15);
       setN3fjpLineColor(localStorage.getItem('n3fjp_line_color') || '#3388ff');
+      setN3fjpPreviewLineColor(localStorage.getItem('n3fjp_preview_line_color') || '#ffaa00');
     } catch {
       setN3fjpEnabled(false);
       setN3fjpDisplayMinutes(15);
       setN3fjpLineColor('#3388ff');
+      setN3fjpPreviewLineColor('#ffaa00');
     }
   }, [isOpen]);
 
@@ -2722,6 +2731,44 @@ export const SettingsPanel = ({
                         setN3fjpLineColor(next);
                         try {
                           localStorage.setItem('n3fjp_line_color', next);
+                        } catch {}
+                        try {
+                          window.dispatchEvent(new Event('ohc-n3fjp-config-changed'));
+                        } catch {}
+                      }}
+                      style={{
+                        width: '100%',
+                        height: 40,
+                        padding: 0,
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 6,
+                        background: 'transparent',
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ flex: '0 0 120px' }}>
+                    <label
+                      style={{
+                        display: 'block',
+                        marginBottom: 6,
+                        color: 'var(--text-muted)',
+                        fontSize: 11,
+                        textTransform: 'uppercase',
+                        letterSpacing: 1,
+                      }}
+                    >
+                      Preview color
+                    </label>
+                    <input
+                      disabled={!isLocalInstall || !n3fjpEnabled}
+                      type="color"
+                      value={n3fjpPreviewLineColor}
+                      onChange={(e) => {
+                        const next = e.target.value || '#ffaa00';
+                        setN3fjpPreviewLineColor(next);
+                        try {
+                          localStorage.setItem('n3fjp_preview_line_color', next);
                         } catch {}
                         try {
                           window.dispatchEvent(new Event('ohc-n3fjp-config-changed'));
