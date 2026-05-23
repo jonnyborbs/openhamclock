@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { validateGridLocator, latLonToMaidenhead, maidenheadToLatLon, maidenheadToBoundingBox } from './geo.js';
+import { getSunPosition } from './geo.js';
+import { normalizeLon } from './geo.js';
 
 describe('Maidenhead Grid tests', () => {
   const gridCases = [
@@ -164,5 +166,113 @@ describe('Maidenhead Grid tests', () => {
         },
       );
     }
+  }
+});
+
+describe('Sun/Moon tests', () => {
+  const sunEphemerisCases = [
+    // based on https://eclipse.gsfc.nasa.gov/TYPE/sun1.html#su2000
+    {
+      date: '1999-12-22T00:00:00.000Z',
+      gast: 6 + 0 / 60 + 26.7 / 3600,
+      dec: -(23 + 26 / 60 + 14.1 / 3600),
+      ra: 17 + 58 / 60 + 34.03 / 3600,
+    },
+
+    // based on https://eclipse.gsfc.nasa.gov/TYPE/sun1.html#su2000
+    {
+      date: '2000-01-01T00:00:00.000Z',
+      gast: 6 + 39 / 60 + 52.3 / 3600,
+      dec: -(23 + 4 / 60 + 16.2 / 3600),
+      ra: 18 + 42 / 60 + 54.05 / 3600,
+    },
+
+    // based on https://eclipse.gsfc.nasa.gov/TYPE/sun1.html#su2000
+    {
+      date: '2000-06-21T00:00:00.000Z',
+      gast: 17 + 57 / 60 + 59.8 / 3600,
+      dec: 23 + 26 / 60 + 16.2 / 3600,
+      ra: 5 + 59 / 60 + 41.15 / 3600,
+    },
+
+    // based on https://www.astropixels.com/ephemeris/sun/sun2026.html
+    {
+      date: '2026-01-01T00:00:00.000Z',
+      gast: 6 + 42 / 60 + 38.8 / 3600,
+      dec: -(23 + 1 / 60 + 2.1 / 3600),
+      ra: 18 + 45 / 60 + 58.74 / 3600,
+    },
+
+    // based on https://www.astropixels.com/ephemeris/sun/sun2026.html
+    {
+      date: '2026-04-29T00:00:00.000Z',
+      gast: 14 + 27 / 60 + 52.3 / 3600,
+      dec: 14 + 24 / 60 + 3.3 / 3600,
+      ra: 2 + 25 / 60 + 16.69 / 3600,
+    },
+  ];
+
+  for (const ephemeris of sunEphemerisCases) {
+    it('should validate getSunPosition() for known position', () => {
+      const date = new Date(ephemeris.date);
+
+      const subSolarPointFromGST = (raHours, decDeg, gstHours) => {
+        // Hours → radians
+        const TWO_PI = 2 * Math.PI;
+        const ra = (raHours * TWO_PI) / 24;
+        const gast = (gstHours * TWO_PI) / 24;
+
+        // Latitude = Dec (unchanged)
+        const lat = decDeg;
+
+        // Longitude = RA - GAST (radians → degrees)
+        let lon = normalizeDegrees180(((ra - gast) * 180) / Math.PI);
+
+        return { lat, lon };
+      };
+
+      const sunPosition = getSunPosition(date); // target code
+      const point = subSolarPointFromGST(ephemeris.ra, ephemeris.dec, ephemeris.gast);
+
+      // check absolute difference in tested and calculated values does not exceed maximum allowed
+      const maxAllowedDeltaLat = 0.75;
+      const maxAllowedDeltaLon = 1.0;
+      expect(Math.abs(normalizeDegrees180(sunPosition.lat - point.lat))).toBeLessThan(maxAllowedDeltaLat);
+      expect(Math.abs(normalizeDegrees180(sunPosition.lon - point.lon))).toBeLessThan(maxAllowedDeltaLon);
+    });
+  }
+
+  function normalizeDegrees360(d) {
+    return ((d % 360) + 360) % 360;
+  }
+  function normalizeDegrees180(d) {
+    return ((((d + 180) % 360) + 360) % 360) - 180;
+  }
+  function normalizeRadians(r) {
+    return ((r % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+  }
+  function deg2rad(d) {
+    return (d * Math.PI) / 180;
+  }
+  function rad2deg(r) {
+    return (r * 180) / Math.PI;
+  }
+});
+
+describe('miscellaneous functionality tests', () => {
+  for (const [lon, expected] of [
+    [-720, 0],
+    [-360, 0],
+    [-180, -180],
+    [-90, -90],
+    [0, 0],
+    [90, 90],
+    [180, -180],
+    [360, 0],
+    [720, 0],
+  ]) {
+    it('should validate normalizeLon()', () => {
+      expect(normalizeLon(lon)).toBe(expected);
+    });
   }
 });

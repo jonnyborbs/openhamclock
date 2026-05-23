@@ -172,7 +172,7 @@ export const calculateDistance = (lat1, lon1, lat2, lon2) => {
  * @returns {string} Formatted distance with unit label (e.g. "1,234 km" or "767 mi")
  */
 export const formatDistance = (km, units) => {
-  if (units === 'imperial') {
+  if (units !== 'metric') {
     const mi = km * 0.621371;
     return `${Math.round(mi).toLocaleString()} mi`;
   }
@@ -181,6 +181,8 @@ export const formatDistance = (km, units) => {
 
 /**
  * Get subsolar point (position where sun is directly overhead)
+ * Note, this is a crude approximation but within estimated +/- 0.75 deg lat, +/- 1.0 deg lon,
+ * variation within this range is seasonal
  */
 export const getSunPosition = (date) => {
   const dayOfYear = Math.floor((date - new Date(date.getFullYear(), 0, 0)) / 86400000);
@@ -389,10 +391,10 @@ export const calculateSunTimes = (lat, lon, date) => {
 };
 
 /**
- * Normalize longitude to -180..180 range
+ * Normalize longitude to [−180,+180) degrees
  */
 export const normalizeLon = (lon) => {
-  while (lon > 180) lon -= 360;
+  while (lon >= 180) lon -= 360;
   while (lon < -180) lon += 360;
   return lon;
 };
