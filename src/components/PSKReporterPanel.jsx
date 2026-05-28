@@ -664,6 +664,8 @@ const PSKReporterPanel = ({
             {/* No client connected */}
             {!wsjtxLoading && activeClients.length === 0 && wsjtxDecodes.length === 0 && wsjtxWspr.length === 0 ? (
               <div
+                role="status"
+                aria-live="polite"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
