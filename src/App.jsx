@@ -66,7 +66,7 @@ const App = () => {
   const { t } = useTranslation();
 
   // Core config/state
-  const { config, configLoaded, showDxWeather, classicAnalogClock, handleSaveConfig } = useAppConfig();
+  const { config, configLoaded, showDxWeather, classicAnalogClock, handleSaveConfig, serverLocal } = useAppConfig();
 
   const [showSettings, setShowSettings] = useState(false);
   const [settingsDefaultTab, setSettingsDefaultTab] = useState(null);
@@ -282,7 +282,7 @@ const App = () => {
   const { displaySleeping } = useDisplaySchedule(config);
   const { wakeLockStatus } = useScreenWakeLock(config, displaySleeping);
   const scale = useResponsiveScale();
-  const isLocalInstall = useLocalInstall();
+  const isLocalInstall = useLocalInstall(serverLocal);
 
   // Responsive breakpoint for sidebar/header behavior
   const [breakpoint, setBreakpoint] = useState(() => {
@@ -748,6 +748,7 @@ const App = () => {
         onToggleDXNews={toggleDXNews}
         wakeLockStatus={wakeLockStatus}
         wsjtxSessionId={wsjtx.sessionId}
+        isLocalInstall={isLocalInstall}
       />
       <DXFilterManager
         filters={dxFilters}
