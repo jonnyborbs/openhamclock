@@ -70,7 +70,7 @@ jobs:
         id: push
         uses: docker/build-push-action@v7
         with:
-          context: .
+          context: ./iturhfprop-service
           push: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
