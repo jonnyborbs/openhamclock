@@ -1510,136 +1510,138 @@ export default function WhatsNew({ showWhatsNew }) {
           animation: 'whatsNewSlideIn 0.3s ease-out',
         }}
       >
-        {/* Header */}
-        <div
-          style={{
-            padding: '24px 24px 16px',
-            borderBottom: '1px solid var(--border-color, #333)',
-            textAlign: 'center',
-          }}
-        >
-          <div
-            style={{
-              fontSize: '13px',
-              fontFamily: 'var(--font-mono)',
-              color: 'var(--accent-cyan, #00ffcc)',
-              letterSpacing: '0.1em',
-              textTransform: 'uppercase',
-              marginBottom: '8px',
-            }}
-          >
-            OpenHamClock v{entry.version}
-          </div>
-          <div
-            style={{
-              fontSize: '20px',
-              fontWeight: '700',
-              color: 'var(--text-primary, #e0e0e0)',
-            }}
-          >
-            What's New
-          </div>
-          <div
-            style={{
-              fontSize: '13px',
-              color: 'var(--text-muted, #888)',
-              marginTop: '6px',
-            }}
-          >
-            {entry.heading}
-          </div>
-          {ANNOUNCEMENT && (
-            <div
-              style={{
-                fontSize: '13px',
-                fontWeight: '600',
-                color: ANNOUNCEMENT.color,
-                marginTop: '12px',
-                padding: '10px 14px',
-                background: ANNOUNCEMENT.bg,
-                borderRadius: '8px',
-                border: `1px solid ${ANNOUNCEMENT.border}`,
-                lineHeight: '1.5',
-                textAlign: 'center',
-                whiteSpace: 'pre-line',
-              }}
-            >
-              <span style={{ fontSize: '18px', display: 'block', marginBottom: '4px' }}>{ANNOUNCEMENT.emoji}</span>
-              {ANNOUNCEMENT.text}
-            </div>
-          )}
-          {entry.notice && (
-            <div
-              style={{
-                fontSize: '12px',
-                color: 'var(--accent-amber, #ffb800)',
-                marginTop: '10px',
-                padding: '8px 12px',
-                background: 'rgba(255, 184, 0, 0.08)',
-                borderRadius: '6px',
-                border: '1px solid rgba(255, 184, 0, 0.2)',
-                lineHeight: '1.5',
-              }}
-            >
-              {entry.notice}
-            </div>
-          )}
-        </div>
-
-        {/* Feature list — scrollable */}
+        {/* Body — one big scrollable region: header + announcement + features */}
         <div
           style={{
             overflowY: 'auto',
-            padding: '16px 24px',
             flex: 1,
             WebkitOverflowScrolling: 'touch',
             overscrollBehavior: 'contain',
           }}
         >
-          {entry.features.map((f, i) => (
+          <div
+            style={{
+              padding: '24px 24px 16px',
+              textAlign: 'center',
+            }}
+          >
             <div
-              key={i}
               style={{
-                display: 'flex',
-                gap: '12px',
-                padding: '10px 0',
-                borderBottom: i < entry.features.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                fontSize: '13px',
+                fontFamily: 'var(--font-mono)',
+                color: 'var(--accent-cyan, #00ffcc)',
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                marginBottom: '8px',
               }}
             >
+              OpenHamClock v{entry.version}
+            </div>
+            <div
+              style={{
+                fontSize: '20px',
+                fontWeight: '700',
+                color: 'var(--text-primary, #e0e0e0)',
+              }}
+            >
+              What's New
+            </div>
+            <div
+              style={{
+                fontSize: '13px',
+                color: 'var(--text-muted, #888)',
+                marginTop: '6px',
+              }}
+            >
+              {entry.heading}
+            </div>
+            {ANNOUNCEMENT && (
               <div
                 style={{
-                  fontSize: '20px',
-                  lineHeight: '28px',
-                  flexShrink: 0,
-                  width: '28px',
-                  textAlign: 'center',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  color: ANNOUNCEMENT.color,
+                  marginTop: '12px',
+                  padding: '10px 14px',
+                  background: ANNOUNCEMENT.bg,
+                  borderRadius: '8px',
+                  border: `1px solid ${ANNOUNCEMENT.border}`,
+                  lineHeight: '1.5',
+                  textAlign: 'left',
+                  whiteSpace: 'pre-line',
                 }}
               >
-                {f.icon}
+                <span style={{ fontSize: '18px', display: 'block', marginBottom: '4px', textAlign: 'center' }}>
+                  {ANNOUNCEMENT.emoji}
+                </span>
+                {ANNOUNCEMENT.text}
               </div>
-              <div>
+            )}
+            {entry.notice && (
+              <div
+                style={{
+                  fontSize: '12px',
+                  color: 'var(--accent-amber, #ffb800)',
+                  marginTop: '10px',
+                  padding: '8px 12px',
+                  background: 'rgba(255, 184, 0, 0.08)',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(255, 184, 0, 0.2)',
+                  lineHeight: '1.5',
+                }}
+              >
+                {entry.notice}
+              </div>
+            )}
+          </div>
+
+          {/* Feature list */}
+          <div style={{ padding: '0 24px 16px' }}>
+            {entry.features.map((f, i) => (
+              <div
+                key={i}
+                style={{
+                  display: 'flex',
+                  gap: '12px',
+                  padding: '10px 0',
+                  borderBottom: i < entry.features.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                }}
+              >
                 <div
                   style={{
-                    fontWeight: '600',
-                    fontSize: '14px',
-                    color: 'var(--text-primary, #e0e0e0)',
-                    marginBottom: '3px',
+                    fontSize: '20px',
+                    lineHeight: '28px',
+                    flexShrink: 0,
+                    width: '28px',
+                    textAlign: 'center',
                   }}
                 >
-                  {f.title}
+                  {f.icon}
                 </div>
-                <div
-                  style={{
-                    fontSize: '12px',
-                    lineHeight: '1.5',
-                    color: 'var(--text-muted, #999)',
-                  }}
-                >
-                  {f.desc}
+                <div>
+                  <div
+                    style={{
+                      fontWeight: '600',
+                      fontSize: '14px',
+                      color: 'var(--text-primary, #e0e0e0)',
+                      marginBottom: '3px',
+                    }}
+                  >
+                    {f.title}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '12px',
+                      lineHeight: '1.5',
+                      color: 'var(--text-muted, #999)',
+                    }}
+                  >
+                    {f.desc}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
         {/* Footer */}
