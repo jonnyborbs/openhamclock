@@ -5506,15 +5506,17 @@ export const SettingsPanel = ({
                       </a>
                       <a
                         href={(() => {
-                          const fallback = `http://localhost:${rigPort}`;
+                          // Coerce rigPort to an integer in [1, 65535] — both settings
+                          // come from user input and CodeQL's xss-through-dom flags any
+                          // raw interpolation into href. Integer-clamped port is safe.
+                          const portNum = Math.floor(Number(rigPort));
+                          const port = portNum >= 1 && portNum <= 65535 ? portNum : 8080;
+                          const fallback = `http://localhost:${port}`;
                           if (typeof rigHost !== 'string' || !rigHost) return fallback;
                           try {
                             const parsed = new URL(rigHost);
                             if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-                              // Reconstruct from parsed components — never interpolate the
-                              // raw user input — and strip any port from the host so we
-                              // can append rigPort cleanly.
-                              return `${parsed.protocol}//${parsed.hostname}:${rigPort}`;
+                              return `${parsed.protocol}//${parsed.hostname}:${port}`;
                             }
                           } catch {
                             /* invalid URL — fall through to localhost */
