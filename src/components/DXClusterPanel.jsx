@@ -2,11 +2,13 @@
  * DXClusterPanel Component
  * Displays DX cluster spots with filtering controls and ON/OFF toggle
  */
+import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getBandColor } from '../utils/callsign.js';
 import { matchesDXSpotPath } from '../utils/dxClusterSpotMatcher';
 import { IconSearch, IconMap, IconGlobe } from './Icons.jsx';
 import CallsignLink from './CallsignLink.jsx';
+import { classifySpotMode } from '../hooks/useBandHealth.js';
 
 export const DXClusterPanel = ({
   data,
@@ -22,6 +24,41 @@ export const DXClusterPanel = ({
   onToggleMap,
 }) => {
   const { t } = useTranslation();
+
+  // Spotter column visibility (#995). Default on to match historical behaviour;
+  // users with tight vertical space can hide it to roughly double the spot
+  // density in the panel.
+  const [showSpotter, setShowSpotter] = useState(() => {
+    try {
+      return localStorage.getItem('ohc_dx_show_spotter') !== '0';
+    } catch {
+      return true;
+    }
+  });
+  const toggleSpotter = () => {
+    setShowSpotter((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('ohc_dx_show_spotter', next ? '1' : '0');
+      } catch {}
+      return next;
+    });
+  };
+
+  // Sort field (#998). Default 'time' preserves upstream order (newest first).
+  const [sortField, setSortField] = useState(() => {
+    try {
+      return localStorage.getItem('ohc_dx_sort') || 'time';
+    } catch {
+      return 'time';
+    }
+  });
+  const handleSortChange = (v) => {
+    setSortField(v);
+    try {
+      localStorage.setItem('ohc_dx_sort', v);
+    } catch {}
+  };
 
   const parseSpotTimeToTimestamp = (spot) => {
     if (spot?.timestamp && Number.isFinite(spot.timestamp)) {
@@ -61,6 +98,18 @@ export const DXClusterPanel = ({
     return t('dxClusterPanel.relativeTime', { minutes, time: clock });
   };
 
+  const formatSpotTimeAriaLabel = (spot) => {
+    const ts = parseSpotTimeToTimestamp(spot);
+    if (!ts) return spot?.time || '';
+
+    const diffMs = Math.max(0, Date.now() - ts);
+    const minutes = Math.floor(diffMs / 60000);
+    const utc = new Date(ts);
+    const hh = String(utc.getUTCHours()).padStart(2, '0');
+    const mm = String(utc.getUTCMinutes()).padStart(2, '0');
+    return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago, ${hh}:${mm} UTC`;
+  };
+
   const getActiveFilterCount = () => {
     let count = 0;
     if (filters?.continents?.length) count++;
@@ -82,7 +131,27 @@ export const DXClusterPanel = ({
   };
 
   const filterCount = getActiveFilterCount();
-  const spots = data || [];
+  const rawSpots = data || [];
+
+  // Helper: parse spot.freq → MHz number for sort comparison. Mirrors the
+  // display-side logic at the row level (kHz values >1000 get divided).
+  const freqToMHz = (spot) => {
+    if (!spot?.freq) return 0;
+    const v = parseFloat(spot.freq);
+    if (!Number.isFinite(v)) return 0;
+    return v > 1000 ? v / 1000 : v;
+  };
+
+  const spots = useMemo(() => {
+    if (sortField === 'time') return rawSpots;
+    const copy = [...rawSpots];
+    if (sortField === 'freq') {
+      copy.sort((a, b) => freqToMHz(a) - freqToMHz(b));
+    } else if (sortField === 'call') {
+      copy.sort((a, b) => (a.call || '').localeCompare(b.call || ''));
+    }
+    return copy;
+  }, [rawSpots, sortField]);
 
   return (
     <div
@@ -116,6 +185,26 @@ export const DXClusterPanel = ({
           <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
             {spots.length}/{totalSpots || spots.length}
           </span>
+          <select
+            value={sortField}
+            onChange={(e) => handleSortChange(e.target.value)}
+            title="Sort spots"
+            aria-label="Sort spots"
+            style={{
+              background: 'var(--bg-tertiary)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '3px',
+              fontSize: '10px',
+              padding: '1px 4px',
+              cursor: 'pointer',
+              maxWidth: '70px',
+            }}
+          >
+            <option value="time">Time</option>
+            <option value="freq">Freq</option>
+            <option value="call">Call</option>
+          </select>
           <button
             onClick={onOpenFilters}
             title={t('dxClusterPanel.filterTooltip')}
@@ -134,8 +223,28 @@ export const DXClusterPanel = ({
             {t('dxClusterPanel.filtersButton')}
           </button>
           <button
+            onClick={toggleSpotter}
+            title={showSpotter ? 'Hide spotter (de) column' : 'Show spotter (de) column'}
+            aria-label={showSpotter ? 'Hide spotter column' : 'Show spotter column'}
+            aria-pressed={showSpotter}
+            style={{
+              background: showSpotter ? 'rgba(68, 136, 255, 0.3)' : 'rgba(100, 100, 100, 0.3)',
+              border: `1px solid ${showSpotter ? '#4488ff' : '#666'}`,
+              color: showSpotter ? '#4488ff' : '#888',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '10px',
+              fontFamily: 'var(--font-mono)',
+              cursor: 'pointer',
+            }}
+          >
+            de
+          </button>
+          <button
             onClick={onToggleMap}
             title={showOnMap ? t('dxClusterPanel.mapToggleHide') : t('dxClusterPanel.mapToggleShow')}
+            aria-label={showOnMap ? t('dxClusterPanel.mapToggleHide') : t('dxClusterPanel.mapToggleShow')}
+            aria-pressed={showOnMap}
             style={{
               background: showOnMap ? 'rgba(68, 136, 255, 0.3)' : 'rgba(100, 100, 100, 0.3)',
               border: `1px solid ${showOnMap ? '#4488ff' : '#666'}`,
@@ -191,6 +300,8 @@ export const DXClusterPanel = ({
         </div>
       ) : (
         <div
+          role="table"
+          aria-label={t('dxClusterPanel.tableLabel', { defaultValue: 'DX cluster spots' })}
           style={{
             flex: 1,
             overflow: 'auto',
@@ -198,6 +309,13 @@ export const DXClusterPanel = ({
             fontFamily: 'var(--font-mono)',
           }}
         >
+          <div className="visually-hidden" role="row">
+            <span role="columnheader">Frequency</span>
+            <span role="columnheader">Callsign</span>
+            <span role="columnheader">Mode</span>
+            {showSpotter && <span role="columnheader">Spotter</span>}
+            <span role="columnheader">Age</span>
+          </div>
           {spots.slice(0, 25).map((spot, i) => {
             // Frequency can be in MHz (string like "14.070") or kHz (number like 14070)
             let freqDisplay = '?';
@@ -218,10 +336,14 @@ export const DXClusterPanel = ({
 
             const color = getBandColor(freqMHz);
             const isHovered = matchesDXSpotPath(hoveredSpot, spot);
+            // Mode is never on the wire — DX cluster format doesn't carry it. Derive from spot.comment if
+            // it has an explicit mode keyword, otherwise fall back to frequency band-plan inference.
+            const modeInfo = classifySpotMode(spot);
 
             return (
               <div
                 key={`${spot.call}-${spot.freq}-${i}`}
+                role="row"
                 onMouseEnter={() => onHoverSpot?.(spot)}
                 onMouseLeave={() => onHoverSpot?.(null)}
                 onClick={() => {
@@ -229,7 +351,7 @@ export const DXClusterPanel = ({
                 }}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '55px 1fr auto auto',
+                  gridTemplateColumns: showSpotter ? '55px 1fr auto auto auto' : '55px 1fr auto auto',
                   gap: '6px',
                   padding: '5px 6px',
                   borderRadius: '3px',
@@ -244,8 +366,12 @@ export const DXClusterPanel = ({
                   borderLeft: isHovered ? '2px solid #4488ff' : '2px solid transparent',
                 }}
               >
-                <div style={{ color, fontWeight: '600' }}>{freqDisplay}</div>
+                <div role="cell" style={{ color, fontWeight: '600' }}>
+                  {freqDisplay}
+                  <span className="visually-hidden"> megahertz</span>
+                </div>
                 <div
+                  role="cell"
                   style={{
                     color: 'var(--text-primary)',
                     fontWeight: '700',
@@ -257,18 +383,43 @@ export const DXClusterPanel = ({
                   <CallsignLink call={spot.call} color="var(--text-primary)" fontWeight="700" />
                 </div>
                 <div
+                  role="cell"
                   style={{
-                    color: 'var(--text-muted)',
+                    color: modeInfo?.mode ? 'var(--text-secondary)' : 'var(--text-muted)',
+                    fontStyle: modeInfo?.inferred ? 'italic' : 'normal',
                     fontSize: '10px',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
                     alignSelf: 'center',
+                    minWidth: '32px',
+                    textAlign: 'right',
                   }}
+                  title={
+                    modeInfo?.mode
+                      ? modeInfo.inferred
+                        ? `${modeInfo.mode} (inferred from ${modeInfo.inferredBy}, ${modeInfo.confidence} confidence)`
+                        : `${modeInfo.mode} (from spot comment)`
+                      : 'mode unknown'
+                  }
                 >
-                  de <CallsignLink call={spot.spotter || '?'} color="var(--text-muted)" fontSize="10px" />
+                  {modeInfo?.mode || '—'}
                 </div>
+                {showSpotter && (
+                  <div
+                    role="cell"
+                    style={{
+                      color: 'var(--text-muted)',
+                      fontSize: '10px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      alignSelf: 'center',
+                    }}
+                  >
+                    de <CallsignLink call={spot.spotter || '?'} color="var(--text-muted)" fontSize="10px" />
+                  </div>
+                )}
                 <div
+                  role="cell"
+                  aria-label={formatSpotTimeAriaLabel(spot)}
                   style={{
                     color: 'var(--text-muted)',
                     fontSize: '10px',

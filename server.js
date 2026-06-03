@@ -236,6 +236,8 @@ require('./server/routes/rotator')(app, ctx);
 require('./server/routes/spots')(app, ctx);
 require('./server/routes/emcomm')(app, ctx);
 require('./server/routes/dxpeditions')(app, ctx);
+require('./server/routes/aircraft')(app, ctx);
+require('./server/routes/atc-sectors')(app, ctx);
 
 const dxclusterExports = require('./server/routes/dxcluster')(app, ctx);
 Object.assign(ctx, dxclusterExports);
@@ -263,6 +265,7 @@ require('./server/routes/meshcom')(app, ctx);
 require('./server/routes/presence')(app, ctx);
 require('./server/routes/rig-bridge')(app, ctx);
 require('./server/routes/config-routes')(app, ctx);
+require('./server/routes/geo-time')(app, ctx);
 require('./server/routes/admin')(app, ctx);
 
 // ── Catch-all for SPA ──

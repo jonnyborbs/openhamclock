@@ -98,6 +98,7 @@ const CONFIG = {
   gridSquare: locator || jsonConfig.locator || '',
   latitude: Number.isFinite(stationLat) ? stationLat : 40.7128,
   longitude: Number.isFinite(stationLon) ? stationLon : -74.006,
+  serverLocal: process.env.SERVERLOCAL === 'true' || jsonConfig.serverLocal === true,
 
   // Display preferences
   units: process.env.UNITS || jsonConfig.units || 'imperial',
@@ -117,6 +118,23 @@ const CONFIG = {
   dxLongitude: Number.isFinite(parseFloat(process.env.DX_LONGITUDE))
     ? parseFloat(process.env.DX_LONGITUDE)
     : (jsonConfig.defaultDX?.lon ?? -0.1278),
+
+  // Satellites configuration
+  satellites: {
+    celestrak: {
+      get enabled() {
+        return !(process.env.CELESTRAK_ENABLED && process.env.CELESTRAK_ENABLED === 'false');
+      },
+    },
+    spaceTrack: {
+      // (do not expose usernames/passwords to frontend)
+      _username: process.env.SPACE_TRACK_USERNAME || '',
+      _password: process.env.SPACE_TRACK_PASSWORD || '',
+      get enabled() {
+        return this._username.length > 0 && this._password.length > 0;
+      },
+    },
+  },
 
   // Feature toggles
   showSatellites: process.env.SHOW_SATELLITES !== 'false' && jsonConfig.features?.showSatellites !== false,

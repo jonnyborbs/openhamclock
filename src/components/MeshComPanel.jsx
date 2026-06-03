@@ -6,6 +6,7 @@
  * Three tabs: Nodes | Messages | Info
  */
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { ariaTabKeyDown } from '../utils/ariaTabKeyDown.js';
 import { useTranslation } from 'react-i18next';
 import { useMeshCom } from '../hooks/useMeshCom.js';
 import { useRig } from '../contexts/RigContext.jsx';
@@ -345,6 +346,7 @@ function MessagesTab({ messages, nodes, sendMessage }) {
           <button
             onClick={handleCancelReply}
             title={t('meshcomPanel.replyCancel')}
+            aria-label={t('meshcomPanel.replyCancel')}
             style={{
               background: 'none',
               border: 'none',
@@ -524,6 +526,7 @@ const TAB_IDS = ['nodes', 'messages', 'info'];
 const MeshComPanel = ({ showOnMap, onToggleMap, onSpotClick, onHoverSpot }) => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('nodes');
+  const meshcomTabRefs = useRef({});
 
   // In local/direct mode the OHC server cannot proxy send requests to rig-bridge
   // (they may be on different machines). Pass the rig-bridge URL so useMeshCom
@@ -601,6 +604,8 @@ const MeshComPanel = ({ showOnMap, onToggleMap, onSpotClick, onHoverSpot }) => {
         <button
           onClick={onToggleMap}
           title={showOnMap ? t('meshcomPanel.mapToggleHide') : t('meshcomPanel.mapToggleShow')}
+          aria-label={showOnMap ? t('meshcomPanel.mapToggleHide') : t('meshcomPanel.mapToggleShow')}
+          aria-pressed={showOnMap}
           style={{
             background: 'var(--bg-secondary)',
             border: `1px solid ${showOnMap ? 'var(--accent-red)' : 'var(--border-color)'}`,
@@ -619,6 +624,8 @@ const MeshComPanel = ({ showOnMap, onToggleMap, onSpotClick, onHoverSpot }) => {
 
       {/* Tab bar */}
       <div
+        role="tablist"
+        aria-label={t('meshcomPanel.tablistLabel', 'MeshCom tabs')}
         style={{
           display: 'flex',
           gap: '2px',
@@ -627,10 +634,17 @@ const MeshComPanel = ({ showOnMap, onToggleMap, onSpotClick, onHoverSpot }) => {
           background: 'var(--bg-secondary)',
           flexShrink: 0,
         }}
+        onKeyDown={(e) => ariaTabKeyDown(e, TAB_IDS, activeTab, setActiveTab, meshcomTabRefs)}
       >
         {TAB_IDS.map((tabId) => (
           <button
             key={tabId}
+            role="tab"
+            id={`tab-meshcom-${tabId}`}
+            aria-selected={activeTab === tabId}
+            aria-controls={`panel-meshcom-${tabId}`}
+            tabIndex={activeTab === tabId ? 0 : -1}
+            ref={(el) => (meshcomTabRefs.current[tabId] = el)}
             onClick={() => setActiveTab(tabId)}
             style={{
               padding: '3px 10px',
@@ -664,11 +678,50 @@ const MeshComPanel = ({ showOnMap, onToggleMap, onSpotClick, onHoverSpot }) => {
 
       {/* Tab content */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        {activeTab === 'nodes' && (
-          <NodesTab nodes={nodes} loading={loading} onSpotClick={onSpotClick} onHoverSpot={onHoverSpot} />
-        )}
-        {activeTab === 'messages' && <MessagesTab messages={messages} nodes={nodes} sendMessage={sendMessage} />}
-        {activeTab === 'info' && <InfoTab connected={connected} nodes={nodes} messages={messages} />}
+        <div
+          role="tabpanel"
+          id="panel-meshcom-nodes"
+          aria-labelledby="tab-meshcom-nodes"
+          hidden={activeTab !== 'nodes'}
+          style={{
+            flex: 1,
+            overflow: 'hidden',
+            display: activeTab === 'nodes' ? 'flex' : 'none',
+            flexDirection: 'column',
+          }}
+        >
+          {activeTab === 'nodes' && (
+            <NodesTab nodes={nodes} loading={loading} onSpotClick={onSpotClick} onHoverSpot={onHoverSpot} />
+          )}
+        </div>
+        <div
+          role="tabpanel"
+          id="panel-meshcom-messages"
+          aria-labelledby="tab-meshcom-messages"
+          hidden={activeTab !== 'messages'}
+          style={{
+            flex: 1,
+            overflow: 'hidden',
+            display: activeTab === 'messages' ? 'flex' : 'none',
+            flexDirection: 'column',
+          }}
+        >
+          {activeTab === 'messages' && <MessagesTab messages={messages} nodes={nodes} sendMessage={sendMessage} />}
+        </div>
+        <div
+          role="tabpanel"
+          id="panel-meshcom-info"
+          aria-labelledby="tab-meshcom-info"
+          hidden={activeTab !== 'info'}
+          style={{
+            flex: 1,
+            overflow: 'hidden',
+            display: activeTab === 'info' ? 'flex' : 'none',
+            flexDirection: 'column',
+          }}
+        >
+          {activeTab === 'info' && <InfoTab connected={connected} nodes={nodes} messages={messages} />}
+        </div>
       </div>
     </div>
   );

@@ -44,7 +44,7 @@ import useAppConfig from './hooks/app/useAppConfig';
 import useDXLocation from './hooks/app/useDXLocation';
 import useMapLayers from './hooks/app/useMapLayers';
 import useFilters from './hooks/app/useFilters';
-import useSatellitesFilters from './hooks/app/useSatellitesFilters';
+import useSatellitesFilters, { useSatelliteFilterState } from './hooks/app/useSatellitesFilters';
 import useTimeState from './hooks/app/useTimeState';
 import useFullscreen from './hooks/app/useFullscreen';
 import useScreenWakeLock from './hooks/app/useScreenWakeLock';
@@ -66,7 +66,7 @@ const App = () => {
   const { t } = useTranslation();
 
   // Core config/state
-  const { config, configLoaded, showDxWeather, classicAnalogClock, handleSaveConfig } = useAppConfig();
+  const { config, configLoaded, showDxWeather, classicAnalogClock, handleSaveConfig, serverLocal } = useAppConfig();
 
   const [showSettings, setShowSettings] = useState(false);
   const [settingsDefaultTab, setSettingsDefaultTab] = useState(null);
@@ -282,7 +282,7 @@ const App = () => {
   const { displaySleeping } = useDisplaySchedule(config);
   const { wakeLockStatus } = useScreenWakeLock(config, displaySleeping);
   const scale = useResponsiveScale();
-  const isLocalInstall = useLocalInstall();
+  const isLocalInstall = useLocalInstall(serverLocal);
 
   // Responsive breakpoint for sidebar/header behavior
   const [breakpoint, setBreakpoint] = useState(() => {
@@ -323,13 +323,41 @@ const App = () => {
 
   const propagation = usePropagation(config.location, dxLocation, config.propagation);
   const mySpots = useMySpots(config.callsign);
-  const satellites = useSatellites(config.location, config.satellite);
+  const filterState = useSatelliteFilterState();
+  const { satelliteFilters, setSatelliteFilters } = filterState;
+  const satellites = useSatellites(config.location, config.satellite, satelliteFilters);
   const localWeather = useWeather(config.location, config.allUnits);
   const dxWeather = useWeather(dxLocation, config.allUnits);
   const localAlerts = useWeatherAlerts(config.location);
   const dxAlerts = useWeatherAlerts(dxLocation);
+  // User-selectable PSK retention window (issue #991). PSKReporterPanel writes
+  // `ohc_psk_age` to localStorage and fires `ohc-psk-age-changed`; we mirror it
+  // here so the hook re-runs with the new window and both the map dots and the
+  // panel list reflect the user's choice in lockstep.
+  const [pskAge, setPskAge] = useState(() => {
+    try {
+      return parseInt(localStorage.getItem('ohc_psk_age')) || 15;
+    } catch {
+      return 15;
+    }
+  });
+  useEffect(() => {
+    const sync = () => {
+      try {
+        const v = parseInt(localStorage.getItem('ohc_psk_age'));
+        if (Number.isFinite(v) && v > 0) setPskAge(v);
+      } catch {}
+    };
+    window.addEventListener('ohc-psk-age-changed', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('ohc-psk-age-changed', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+
   const pskReporter = usePSKReporter(config.callsign, {
-    minutes: config.lowMemoryMode ? 5 : 30,
+    minutes: config.lowMemoryMode ? Math.min(pskAge, 5) : pskAge,
     enabled: pskFilters?.filterMode === 'grid' ? !!config.locator : config.callsign !== 'N0CALL',
     maxSpots: config.lowMemoryMode ? 50 : 500,
     filterMode: pskFilters?.filterMode || 'call',
@@ -355,7 +383,22 @@ const App = () => {
     }
   }, [wsjtx.dxTarget, handleDXChange]);
 
-  const { satelliteFilters, setSatelliteFilters, filteredSatellites } = useSatellitesFilters(satellites.data);
+  // ── N3FJP → DX Target ──
+  // The N3FJP Logged QSOs layer emits this on its own channel when the operator
+  // types a callsign in the logger, so propagation + beam heading follow the
+  // previewed station. handleDXChange honours the DX Lock toggle.
+  useEffect(() => {
+    const handler = (e) => {
+      const { lat, lon } = e.detail || {};
+      if (lat != null && lon != null) {
+        handleDXChange({ lat, lon });
+      }
+    };
+    window.addEventListener('ohc-n3fjp-dx-target', handler);
+    return () => window.removeEventListener('ohc-n3fjp-dx-target', handler);
+  }, [handleDXChange]);
+
+  const { filteredSatellites } = useSatellitesFilters(satellites.data, filterState);
 
   const {
     currentTime,
@@ -370,6 +413,8 @@ const App = () => {
     dxGrid,
     deSunTimes,
     dxSunTimes,
+    dxTimezone,
+    dxSolarFallback,
   } = useTimeState(config.location, dxLocation, config.timezone);
 
   const filteredPskSpots = useMemo(() => {
@@ -502,6 +547,8 @@ const App = () => {
     handleToggleDxLock,
     deSunTimes,
     dxSunTimes,
+    dxTimezone,
+    dxSolarFallback,
     localWeather,
     dxWeather,
     localAlerts,
@@ -705,6 +752,7 @@ const App = () => {
         onToggleDXNews={toggleDXNews}
         wakeLockStatus={wakeLockStatus}
         wsjtxSessionId={wsjtx.sessionId}
+        isLocalInstall={isLocalInstall}
       />
       <DXFilterManager
         filters={dxFilters}

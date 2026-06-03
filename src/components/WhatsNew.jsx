@@ -8,11 +8,11 @@ import { useState, useEffect } from 'react';
 // ─── Announcement Banner ────────────────────────────────────
 // Set to null to hide. Shown at the top of the What's New modal.
 const ANNOUNCEMENT = {
-  emoji: '🎪',
-  text: 'Mid-week update before Hamvention. Adds a new Band Activity heatmap panel, a customizable monospace font in Settings, a one-click clear for PSK Reporter spots, plus assorted fixes — including a TV-standby workaround for Display Schedule, an N1MM UDP spot-line direction fix, and a significant satellite TLE resolver overhaul that was occasionally stranding ISS and other birds.\n\nHamvention 2026 is THIS WEEKEND, May 15–17 in Dayton, Ohio! Come visit OpenHamClock in the Flea Market area — Booth #9518. Say hi, see a live demo, and grab some stickers. We look forward to seeing some of you there!',
-  color: '#ff6b35',
-  bg: 'rgba(255, 107, 53, 0.10)',
-  border: 'rgba(255, 107, 53, 0.30)',
+  emoji: '⭐',
+  text: 'Meet the core maintainers. The project has grown well past what one operator can carry alone, and four people have been doing the day-to-day heavy lifting alongside Chris this past cycle — pull requests, reviews, issue triage, translations, and a steady stream of polish. Please give them a wave on the air or a star on GitHub:\n\n• Jörg Holzapfel (DO1HOZ / @ceotjoe) — rig-bridge plugin work, Cloud Relay, MeshCom LoRa integration, the SmartSDR PTT fix, and consistent dependency / accessibility cleanup\n• Alan Hargreaves (@alanhargreaves) — useLocalInstall refactor, QRZ credentials consolidation, server reliability bug reports, and a lot of patient post-merge triage\n• Laura Batalha (@lbatalha) — accurate-timezone API, the Docker workflow split that gave dxspider-proxy and iturhfprop-service their own GHCR images, callsign-lookup picker\n• Michael R Wheeley (@MichaelWheeley) — by far the most prolific PR author this cycle: satellite OMM rewrite, the +180 Maidenhead antimeridian fix on both client and server, satellite list curation, the lang-sort CI gate, plus a long list of smaller fixes that add up\n\nThis release exists because of you four. 73 from K0CJH.',
+  color: '#ffd700',
+  bg: 'rgba(255, 215, 0, 0.10)',
+  border: 'rgba(255, 215, 0, 0.30)',
 };
 
 // ─── Changelog ──────────────────────────────────────────────
@@ -28,6 +28,89 @@ const ANNOUNCEMENT = {
 // The jump to v26 resets the scheme to something meaningful going forward.
 
 const CHANGELOG = [
+  {
+    version: '26.4.1',
+    date: '2026-06-02',
+    heading:
+      'June monthly drop, and a big one — plus a same-day hotfix at the bottom. Headline additions: a live aircraft tracking layer powered by adsb.lol, a worldwide ATC sector overlay with around 1,000 FIRs, accurate DX-target local time using real IANA timezones (with a graceful solar-time fallback when offline), and a non-map text-list panel for screen-reader and low-vision users covering DX, satellites, and POTA/SOTA/WWFF/WWBOTA activations. The long-running VOACAP propagation accuracy issue — the "vertical line through China/Russia" that several users reported — is finally fixed at the root: the antimeridian patch in the midpoint code was making adjacent cells disagree by 178° of midLon, replaced now with a proper great-circle midpoint. On the reliability side: SmartSDR PTT/MOX is detected for the first time, the Cloud Relay auth retry storm is contained, the DX Cluster proxy stays connected through quiet bands, and satellite math only runs for the birds you actually have selected. Plus a substantial accessibility push — every tab strip now follows the W3C tablist pattern with arrow-key navigation, spot lists are announced as tables, status changes go through aria-live regions, and there\'s a non-map alternative view of the map data. The same-day v26.4.1 hotfix restored the AMSAT and SatNOGS satellite fallback sources that v26.4.0 inadvertently dropped — see the last item below.',
+    features: [
+      {
+        icon: '✈️',
+        title: 'NEW: Live Aircraft Tracking Layer',
+        desc: 'A new map layer plots civilian aircraft worldwide from adsb.lol — free, no auth, no quota, global coverage in one shot. Heading-rotated SVG plane icons with a 30-second server-side cache shared across all users, viewport-filtered on the client (400 marker cap, 80 in low-memory mode), and rich popups showing aircraft type, full description, operator, registration, altitude (ft) and speed (kn). Originally launched on OpenSky Network but their 400/day anonymous quota was unworkable on Railway shared egress, so we swapped to adsb.lol for the production layer. Toggle from the layer panel.',
+      },
+      {
+        icon: '🛩️',
+        title: 'NEW: ATC Sectors Layer',
+        desc: 'Shortcut key z, default off, opacity 0.45. Lazily fetches the VATSPY-data community boundaries (about 1,000 FIRs worldwide) plus VATSpy.dat metadata for name lookup, cached server-side for 7 days and shared across all users. Popup shows the FIR name, primary Center frequency where curated (US ARTCCs, Canadian ACCs, major EU + AP centers all included inline as easy PR drop-ins), plus a LiveATC.net deep link for the full per-facility list. The sector nearest your DE location is highlighted in orange. Great for matching what you hear on HF to who has the airspace right now.',
+      },
+      {
+        icon: '🕒',
+        title: 'NEW: Accurate DX Target Local Time',
+        desc: "The DX panel's local time was previously approximated from longitude (UTC ± lon/15), which gets things like Manila or Perth visibly wrong because their civil timezones don't line up with their meridian. There's now a real IANA timezone lookup via a new /api/geo-time endpoint backed by the geo-tz 1970-data product, so the DX clock displays civil time correctly worldwide. If the server is unreachable the panel falls back to the old solar approximation and shows a small ⚠ marker next to the timezone so you know you're looking at fallback data. The toggle between UTC and local is now a real button (keyboard-focusable and screen-reader friendly). Thanks Laura (lbatalha) and Michael Wheeley for the catch.",
+      },
+      {
+        icon: '👁️‍🗨️',
+        title: 'NEW: Non-Map Text View Panel',
+        desc: 'A first-pass alternative view of the map data, intended for screen-reader and low-vision users who can\'t make sense of the visual map. Lists DX spots, satellites currently overhead (filtered to those above the horizon, sorted by elevation), and combined POTA/SOTA/WWFF/WWBOTA activations as real tables with proper semantic markup. Bearing and distance are computed against your station, and numeric cells are expanded into English for screen readers ("bearing 320 degrees NW, 10,750 km", "next pass in 12 minutes"). Available from the panel picker in the Dockable layout as "Map Data (text view)". Aircraft, lightning, aurora, and Winlink gateway integration is on the roadmap as v2 — let us know if cadence or wording can be improved.',
+      },
+      {
+        icon: '📡',
+        title: 'NEW: N3FJP Live Entry Previews',
+        desc: "If you log with N3FJP, OpenHamClock now plots the call you're currently typing in the entry window as a live preview marker on the map — dashed arc, larger marker, in your chosen preview color — without waiting for you to hit Log. The DX crosshair follows the previewed call so you can confirm the bearing and distance before committing the QSO. Previews self-expire after 5 minutes if you walk away. New Preview color picker in Settings → Integrations. Built from a working prototype by Ben (KC1UEK) — thanks Ben.",
+      },
+      {
+        icon: '♿',
+        title: 'Accessibility — Big Push This Cycle',
+        desc: 'Every tab strip in the app (Settings, MeshCom, POTA/SOTA, DX/Activate/PSK filters, PSK Reporter) now follows the W3C ARIA tablist pattern with arrow / Home / End keyboard navigation and a roving tab-index so Tab key skips inactive tabs. Spot lists in DX Cluster, Activate, and PSK Reporter are announced as proper tables with column headers and expanded English labels for frequency, age, mode and SNR cells. Status changes (NWS weather alerts, lightning proximity, WSJT-X connection state) go through aria-live regions. A global :focus-visible outline makes keyboard focus obvious. ContestPanel and DX-local-time clickable spans were converted to real buttons. First pass — explicitly calling for screen-reader testers in the umbrella issue.',
+      },
+      {
+        icon: '📋',
+        title: 'DX Cluster — Mode Column + Sort Selector',
+        desc: 'The DX Cluster panel now shows the Mode column the README has long promised. Mode is pulled from the spot comment when a recognized keyword is present (FT8, CW, SSB, RTTY, PSK and friends), otherwise inferred from frequency against band-plan sub-bands plus FT8/FT4 digital-mode islands; inferred values render italic and muted with a tooltip explaining the source. The Activate and DX Cluster panels also gained a Time / Freq / Call sort selector in the header so you can re-order without leaving the panel. A small "de" pill collapses the column grid by hiding the spotter to double spot density when you want it tighter.',
+      },
+      {
+        icon: '📊',
+        title: 'X-Ray Flux History + Selectable PSK Retention',
+        desc: 'The X-Ray Flux panel has a new 6 / 12 / 24 / 48 hour history selector and the peak rating recalculates per window. The PSK Reporter panel header gained a 2 / 5 / 10 / 15 minute retention dropdown — useful for pseudo-beacon use cases where you want a shorter window than the previous 15-minute default. Both choices persist to localStorage. PSK retention changes signal across the app so the panel list and the map dots stay in sync. Thanks K3JZD and HoserRob.',
+      },
+      {
+        icon: '🔍',
+        title: 'Settings — Callsign Lookup Picker',
+        desc: 'Station Settings now has a Callsign Lookup dropdown letting you pick QRZ.com, HamQTH, or QRZCQ as the destination when you click a callsign anywhere in OpenHamClock. Both callsign-click paths (callsign links and the QRZ toggle in the header) route through it. Default remains QRZ.com. Thanks Laura (lbatalha).',
+      },
+      {
+        icon: '🛰️',
+        title: 'Satellites — Performance + Hide-UI Fix',
+        desc: "Position, orbit, and footprint math now only runs for the satellites you've actually selected in Settings (the common case), not the full tracked list — meaningful CPU savings on Raspberry Pi and lower-end devices. The minimized satellite info dialog now actually expands back out cleanly. The satellite status box now respects the Hide UI toggle (the box is appended to the map container, not the Leaflet control container, so it was being missed by the original UI-hide rule). Plus the latest OMM data-product refresh with active ham birds (AO-123, SO-125, QMR-KWT-2) and current weather satellites.",
+      },
+      {
+        icon: '🐛',
+        title: 'HOTFIX: VOACAP Propagation Accuracy (the real root cause)',
+        desc: "Several users reported a perfectly straight vertical line through China and Russia where adjacent cells suddenly disagreed on propagation. After multiple cosmetic rounds (alpha taper, 3×3 spatial blur — both kept as defensive smoothing), the actual bug turned out to be in the server's midpoint code: midLon was computed as a longitude average with a sloppy antimeridian patch that, for a DE in the Americas, flipped at exactly lon=106 for every latitude and produced a 178° midLon jump between adjacent cells — which fed wildly different solar zenith and ionospheric inputs into MUF/LUF on either side of an arbitrary geographic line. Replaced with a proper great-circle midpoint (continuous everywhere, short-path automatically). Affects /api/propagation, /api/propagation/heatmap, /api/propagation/mufmap. Separately, the azimuthal projection now subdivides each propagation cell into a 20-vertex polygon so rectangles in lat/lon actually curve correctly on the disc instead of rendering blocky and distorted near the antipode.",
+      },
+      {
+        icon: '🐛',
+        title: 'DX Cluster — Proxy Reliability + HamQTH Fallback',
+        desc: 'Two fixes after an 18-hour proxy log triage: (1) the DXSpider proxy used to disconnect during quiet overnight bands because its 60-second socket timeout was shorter than the upstream keepalive — increased the timeout to 5 minutes, tightened keepalive to 60 seconds, and we now destroy zombie sockets so the activity watchdog can actually own failover. Auth detection was also missing because the DXSpider login prompt has no trailing newline; we now mark the session authenticated on the first spot received. (2) The /api/dxcluster/paths endpoint had one AbortController shared between the proxy fetch and the HamQTH fallback fetch, so when the proxy hung to its timeout the fallback ran with an already-aborted signal and rejected instantly. Each upstream now gets its own controller.',
+      },
+      {
+        icon: '🐛',
+        title: 'Rig-Bridge Cloud Relay — Auth Storm + SmartSDR PTT',
+        desc: 'Two rig-bridge fixes. The Cloud Relay client now permanently halts its push timer, long-poll loop, and immediate-push timer on a 401/403 instead of retrying 1-2 times per second forever, with a clear user-facing instruction to re-run Connect Cloud Relay and restart rig-bridge. The corresponding server warnings are rate-limited to once per 5 minutes per session ID prefix, and the rate-limit map is now pruned on the existing 5-minute cleanup pass so it can\'t grow unbounded. Separately, the SmartSDR plugin now subscribes to "radio all" to receive the interlock state object, which is where the FlexRadio API actually reports live transmit state — so MOX/PTT is detected for the first time and the On Air indicator switches RX → TX when you key up. Thanks Jörg (ceotjoe) and k0otc.',
+      },
+      {
+        icon: '🐳',
+        title: 'Docker / GHCR + Security Bumps',
+        desc: 'Docker workflows split into three per-image workflows (openhamclock, dxspider-proxy, iturhfprop-service) so the two microservices now publish their own GHCR images — users no longer have to clone-and-build the helpers, they can pull ghcr.io/accius/openhamclock/dxspider-proxy and /iturhfprop-service directly. Container docs centralized in docs/DOCKER.md with the new pull URLs. Thanks Laura (lbatalha). Dependabot security alerts cleaned up in the same window: axios 1.15→1.16 (prototype pollution / MITM / proxy bypass), ws 8.19→8.21 (uninitialized memory disclosure), express 4.22.1→4.22.2 + qs + body-parser (DoS via null entries in comma-format arrays), and tmp 0.2.5→0.2.7 (path traversal in dev tooling).',
+      },
+      {
+        icon: '🛰️',
+        title: 'v26.4.1 HOTFIX: Restore AMSAT + SatNOGS Satellite Fallback Sources',
+        desc: 'The v26.4.0 OMM rewrite consolidated to CelesTrak and Space-Track only, dropping the AMSAT and SatNOGS feeds that v26.3.3 used. When the hosted production server deployed on 2026-06-02, its Railway egress IPs were silently dropped at the TCP level by CelesTrak (the same intermittent block that has hit cloud hosts before) and with no alternate sources, zero satellites resolved for hosted users. Self-hosted installs were unaffected because their home or LAN IPs reach CelesTrak fine. The v26.4.1 hotfix ships a new server-side TLE-to-OMM converter (server/utils/tle-to-omm.js) that lets the OMM resolver consume the AMSAT nasabare.txt bulk feed plus per-NORAD SatNOGS DB lookups, wired in as state-machine fallback stages that activate when CelesTrak times out or is unreachable. AMSAT covers the 23 amateur sats; SatNOGS picks up the remaining 17 (weather plus active). Self-hosted installs benefit too — the resolver now has three independent upstreams instead of one.',
+      },
+    ],
+  },
   {
     version: '26.3.3',
     date: '2026-05-12',
@@ -1432,136 +1515,138 @@ export default function WhatsNew({ showWhatsNew }) {
           animation: 'whatsNewSlideIn 0.3s ease-out',
         }}
       >
-        {/* Header */}
-        <div
-          style={{
-            padding: '24px 24px 16px',
-            borderBottom: '1px solid var(--border-color, #333)',
-            textAlign: 'center',
-          }}
-        >
-          <div
-            style={{
-              fontSize: '13px',
-              fontFamily: 'var(--font-mono)',
-              color: 'var(--accent-cyan, #00ffcc)',
-              letterSpacing: '0.1em',
-              textTransform: 'uppercase',
-              marginBottom: '8px',
-            }}
-          >
-            OpenHamClock v{entry.version}
-          </div>
-          <div
-            style={{
-              fontSize: '20px',
-              fontWeight: '700',
-              color: 'var(--text-primary, #e0e0e0)',
-            }}
-          >
-            What's New
-          </div>
-          <div
-            style={{
-              fontSize: '13px',
-              color: 'var(--text-muted, #888)',
-              marginTop: '6px',
-            }}
-          >
-            {entry.heading}
-          </div>
-          {ANNOUNCEMENT && (
-            <div
-              style={{
-                fontSize: '13px',
-                fontWeight: '600',
-                color: ANNOUNCEMENT.color,
-                marginTop: '12px',
-                padding: '10px 14px',
-                background: ANNOUNCEMENT.bg,
-                borderRadius: '8px',
-                border: `1px solid ${ANNOUNCEMENT.border}`,
-                lineHeight: '1.5',
-                textAlign: 'center',
-                whiteSpace: 'pre-line',
-              }}
-            >
-              <span style={{ fontSize: '18px', display: 'block', marginBottom: '4px' }}>{ANNOUNCEMENT.emoji}</span>
-              {ANNOUNCEMENT.text}
-            </div>
-          )}
-          {entry.notice && (
-            <div
-              style={{
-                fontSize: '12px',
-                color: 'var(--accent-amber, #ffb800)',
-                marginTop: '10px',
-                padding: '8px 12px',
-                background: 'rgba(255, 184, 0, 0.08)',
-                borderRadius: '6px',
-                border: '1px solid rgba(255, 184, 0, 0.2)',
-                lineHeight: '1.5',
-              }}
-            >
-              {entry.notice}
-            </div>
-          )}
-        </div>
-
-        {/* Feature list — scrollable */}
+        {/* Body — one big scrollable region: header + announcement + features */}
         <div
           style={{
             overflowY: 'auto',
-            padding: '16px 24px',
             flex: 1,
             WebkitOverflowScrolling: 'touch',
             overscrollBehavior: 'contain',
           }}
         >
-          {entry.features.map((f, i) => (
+          <div
+            style={{
+              padding: '24px 24px 16px',
+              textAlign: 'center',
+            }}
+          >
             <div
-              key={i}
               style={{
-                display: 'flex',
-                gap: '12px',
-                padding: '10px 0',
-                borderBottom: i < entry.features.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                fontSize: '13px',
+                fontFamily: 'var(--font-mono)',
+                color: 'var(--accent-cyan, #00ffcc)',
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                marginBottom: '8px',
               }}
             >
+              OpenHamClock v{entry.version}
+            </div>
+            <div
+              style={{
+                fontSize: '20px',
+                fontWeight: '700',
+                color: 'var(--text-primary, #e0e0e0)',
+              }}
+            >
+              What's New
+            </div>
+            <div
+              style={{
+                fontSize: '13px',
+                color: 'var(--text-muted, #888)',
+                marginTop: '6px',
+              }}
+            >
+              {entry.heading}
+            </div>
+            {ANNOUNCEMENT && (
               <div
                 style={{
-                  fontSize: '20px',
-                  lineHeight: '28px',
-                  flexShrink: 0,
-                  width: '28px',
-                  textAlign: 'center',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  color: ANNOUNCEMENT.color,
+                  marginTop: '12px',
+                  padding: '10px 14px',
+                  background: ANNOUNCEMENT.bg,
+                  borderRadius: '8px',
+                  border: `1px solid ${ANNOUNCEMENT.border}`,
+                  lineHeight: '1.5',
+                  textAlign: 'left',
+                  whiteSpace: 'pre-line',
                 }}
               >
-                {f.icon}
+                <span style={{ fontSize: '18px', display: 'block', marginBottom: '4px', textAlign: 'center' }}>
+                  {ANNOUNCEMENT.emoji}
+                </span>
+                {ANNOUNCEMENT.text}
               </div>
-              <div>
+            )}
+            {entry.notice && (
+              <div
+                style={{
+                  fontSize: '12px',
+                  color: 'var(--accent-amber, #ffb800)',
+                  marginTop: '10px',
+                  padding: '8px 12px',
+                  background: 'rgba(255, 184, 0, 0.08)',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(255, 184, 0, 0.2)',
+                  lineHeight: '1.5',
+                }}
+              >
+                {entry.notice}
+              </div>
+            )}
+          </div>
+
+          {/* Feature list */}
+          <div style={{ padding: '0 24px 16px' }}>
+            {entry.features.map((f, i) => (
+              <div
+                key={i}
+                style={{
+                  display: 'flex',
+                  gap: '12px',
+                  padding: '10px 0',
+                  borderBottom: i < entry.features.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none',
+                }}
+              >
                 <div
                   style={{
-                    fontWeight: '600',
-                    fontSize: '14px',
-                    color: 'var(--text-primary, #e0e0e0)',
-                    marginBottom: '3px',
+                    fontSize: '20px',
+                    lineHeight: '28px',
+                    flexShrink: 0,
+                    width: '28px',
+                    textAlign: 'center',
                   }}
                 >
-                  {f.title}
+                  {f.icon}
                 </div>
-                <div
-                  style={{
-                    fontSize: '12px',
-                    lineHeight: '1.5',
-                    color: 'var(--text-muted, #999)',
-                  }}
-                >
-                  {f.desc}
+                <div>
+                  <div
+                    style={{
+                      fontWeight: '600',
+                      fontSize: '14px',
+                      color: 'var(--text-primary, #e0e0e0)',
+                      marginBottom: '3px',
+                    }}
+                  >
+                    {f.title}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '12px',
+                      lineHeight: '1.5',
+                      color: 'var(--text-muted, #999)',
+                    }}
+                  >
+                    {f.desc}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
         {/* Footer */}

@@ -25,7 +25,6 @@ import {
 import { createTerminator } from '../utils/terminator.js';
 import { getAprsSymbolIcon } from '../utils/aprs-symbols.js';
 import { getAllLayers } from '../plugins/layerRegistry.js';
-import useLocalInstall from '../hooks/app/useLocalInstall.js';
 import PluginLayer from './PluginLayer.jsx';
 import AzimuthalMap from './AzimuthalMap.jsx';
 import { DXNewsTicker } from './DXNewsTicker.jsx';
@@ -93,6 +92,7 @@ const POPUP_AUTO_CLOSE_MS = 20_000;
 
 export const WorldMap = ({
   config,
+  isLocalInstall,
   deLocation,
   dxLocation,
   onDXChange,
@@ -432,7 +432,6 @@ export const WorldMap = ({
 
   // Plugin system refs and state
   const [pluginLayerStates, setPluginLayerStates] = useState({});
-  const isLocalInstall = useLocalInstall();
 
   const [integrationsRev, setIntegrationsRev] = useState(0);
 
@@ -1318,7 +1317,7 @@ export const WorldMap = ({
           iconAnchor: [14, 14],
         });
         const m = L.marker([sunPos.lat, sunPos.lon + offset], { icon: sunIcon })
-          .bindPopup(`<b>Subsolar Point</b><br>${sunPos.lat.toFixed(2)}°, ${sunPos.lon.toFixed(2)}°`)
+          .bindPopup(`<b>Subsolar Point</b><br>${sunPos.lat.toFixed(1)}°, ${sunPos.lon.toFixed(1)}°`)
           .addTo(map);
         sunMarkerRef.current.push(m);
       }
@@ -1338,7 +1337,7 @@ export const WorldMap = ({
           iconAnchor: [12, 12],
         });
         const m = L.marker([moonPos.lat, moonPos.lon + offset], { icon: moonIcon })
-          .bindPopup(`<b>Sublunar Point</b><br>${moonPos.lat.toFixed(2)}°, ${moonPos.lon.toFixed(2)}°`)
+          .bindPopup(`<b>Sublunar Point</b><br>${moonPos.lat.toFixed(1)}°, ${moonPos.lon.toFixed(1)}°`)
           .addTo(map);
         moonMarkerRef.current.push(m);
       }

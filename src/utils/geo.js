@@ -104,7 +104,10 @@ export const latLonToMaidenhead = ({ lat, lon }, precision = 6) => {
   if (lon < -180 || lon > 180) throw new Error('invalid longitude, it should be between -180 and 180');
 
   const latNorm = lat + 90;
-  const lonNorm = lon + 180;
+
+  // Handle case where longitude is given as +180, which should be treated as -180,
+  // by normalizing to 0-360 range first then applying modulus again to get back to -180..180 range.
+  const lonNorm = (((lon + 180) % 360) + 360) % 360;
 
   // Field (2 chars): 20° lon x 10° lat
   const field1 = String.fromCharCode(65 + Math.floor(lonNorm / 20)); // A-R
@@ -169,7 +172,7 @@ export const calculateDistance = (lat1, lon1, lat2, lon2) => {
  * @returns {string} Formatted distance with unit label (e.g. "1,234 km" or "767 mi")
  */
 export const formatDistance = (km, units) => {
-  if (units === 'imperial') {
+  if (units !== 'metric') {
     const mi = km * 0.621371;
     return `${Math.round(mi).toLocaleString()} mi`;
   }
@@ -178,6 +181,8 @@ export const formatDistance = (km, units) => {
 
 /**
  * Get subsolar point (position where sun is directly overhead)
+ * Note, this is a crude approximation but within estimated +/- 0.75 deg lat, +/- 1.0 deg lon,
+ * variation within this range is seasonal
  */
 export const getSunPosition = (date) => {
   const dayOfYear = Math.floor((date - new Date(date.getFullYear(), 0, 0)) / 86400000);
@@ -386,10 +391,10 @@ export const calculateSunTimes = (lat, lon, date) => {
 };
 
 /**
- * Normalize longitude to -180..180 range
+ * Normalize longitude to [−180,+180) degrees
  */
 export const normalizeLon = (lon) => {
-  while (lon > 180) lon -= 360;
+  while (lon >= 180) lon -= 360;
   while (lon < -180) lon += 360;
   return lon;
 };
@@ -532,6 +537,51 @@ export const classifyTwilight = (solarElevationDeg) => {
   return 'night';
 };
 
+/**
+ * Calculate an approximate "solar timezone" from longitude.
+ * Returns a synthetic IANA-compatible zone string (Etc/GMT∓N)
+ * and the offset in hours, suitable as a fallback when a real
+ * IANA timezone lookup (geo-tz API) is unavailable.
+ *
+ * Etc/GMT uses INVERTED sign convention:
+ *   Etc/GMT-5  = UTC+5  (5 hours EAST of UTC)
+ *   Etc/GMT+5  = UTC-5  (5 hours WEST  of UTC)
+ *
+ * @param {number} lon - Longitude in degrees (-180 to 180)
+ * @returns {{ tz: string | null, offsetHrs: number | null }}
+ *   tz: IANA zone string (e.g. "Etc/GMT-5") or null if lon is invalid
+ *   offsetHrs: rounded hour offset (e.g. 5 for +5h) or null
+ */
+export const calculateSolarTimezone = (lon) => {
+  if (lon == null || !Number.isFinite(lon)) return { tz: null, offsetHrs: null };
+
+  const offsetHrs = Math.round(lon / 15);
+  // Etc/GMT sign is inverted: positive offset → minus sign
+  const sign = offsetHrs >= 0 ? '-' : '+';
+  const tz = `Etc/GMT${sign}${Math.abs(offsetHrs)}`;
+  return { tz, offsetHrs };
+};
+
+/**
+ * Format an Etc/GMT timezone string for human display.
+ * The timezone offset sign convention is inverted from ISO 8601 notation,
+ * so this flips the sign (e.g. Etc/GMT+5 → "UTC-5").
+ * Also normalizes Etc/GMT (no offset) to plain "UTC".
+ *
+ * @param {string|null} tz - The Etc/GMT timezone string (e.g. "Etc/GMT+5")
+ * @returns {string|null} Human-readable offset (e.g. "UTC-5") or the original
+ *   value unchanged if it doesn't match the Etc/GMT pattern
+ */
+export const formatGmtUtc = (tz) => {
+  if (tz == null) return tz;
+  if (tz === 'Etc/GMT') return 'UTC';
+  const match = tz.match(/^Etc\/GMT([+-])(\d+)$/);
+  if (!match) return tz;
+  const [, sign, offset] = match;
+  const flipped = sign === '+' ? '-' : '+';
+  return `UTC${flipped}${offset}`;
+};
+
 export default {
   validateGridLocator,
   maidenheadToLatLon,
@@ -550,5 +600,7 @@ export default {
   normalizeLon,
   calculateSolarElevation,
   classifyTwilight,
+  calculateSolarTimezone,
+  formatGmtUtc,
   WORLD_COPY_OFFSETS,
 };

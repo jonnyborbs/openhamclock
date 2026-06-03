@@ -2,7 +2,7 @@
  * Classic HamClock-style layout — faithful WB0OEW HamClock recreation
  */
 import React, { useState, useEffect, useCallback } from 'react';
-import { DXNewsTicker, WorldMap } from '../components';
+import { DXNewsTicker, WorldMap, DXLocalTime } from '../components';
 import { DXGridInput } from '../components/DXGridInput.jsx';
 import { DXFavorites } from '../components/DXFavorites.jsx';
 import { getBandColor, getBandColorForBand } from '../utils';
@@ -104,6 +104,10 @@ export default function ClassicLayout(props) {
     dxGrid,
     deSunTimes,
     dxSunTimes,
+    dxTimezone,
+    dxTimezoneApiError,
+    dxSolarFallback,
+    currentTime,
     tempUnit,
     setTempUnit,
     showDxWeather,
@@ -138,6 +142,7 @@ export default function ClassicLayout(props) {
     dxpeditions,
     filteredPotaSpots,
     filteredSotaSpots,
+    isLocalInstall,
   } = props;
 
   const mapLegendBands = ['160', '80', '40', '30', '20', '17', '15', '12', '10', '8', '6', '4'];
@@ -899,6 +904,9 @@ export default function ClassicLayout(props) {
                     </>
                   )}
                 </div>
+                {dxLocation.lat != null && dxLocation.lon != null && (
+                  <DXLocalTime currentTime={currentTime} timezone={dxTimezone} solarTimezone={dxSolarFallback} />
+                )}
                 <div style={{ marginTop: '6px', color: '#ff8800', fontSize: '18px', fontWeight: '600' }}>
                   <span>{bearing != null ? `${bearing}°` : '--°'}</span>
                   <span style={{ marginLeft: '12px' }}>{distStr}</span>
@@ -912,6 +920,7 @@ export default function ClassicLayout(props) {
         <div style={{ position: 'relative', overflow: 'hidden' }}>
           <WorldMap
             config={config}
+            isLocalInstall={isLocalInstall}
             deLocation={config.location}
             dxLocation={dxLocation}
             onDXChange={handleDXChange}
@@ -1429,6 +1438,7 @@ export default function ClassicLayout(props) {
         <div style={{ flex: 1, position: 'relative' }}>
           <WorldMap
             config={config}
+            isLocalInstall={isLocalInstall}
             deLocation={config.location}
             dxLocation={dxLocation}
             onDXChange={handleDXChange}
@@ -2103,6 +2113,7 @@ export default function ClassicLayout(props) {
         <div style={{ flex: 1, position: 'relative' }}>
           <WorldMap
             config={config}
+            isLocalInstall={isLocalInstall}
             deLocation={config.location}
             dxLocation={dxLocation}
             onDXChange={handleDXChange}

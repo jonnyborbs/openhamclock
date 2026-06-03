@@ -2,7 +2,7 @@
  * ActivatePanel Component
  * Displays <whatever> on the Air activations with ON/OFF toggle
  */
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import CallsignLink from './CallsignLink.jsx';
 import { IconSearch, IconRefresh, IconMap, IconTag } from './Icons.jsx';
 
@@ -27,7 +27,37 @@ export const ActivatePanel = ({
   const isStale = staleMinutes !== null && staleMinutes >= 5;
   const checkedTime = lastChecked ? new Date(lastChecked).toISOString().substr(11, 5) + 'z' : '';
   const filterActiveColor = '#ffaa00';
-  const spots = filteredData ? filteredData : data;
+  const rawSpots = filteredData ? filteredData : data;
+
+  // Sort field (#998). Default 'time' preserves the upstream feed order
+  // (newest first for POTA/SOTA/WWFF). All activation panels share one key
+  // — sorting POTA by freq but SOTA by time tends to be more confusing than
+  // useful in practice; revisit if anyone asks.
+  const [sortField, setSortField] = useState(() => {
+    try {
+      return localStorage.getItem('ohc_activations_sort') || 'time';
+    } catch {
+      return 'time';
+    }
+  });
+  const handleSortChange = (v) => {
+    setSortField(v);
+    try {
+      localStorage.setItem('ohc_activations_sort', v);
+    } catch {}
+  };
+
+  const spots = useMemo(() => {
+    if (!rawSpots) return rawSpots;
+    if (sortField === 'time') return rawSpots; // upstream order
+    const copy = [...rawSpots];
+    if (sortField === 'freq') {
+      copy.sort((a, b) => (parseFloat(a.freq) || 0) - (parseFloat(b.freq) || 0));
+    } else if (sortField === 'call') {
+      copy.sort((a, b) => (a.call || '').localeCompare(b.call || ''));
+    }
+    return copy;
+  }, [rawSpots, sortField]);
 
   let filterCount = 0;
   if (filters?.bands?.length) filterCount += filters.bands.length;
@@ -94,6 +124,26 @@ export const ActivatePanel = ({
         </span>
 
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+          <select
+            value={sortField}
+            onChange={(e) => handleSortChange(e.target.value)}
+            title="Sort spots"
+            aria-label="Sort spots"
+            style={{
+              background: 'var(--bg-tertiary)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '3px',
+              fontSize: '10px',
+              padding: '1px 4px',
+              cursor: 'pointer',
+              maxWidth: '70px',
+            }}
+          >
+            <option value="time">Time</option>
+            <option value="freq">Freq</option>
+            <option value="call">Call</option>
+          </select>
           {typeof onOpenFilters === 'function' && (
             <button
               onClick={onOpenFilters}
@@ -120,6 +170,10 @@ export const ActivatePanel = ({
               title={
                 showLabelsOnMap ? `Hide ${mapDefs.name} callsigns on map` : `Show ${mapDefs.name} callsigns on map`
               }
+              aria-label={
+                showLabelsOnMap ? `Hide ${mapDefs.name} callsigns on map` : `Show ${mapDefs.name} callsigns on map`
+              }
+              aria-pressed={showLabelsOnMap}
               style={{
                 background: showLabelsOnMap ? 'rgba(255, 170, 0, 0.22)' : 'rgba(100, 100, 100, 0.3)',
                 border: `1px solid ${showLabelsOnMap ? '#ffaa00' : '#666'}`,
@@ -138,8 +192,9 @@ export const ActivatePanel = ({
           <button
             onClick={onToggleMap}
             title={showOnMap ? `Hide ${mapDefs.name} activators on map` : `Show ${mapDefs.name} activators on map`}
+            aria-label={showOnMap ? `Hide ${mapDefs.name} activators on map` : `Show ${mapDefs.name} activators on map`}
+            aria-pressed={showOnMap}
             style={{
-              // background: showOnMap ? 'rgba(68, 204, 68, 0.3)' : 'rgba(100, 100, 100, 0.3)',
               background: showOnMap ? 'rgba(255, 170, 0, 0.22)' : 'rgba(100, 100, 100, 0.3)',
               border: `1px solid ${showOnMap ? '#ffaa00' : '#666'}`,
               color: showOnMap ? '#ffaa00' : '#888',
@@ -161,7 +216,17 @@ export const ActivatePanel = ({
             <div className="loading-spinner" />
           </div>
         ) : spots && spots.length > 0 ? (
-          <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)' }}>
+          <div
+            role="table"
+            aria-label={`${mapDefs.label || 'Activation'} spots`}
+            style={{ fontSize: '10px', fontFamily: 'var(--font-mono)' }}
+          >
+            <div className="visually-hidden" role="row">
+              <span role="columnheader">Callsign</span>
+              <span role="columnheader">Reference</span>
+              <span role="columnheader">Frequency</span>
+              <span role="columnheader">Time</span>
+            </div>
             {spots.map((spot, i) => (
               <div
                 key={`${spot.call}-${spot.ref}-${i}`}
@@ -171,6 +236,7 @@ export const ActivatePanel = ({
                 }}
               >
                 <div
+                  role="row"
                   style={{
                     display: 'grid',
                     gridTemplateColumns: '62px 72px 58px 1fr',
@@ -184,6 +250,7 @@ export const ActivatePanel = ({
                   }}
                 >
                   <span
+                    role="cell"
                     style={{
                       color: mapDefs.color,
                       fontWeight: '600',
@@ -195,6 +262,7 @@ export const ActivatePanel = ({
                     <CallsignLink call={spot.call} color={mapDefs.color} fontWeight="600" />
                   </span>
                   <span
+                    role="cell"
                     style={{
                       color: 'var(--text-muted)',
                       overflow: 'hidden',
@@ -205,15 +273,22 @@ export const ActivatePanel = ({
                   >
                     {spot.ref}
                   </span>
-                  <span style={{ color: 'var(--accent-cyan)', textAlign: 'right' }} title={`${spot.freq} ${spot.mode}`}>
+                  <span
+                    role="cell"
+                    style={{ color: 'var(--accent-cyan)', textAlign: 'right' }}
+                    title={`${spot.freq} ${spot.mode}`}
+                  >
                     {(() => {
                       if (!spot.freq) return '?';
                       const freqVal = parseFloat(spot.freq);
                       // Already in MHz in the hook
                       return freqVal.toFixed(3);
                     })()}
+                    <span className="visually-hidden"> megahertz</span>
                   </span>
-                  <span style={{ color: 'var(--text-muted)', textAlign: 'right', fontSize: '9px' }}>{spot.time}</span>
+                  <span role="cell" style={{ color: 'var(--text-muted)', textAlign: 'right', fontSize: '9px' }}>
+                    {spot.time}
+                  </span>
                 </div>
                 {spot.comments?.length > 0 && (
                   <div

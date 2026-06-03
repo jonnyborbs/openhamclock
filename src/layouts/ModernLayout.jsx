@@ -66,6 +66,8 @@ export default function ModernLayout(props) {
     handleToggleDxLock,
     deSunTimes,
     dxSunTimes,
+    dxTimezone,
+    dxSolarFallback,
     showDxWeather,
     currentTime,
     classicAnalogClock,
@@ -125,7 +127,6 @@ export default function ModernLayout(props) {
   const { tuneTo } = useRig();
   const { breakpoint } = useBreakpoint();
   const [showDxccSelect, setShowDxccSelect] = useState(false);
-  const [showDXLocalTime, setShowDXLocalTime] = useState(false);
   const isMobile = breakpoint === 'mobile';
   const isTablet = breakpoint === 'tablet';
 
@@ -148,6 +149,7 @@ export default function ModernLayout(props) {
     <div style={{ position: 'relative', borderRadius: '6px', overflow: 'hidden', ...style }}>
       <WorldMap
         config={config}
+        isLocalInstall={isLocalInstall}
         deLocation={config.location}
         dxLocation={dxLocation}
         onDXChange={handleDXChange}
@@ -311,13 +313,9 @@ export default function ModernLayout(props) {
         {showDxccSelect && (
           <DXCCSelect dxLocked={dxLocked} onDXChange={handleDXChange} style={{ margin: '5px 0 10px 0' }} />
         )}
-        <DXLocalTime
-          currentTime={currentTime}
-          dxLocation={dxLocation}
-          isLocal={showDXLocalTime}
-          onToggle={() => setShowDXLocalTime((prev) => !prev)}
-          marginTop="8px"
-        />
+        {dxLocation.lat != null && dxLocation.lon != null && (
+          <DXLocalTime currentTime={currentTime} timezone={dxTimezone} solarTimezone={dxSolarFallback} />
+        )}
         <div style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '8px' }}>
           {dxLocation.lat.toFixed(4)}°, {dxLocation.lon.toFixed(4)}°
         </div>

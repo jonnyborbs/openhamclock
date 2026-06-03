@@ -62,8 +62,8 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
 
   const fetchSatellites = async () => {
     try {
-      const response = await fetch('/api/satellites/tle');
-      const data = await response.json();
+      const response = await fetch('/api/satellites/data');
+      const { timestamp: newTimestamp, data } = await response.json();
 
       const satArray = Object.keys(data).map((name) => {
         const satData = data[name];
@@ -181,7 +181,7 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
       };
 
       // Prevent map from capturing events on the window
-      win.addEventListener('wheel', handleWheelPropagation);
+      win.addEventListener('wheel', handleWheelPropagation, { passive: true });
       win.addEventListener('mousedown', handleMouseDownPropagation);
       win.addEventListener('mousemove', handleMouseMovePropagation);
       win.addEventListener('mouseup', handleMouseUpPropagation);
@@ -206,27 +206,22 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
     const activeSats = satellites.filter((s) => selectedSats.includes(s.name));
 
     const titleBar = `
-      <div class="sat-data-window-title" style="display:flex; justify-content:space-between; align-items:center;
-                  cursor:grab; user-select:none;
-                  padding: 8px 10px; border-bottom: 1px solid var(--border-color); background: var(--bg-tertiary);">
-        <span data-drag-handle="true" style="font-family: var(--font-mono); font-size:13px; font-weight:700; color: var(--accent-blue); letter-spacing:0.05em;">
-          🛰 ${activeSats.length} ${activeSats.length !== 1 ? t('station.settings.satellites.name_plural') : t('station.settings.satellites.name')}
+      <div class="sat-data-window-title"
+        style="display:flex; justify-content:space-between; align-items:center; cursor:grab; user-select:none; border-bottom:1px solid var(--border-color); background:var(--bg-tertiary);
+          ${winMinimized ? `padding:2px 6px; width:fit-content; min-width:0; max-width:fit-content; height:fit-content; min-height:0; flex:none;` : `padding:8px 10px;`}">
+        <span data-drag-handle="true" style="font-family:var(--font-mono); font-size:13px; font-weight:700; color:var(--accent-blue); letter-spacing:0.05em;">
+          🛰 ${!winMinimized ? `${activeSats.length} ${activeSats.length !== 1 ? t('station.settings.satellites.name_plural') : t('station.settings.satellites.name')}` : ''}
         </span>
-        <button class="sat-data-window-minimize"
-                onclick="window.__satWinToggleMinimize()"
-                title="${winMinimized ? 'Expand' : 'Minimize'}"
-          style="background:none; border:none; color: var(--text-secondary); cursor:pointer;
-                       font-size:10px; line-height:1; padding:2px 4px; margin:0;">
+        <button class="sat-data-window-minimize" onclick="window.__satWinToggleMinimize()" title="${winMinimized ? 'Expand' : 'Minimize'}" aria-label="${winMinimized ? 'Expand' : 'Minimize'}" aria-pressed="${winMinimized}" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; font-size:10px; line-height:1; padding:2px 4px; margin:0;">
           ${winMinimized ? '▶' : '▼'}
         </button>
-      </div>
-    `;
+      </div>`;
 
     const clearAllBtn = `
       <div style="margin: 10px 12px 8px; display: flex; flex-direction: column; align-items: center; gap: 5px;">
         <button onclick="sessionStorage.removeItem('selected_satellites'); window.location.reload();"
           style="background: var(--bg-primary); border: 1px solid var(--accent-red); color: var(--accent-red); cursor: pointer;
-                       padding: 4px 10px; font-size: 10px; border-radius: 3px; font-weight: bold; width: 100%;">
+            padding: 4px 10px; font-size: 10px; border-radius: 3px; font-weight: bold; width: 100%;">
           ${t('station.settings.satellites.clearFootprints')}
         </button>
         <span style="font-size: 9px; color: var(--text-muted);">${t('station.settings.satellites.dragTitle')}</span>
@@ -236,7 +231,16 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
     if (winMinimized) {
       win.style.maxHeight = '';
       win.style.overflowY = 'hidden';
+
+      // shrink to minimal size
+      win.style.width = 'fit-content';
+      win.style.minWidth = 'unset';
+      win.style.maxWidth = 'fit-content';
+      win.style.height = 'fit-content';
+      win.style.minHeight = 'unset';
+
       win.innerHTML = `${titleBar}<div class="sat-data-window-content"></div>`;
+
       addMinimizeToggle(win, 'sat-data-window', {
         contentClassName: 'sat-data-window-content',
         buttonClassName: 'sat-data-window-minimize',
@@ -245,11 +249,32 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
         persist: false,
         manageButtonEvents: true,
       });
+
       return;
     }
 
+    // reset to default size constraints
+    win.style.width = '260px';
+    win.style.minWidth = '';
+    win.style.maxWidth = '';
+    win.style.height = '';
+    win.style.minHeight = '';
     win.style.maxHeight = 'calc(100% - 80px)';
     win.style.overflowY = 'auto';
+
+    // --- SAFE HELPERS ---------------------------------------------------------
+    const safeNum = (v, digits = null) => {
+      if (!Number.isFinite(v)) return '';
+      return digits === null ? v : v.toFixed(digits);
+    };
+
+    const safeStr = (v) =>
+      String(v ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;');
+
+    const safeArr = (v) => (Array.isArray(v) ? v : []);
+    // --------------------------------------------------------------------------
 
     win.innerHTML =
       titleBar +
@@ -257,9 +282,11 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
       clearAllBtn +
       `<div style="padding: 0 12px 8px;">` +
       activeSats
-        .map((sat) => {
+        .map((satRaw) => {
+          const sat = satRaw ?? {}; // ensure sat is always an object
+
           const isVisible = sat.isVisible === true;
-          const isAboveHorizon = sat.elevation >= 0;
+          const isAboveHorizon = Number.isFinite(sat.elevation) && sat.elevation >= 0;
 
           const isMetric = allUnits.dist === 'metric';
           const distanceUnitsStr = isMetric ? 'km' : 'miles';
@@ -267,159 +294,177 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
           const rangeRateUnitsStr = isMetric ? 'km/s' : 'miles/s';
           const km_to_miles_factor = 0.621371;
 
-          let speed = Math.round((sat.speedKmH || 0) * (isMetric ? 1 : km_to_miles_factor));
-          let speedStr = `${speed.toLocaleString()} ${speedUnitsStr}`;
-          speedStr = `${sat.speedKmH ? speedStr : 'N/A'}`;
+          const speedKmH = Number.isFinite(sat.speedKmH) ? sat.speedKmH : null;
+          const speed = speedKmH !== null ? Math.round(speedKmH * (isMetric ? 1 : km_to_miles_factor)) : null;
+          const speedStr = speed !== null ? `${speed.toLocaleString()} ${speedUnitsStr}` : 'N/A';
 
-          let altitude = Math.round(sat.alt * (isMetric ? 1 : km_to_miles_factor));
-          let altitudeStr = `${altitude.toLocaleString()} ${distanceUnitsStr}`;
+          const alt = Number.isFinite(sat.alt) ? sat.alt : null;
+          const altitude = alt !== null ? Math.round(alt * (isMetric ? 1 : km_to_miles_factor)) : null;
+          const altitudeStr = altitude !== null ? `${altitude.toLocaleString()} ${distanceUnitsStr}` : 'N/A';
 
-          const nextPassStartTimes = sat.nextPassStartTimes || [];
+          const nextPassStartTimes = safeArr(sat.nextPassStartTimes);
+          const nextPassEndTimes = safeArr(sat.nextPassEndTimes);
 
           let nextPassSecsFromNow = null;
           let nextPassEndingSecsFromNow = null;
           nextPassStartTimes.forEach((startTime, i) => {
-            const secsFromNow = Math.floor((new Date(startTime) - new Date()) / 1000);
-            const secsEndingFromNow = Math.floor((new Date(sat.nextPassEndTimes?.[i]) - new Date()) / 1000);
+            const endTime = nextPassEndTimes[i];
+            const secsFromNow = Number.isFinite(new Date(startTime).getTime())
+              ? Math.floor((new Date(startTime) - new Date()) / 1000)
+              : null;
+            const secsEndingFromNow = Number.isFinite(new Date(endTime).getTime())
+              ? Math.floor((new Date(endTime) - new Date()) / 1000)
+              : null;
             if (secsEndingFromNow > 0 && nextPassSecsFromNow === null) {
               nextPassSecsFromNow = secsFromNow;
               nextPassEndingSecsFromNow = secsEndingFromNow;
             }
           });
 
-          const attrEscape = (s) =>
-            String(s ?? '')
-              .replace(/&/g, '&amp;')
-              .replace(/"/g, '&quot;');
-
           return `
-          <div class="sat-card" style="border-bottom: 1px solid var(--border-color); margin-bottom: 10px; padding-bottom: 8px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <strong style="color: var(--text-primary); font-size: 14px;">${sat.name}</strong>
-            <button
-              class="sat-toggle"
-              data-action="toggle-satellite"
-              data-sat-name="${sat.name}"
-              style="background:none; border:none; color: var(--accent-red); cursor:pointer; font-weight:bold; font-size:20px; padding: 0 5px;">
-              ✕
-            </button>
-          </div>
+      <div class="sat-card" style="border-bottom: 1px solid var(--border-color); margin-bottom: 10px; padding-bottom: 8px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <strong style="color: var(--text-primary); font-size: 14px;">${safeStr(sat.name)}</strong>
+        <button
+          class="sat-toggle"
+          data-action="toggle-satellite"
+          data-sat-name="${safeStr(sat.name)}"
+          style="background:none; border:none; color: var(--accent-red); cursor:pointer; font-weight:bold; font-size:20px; padding: 0 5px;">
+          ✕
+        </button>
+      </div>
 
-          <table style="width:100%; font-size:11px; border-collapse: collapse;">
+      <table style="width:100%; font-size:11px; border-collapse: collapse;">
 
-            <!-- section 1: satellite position and motion -->
-            <tr style="background-color: var(--bg-tertiary); color: var(--text-secondary);">
-              <td style="padding: 0 2px;">${t('station.settings.satellites.latitude')}:</td>
-              <td align="right" style="padding: 0 2px;">${sat.lat.toFixed(2)}°</td>
-            </tr>
-            <tr style="background-color: var(--bg-tertiary); color: var(--text-secondary);">
-              <td style="padding: 0 2px;">${t('station.settings.satellites.longitude')}:</td>
-              <td align="right" style="padding: 0 2px;">${sat.lon.toFixed(2)}°</td>
-            </tr>
-            <tr style="background-color: var(--bg-tertiary); color: var(--text-secondary);">
-              <td style="padding: 0 2px;">${t('station.settings.satellites.altitude')}:</td>
-              <td align="right" style="padding: 0 2px;">${altitudeStr}</td>
-            </tr>
-            <tr style="background-color: var(--bg-tertiary); color: var(--text-secondary);">
-              <td style="padding: 0 2px;">${t('station.settings.satellites.speed')}:</td>
-              <td align="right" style="padding: 0 2px;">${speedStr}</td>
-            </tr>
+        <!-- section 1: satellite position and motion -->
+        <tr style="background-color: var(--bg-tertiary); color: var(--text-secondary);">
+          <td style="padding: 0 2px;">${t('station.settings.satellites.latitude')}:</td>
+          <td align="right" style="padding: 0 2px;">${safeNum(sat.lat, 2)}°</td>
+        </tr>
+        <tr style="background-color: var(--bg-tertiary); color: var(--text-secondary);">
+          <td style="padding: 0 2px;">${t('station.settings.satellites.longitude')}:</td>
+          <td align="right" style="padding: 0 2px;">${safeNum(sat.lon, 2)}°</td>
+        </tr>
+        <tr style="background-color: var(--bg-tertiary); color: var(--text-secondary);">
+          <td style="padding: 0 2px;">${t('station.settings.satellites.altitude')}:</td>
+          <td align="right" style="padding: 0 2px;">${altitudeStr}</td>
+        </tr>
+        <tr style="background-color: var(--bg-tertiary); color: var(--text-secondary);">
+          <td style="padding: 0 2px;">${t('station.settings.satellites.speed')}:</td>
+          <td align="right" style="padding: 0 2px;">${speedStr}</td>
+        </tr>
 
-            <!-- section 2: relative location and visibility -->
-            <tr style="background-color: ${isVisible ? 'var(--accent-green)' : 'var(--bg-primary)'}; color: ${isVisible ? '#000' : 'var(--text-secondary)'};">
-              <td style="padding: 0 2px;">${t('station.settings.satellites.azimuth_elevation')}:</td>
-              <td align="right" style="padding: 0 2px;">${sat.azimuth}° / ${sat.elevation}°</td>
-            </tr>
+        <!-- section 2: relative location and visibility -->
+        <tr style="background-color: ${isVisible ? 'var(--accent-green)' : 'var(--bg-primary)'}; color: ${isVisible ? '#000' : 'var(--text-secondary)'};">
+          <td style="padding: 0 2px;">${t('station.settings.satellites.azimuth_elevation')}:</td>
+          <td align="right" style="padding: 0 2px;">${safeNum(sat.azimuth)}° / ${safeNum(sat.elevation)}°</td>
+        </tr>
 
+        ${
+          isVisible
+            ? `
+          <tr style="background-color: var(--accent-green); color:#000;">
+            <td style="padding: 0 2px;">${t('station.settings.satellites.range')}:</td>
+            <td align="right" style="padding: 0 2px;">${safeNum(sat.range * (isMetric ? 1 : km_to_miles_factor), 0)} ${distanceUnitsStr}</td>
+          </tr>
+          <tr style="background-color: var(--accent-green); color:#000;">
+            <td style="padding: 0 2px;">${t('station.settings.satellites.rangeRate')}:</td>
+            <td align="right" style="padding: 0 2px;">${safeNum(sat.rangeRate * (isMetric ? 1 : km_to_miles_factor), 2)} ${rangeRateUnitsStr}</td>
+          </tr>
+          <tr style="background-color: var(--accent-green); color:#000;">
+            <td style="padding: 0 2px;">${t('station.settings.satellites.dopplerFactor')}:</td>
+            <td align="right" style="padding: 0 2px;">${safeNum(sat.dopplerFactor, 7)}</td>
+          </tr>
+        `
+            : ``
+        }
+
+        <tr style="background-color: ${isVisible ? 'var(--accent-green)' : 'var(--bg-primary)'}; color: ${isVisible ? '#000' : 'var(--text-secondary)'};">
+          <td style="padding: 0 2px;">${t('station.settings.satellites.status')}:</td>
+          <td align="right" style="padding: 0 2px;">
             ${
               isVisible
-                ? `
-              <tr style="background-color: ${isVisible ? 'var(--accent-green)' : 'var(--bg-primary)'}; color: ${isVisible ? '#000' : 'var(--text-secondary)'};">
-                <td style="padding: 0 2px;">${t('station.settings.satellites.range')}:</td>
-                <td align="right" style="padding: 0 2px;">${(sat.range * (isMetric ? 1 : km_to_miles_factor)).toFixed(0)} ${distanceUnitsStr}</td>
-              </tr>
-              <tr style="background-color: ${isVisible ? 'var(--accent-green)' : 'var(--bg-primary)'}; color: ${isVisible ? '#000' : 'var(--text-secondary)'};">
-                <td style="padding: 0 2px;">${t('station.settings.satellites.rangeRate')}:</td>
-                <td align="right" style="padding: 0 2px;">${(sat.rangeRate * (isMetric ? 1 : km_to_miles_factor)).toFixed(2)} ${rangeRateUnitsStr}</td>
-              </tr>
-              <tr style="background-color: ${isVisible ? 'var(--accent-green)' : 'var(--bg-primary)'}; color: ${isVisible ? '#000' : 'var(--text-secondary)'};">
-                <td style="padding: 0 2px;">${t('station.settings.satellites.dopplerFactor')}:</td>
-                <td align="right" style="padding: 0 2px;">${sat.dopplerFactor.toFixed(7)}</td>
-              </tr>
+                ? t('station.settings.satellites.visible')
+                : isAboveHorizon
+                  ? t('station.settings.satellites.belowMinElev')
+                  : t('station.settings.satellites.belowHorizon')
+            }
+          </td>
+        </tr>
+
+        ${
+          !isVisible && nextPassSecsFromNow !== null
+            ? `
+            <tr style="background-color: var(--bg-primary); color: var(--text-secondary);">
+              <td style="padding: 0 2px;">${t('station.settings.satellites.nextPass')}:</td>
+              <td align="right" style="padding: 0 2px;">${formatSecsFromNow(nextPassSecsFromNow)}</td>
+            </tr>
             `
-                : ``
-            }
+            : ``
+        }
 
-            <tr style="background-color: ${isVisible ? 'var(--accent-green)' : 'var(--bg-primary)'}; color: ${isVisible ? '#000' : 'var(--text-secondary)'};">
-              <td style="padding: 0 2px;">${t('station.settings.satellites.status')}:</td>
-              <td align="right" style="padding: 0 2px;">
-                ${
-                  isVisible
-                    ? `${t('station.settings.satellites.visible')}`
-                    : isAboveHorizon
-                      ? `${t('station.settings.satellites.belowMinElev')}`
-                      : `${t('station.settings.satellites.belowHorizon')}`
-                }
-              </td>
+        ${
+          isVisible && nextPassEndingSecsFromNow !== null
+            ? `
+            <tr style="background-color: var(--accent-green); color:#000;">
+              <td style="padding: 0 2px;">Ending:</td>
+              <td align="right" style="padding: 0 2px;">${formatSecsFromNow(nextPassEndingSecsFromNow)}</td>
             </tr>
+            `
+            : ``
+        }
 
-            ${
-              !isVisible && nextPassSecsFromNow !== null
-                ? `
-                <tr style="background-color: var(--bg-primary); color: var(--text-secondary);">
-                  <td style="padding: 0 2px;">${t('station.settings.satellites.nextPass')}:</td>
-                  <td align="right" style="padding: 0 2px;">${formatSecsFromNow(nextPassSecsFromNow)}</td>
-                </tr>
-                `
-                : ``
-            }
+        <!-- section 3: miscellaneous satellite information -->
+        <tr style="background-color: var(--bg-secondary); color: var(--text-muted);">
+          <td style="padding: 0 2px;">${t('station.settings.satellites.mode')}:</td>
+          <td align="right" style="padding: 0 2px;">${safeStr(sat.mode || 'N/A')}</td>
+        </tr>
+        ${
+          sat.downlink
+            ? `<tr style="background-color: var(--bg-secondary); color: var(--text-muted);"><td style="padding: 0 2px;">${t('station.settings.satellites.downlink')}:</td><td align="right" style="padding: 0 2px;">${safeStr(sat.downlink)}</td></tr>`
+            : ''
+        }
+        ${
+          sat.uplink
+            ? `<tr style="background-color: var(--bg-secondary); color: var(--text-muted);"><td style="padding: 0 2px;">${t('station.settings.satellites.uplink')}:</td><td align="right" style="padding: 0 2px;">${safeStr(sat.uplink)}</td></tr>`
+            : ''
+        }
+        ${
+          sat.tone
+            ? `<tr style="background-color: var(--bg-secondary); color: var(--text-muted);"><td style="padding: 0 2px;">${t('station.settings.satellites.tone')}:</td><td align="right" style="padding: 0 2px;">${safeStr(sat.tone)}</td></tr>`
+            : ''
+        }
 
-            ${
-              isVisible && nextPassEndingSecsFromNow !== null
-                ? `
-                <tr style="background-color: var(--accent-green); color: #000;">
-                  <td style="padding: 0 2px;">Ending:</td>
-                  <td align="right" style="padding: 0 2px;">${formatSecsFromNow(nextPassEndingSecsFromNow)}</td>
-                </tr>
-                `
-                : ``
-            }
+        <tr><td colSpan="2">
+          <button
+            class="sat-open-predict"
+            data-action="open-predict"
+            data-sat-name="${safeStr(sat.name)}"
+            data-omm="${safeStr(sat.omm ? JSON.stringify(sat.omm) : '')}"
+            style="
+              width: 100%;
+              padding: 2px 0;
+              min-height: 0;
+              background: var(--bg-primary);
+              border: 1px solid var(--accent-red);
+              border-radius: 3px;
+              color: var(--accent-red);
+              font-size: 10px;
+              font-weight: bold;
+              text-align: center;
+              cursor: pointer;">${t('station.settings.satellites.predict')}</button>
+        </td></tr>
 
-            <!-- section 3: miscellaneous satellite information -->
-            <tr style="background-color: var(--bg-secondary); color: var(--text-muted);">
-              <td style="padding: 0 2px;">${t('station.settings.satellites.mode')}:</td>
-              <td align="right" style="padding: 0 2px;">${attrEscape(sat.mode || 'N/A')}</td>
-            </tr>
-            ${sat.downlink ? `<tr style="background-color: var(--bg-secondary); color: var(--text-muted);"><td style="padding: 0 2px;">${t('station.settings.satellites.downlink')}:</td><td align="right" style="padding: 0 2px;">${attrEscape(sat.downlink)}</td></tr>` : ''}
-            ${sat.uplink ? `<tr style="background-color: var(--bg-secondary); color: var(--text-muted);"><td style="padding: 0 2px;">${t('station.settings.satellites.uplink')}:</td><td align="right" style="padding: 0 2px;">${attrEscape(sat.uplink)}</td></tr>` : ''}
-            ${sat.tone ? `<tr style="background-color: var(--bg-secondary); color: var(--text-muted);"><td style="padding: 0 2px;">${t('station.settings.satellites.tone')}:</td><td align="right" style="padding: 0 2px;">${attrEscape(sat.tone)}</td></tr>` : ''}
+      </table>
 
-            <tr><td colSpan="2">
-              <button
-                class="sat-open-predict"
-                data-action="open-predict"
-                data-sat-name="${attrEscape(sat.name)}"
-                data-tle1="${attrEscape(sat.tle1)}"
-                data-tle2="${attrEscape(sat.tle2)}"
-                style="
-                  width: 100%;
-                  padding: 2px 0;
-                  min-height: 0;
-                  background: var(--bg-primary);
-                  border: 1px solid var(--accent-red);
-                  border-radius: 3px;
-                  color: var(--accent-red);
-                  font-size: 10px;
-                  font-weight: bold;
-                  text-align: center;
-                  cursor: pointer;">${t('station.settings.satellites.predict')}</button>
-            </td></tr>
+      ${
+        sat.notes
+          ? `<div style="font-size:9px; color: var(--text-muted); margin-top:4px; font-style:italic;">${safeStr(sat.notes)}</div>`
+          : ''
+      }
 
-            </table>
-
-            ${sat.notes ? `<div style="font-size:9px; color: var(--text-muted); margin-top:4px; font-style:italic;">${attrEscape(sat.notes)}</div>` : ''}
-          </div>
-      `;
+      </div>
+    `;
         })
         .join('') +
       `</div></div>`;
@@ -513,27 +558,31 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
         }
       }
 
-      replicatePoint(sat.lat, sat.lon).forEach((pos) => {
-        const marker = window.L.marker(pos, {
-          icon: window.L.divIcon({
-            className: 'sat-marker',
-            html: `<div style="display:flex; flex-direction:column; align-items:center; opacity: ${globalOpacity};">
+      const isSafeLatLon = (sat) => Number.isFinite(sat?.lat) && Number.isFinite(sat?.lon);
+
+      if (isSafeLatLon(sat)) {
+        replicatePoint(sat.lat, sat.lon).forEach((pos) => {
+          const marker = window.L.marker(pos, {
+            icon: window.L.divIcon({
+              className: 'sat-marker',
+              html: `<div style="display:flex; flex-direction:column; align-items:center; opacity: ${globalOpacity};">
                      <div style="font-size:${isSelected ? '32px' : '22px'}; filter:${isSelected ? 'drop-shadow(0 0 10px rgba(0, 255, 255, 1))' : 'none'}; cursor: pointer;">🛰</div>
                      <div class="sat-label" style="${isSelected ? 'color: rgba(255, 255, 255, 1); font-weight: bold;' : ''}">${sat.name}</div>
                    </div>`,
-            iconSize: [80, 50],
-            iconAnchor: [40, 25],
-          }),
-          zIndexOffset: isSelected ? 10000 : 1000,
-        });
+              iconSize: [80, 50],
+              iconAnchor: [40, 25],
+            }),
+            zIndexOffset: isSelected ? 10000 : 1000,
+          });
 
-        marker.on('click', (e) => {
-          window.L.DomEvent.stopPropagation(e);
-          toggleSatellite(sat.name);
-        });
+          marker.on('click', (e) => {
+            window.L.DomEvent.stopPropagation(e);
+            toggleSatellite(sat.name);
+          });
 
-        marker.addTo(layerGroupRef.current);
-      });
+          marker.addTo(layerGroupRef.current);
+        });
+      }
     });
 
     updateInfoWindow();
@@ -588,10 +637,16 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
         e.stopPropagation();
         e.preventDefault();
         const name = actionEl.dataset.satName;
-        const tle1 = actionEl.dataset.tle1;
-        const tle2 = actionEl.dataset.tle2;
-        if (name && tle1 && tle2 && window.openSatellitePredict) {
-          window.openSatellitePredict(name, tle1, tle2);
+        let omm = null;
+        if (actionEl.dataset.omm) {
+          try {
+            omm = JSON.parse(actionEl.dataset.omm);
+          } catch (err) {
+            console.warn('Failed to parse satellite OMM data:', err);
+          }
+        }
+        if (name && omm && window.openSatellitePredict) {
+          window.openSatellitePredict(name, omm);
         }
         return;
       }
@@ -619,7 +674,7 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
 
   // Expose satellite prediction panel function
   useEffect(() => {
-    const openSatellitePredict = (satName, tle1, tle2) => {
+    const openSatellitePredict = (satName, omm) => {
       if (!satName || !satellites) return;
 
       // Find the satellite data
@@ -629,7 +684,7 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
         return;
       }
 
-      const orbit = new Orbit(sat.name, `${sat.name}\n${tle1}\n${tle2}`);
+      const orbit = new Orbit(sat.name, omm);
       orbit.error && console.warn('Satellite orbit error:', orbit.error);
 
       const groundStation = {
@@ -808,7 +863,7 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
       );
 
       // update modal every second, satellite data currentPasses is not updated unless modal is reopened,
-      // or if satellite layer is updated for instance if TLE data changes
+      // or if satellite layer is updated for instance if satellite data changes
       const updatePasses = () => {
         content.innerHTML = generateModalContent(currentPasses);
       };

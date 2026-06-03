@@ -23,6 +23,7 @@ import {
   DXpeditionPanel,
   PSKReporterPanel,
   APRSPanel,
+  MapDataListView,
   MeshComPanel,
   WeatherPanel,
   AmbientPanel,
@@ -159,6 +160,8 @@ export const DockableApp = ({
   setShowSettings,
   handleFullscreenToggle,
   isFullscreen,
+  dxTimezone,
+  dxSolarFallback,
 
   // Update
   handleUpdateClick,
@@ -202,7 +205,6 @@ export const DockableApp = ({
       setModel(Model.fromJson(defaultLayout));
     }
   }, []);
-  const [showDXLocalTime, setShowDXLocalTime] = useState(false);
   const [showDxccSelect, setShowDxccSelect] = useState(false);
 
   // ── Tabset auto-rotation (persistent per tabset) ──
@@ -417,6 +419,7 @@ export const DockableApp = ({
 
     return {
       'world-map': { name: 'World Map', icon: '🗺️' },
+      'map-list-view': { name: 'Map Data (text view)', icon: '👁️‍🗨️' },
       'de-location': { name: 'DE Location', icon: '📍' },
       'dx-location': { name: 'DX Target', icon: '🎯' },
       'analog-clock': { name: 'Analog Clock', icon: '🕐' },
@@ -592,13 +595,9 @@ export const DockableApp = ({
             {showDxccSelect && (
               <DXCCSelect dxLocked={dxLocked} onDXChange={handleDXChange} style={{ margin: '5px 0 10px 0' }} />
             )}
-            <DXLocalTime
-              currentTime={currentTime}
-              dxLocation={dxLocation}
-              isLocal={showDXLocalTime}
-              onToggle={() => setShowDXLocalTime((prev) => !prev)}
-              marginTop="2px"
-            />
+            {dxLocation.lat != null && dxLocation.lon != null && (
+              <DXLocalTime currentTime={currentTime} timezone={dxTimezone} solarTimezone={dxSolarFallback} />
+            )}
             <div style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '4px' }}>
               {dxLocation.lat.toFixed(4)}°, {dxLocation.lon.toFixed(4)}°
             </div>
@@ -677,6 +676,7 @@ export const DockableApp = ({
     <div style={{ height: '100%', width: '100%', position: 'relative' }}>
       <WorldMap
         config={config}
+        isLocalInstall={isLocalInstall}
         deLocation={config.location}
         dxLocation={dxLocation}
         onDXChange={handleDXChange}
@@ -747,6 +747,21 @@ export const DockableApp = ({
       switch (component) {
         case 'world-map':
           return renderWorldMap(); // Map has its own zoom — skip panel zoom
+
+        case 'map-list-view':
+          content = (
+            <MapDataListView
+              dxSpots={dxClusterData.spots}
+              satellites={filteredSatellites || satellites}
+              potaSpots={filteredPotaSpots || potaSpots?.data}
+              sotaSpots={filteredSotaSpots || sotaSpots?.data}
+              wwffSpots={filteredWwffSpots || wwffSpots?.data}
+              wwbotaSpots={filteredWwbotaSpots || wwbotaSpots?.data}
+              deLocation={config.location}
+              units={config.allUnits?.dist}
+            />
+          );
+          break;
 
         case 'de-location':
           content = renderDELocation(nodeId);
