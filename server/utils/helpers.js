@@ -16,4 +16,15 @@ function formatDuration(ms) {
   return `${Math.floor(ms / 3600000)}h ${Math.floor((ms % 3600000) / 60000)}m`;
 }
 
-module.exports = { formatBytes, formatDuration };
+// Cloudflare strips client-supplied CF-Ray / CF-Connecting-IP at its edge, so
+// the presence of CF-Ray is a reliable signal the request actually transited
+// CF. Without that guard, anyone hitting the Railway origin URL directly could
+// forge CF-Connecting-IP and bypass per-IP rate limits and lockouts.
+function getClientIP(req) {
+  if (req.headers['cf-ray'] && req.headers['cf-connecting-ip']) {
+    return req.headers['cf-connecting-ip'];
+  }
+  return req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress || 'unknown';
+}
+
+module.exports = { formatBytes, formatDuration, getClientIP };

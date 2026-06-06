@@ -7,7 +7,7 @@ const compression = require('compression');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const express = require('express');
-const { formatBytes } = require('../utils/helpers');
+const { formatBytes, getClientIP } = require('../utils/helpers');
 
 /**
  * Apply all middleware to the Express app.
@@ -84,6 +84,7 @@ function applyMiddleware(app, ctx) {
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests, please try again later' },
+    keyGenerator: getClientIP,
   });
   app.use('/api/', apiLimiter);
 
@@ -94,6 +95,7 @@ function applyMiddleware(app, ctx) {
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: 'Too many requests' },
+    keyGenerator: getClientIP,
   });
 
   // Body parser

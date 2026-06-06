@@ -5,6 +5,7 @@
 
 const mqttLib = require('mqtt');
 const { maidenheadToLatLon, getBandFromHz } = require('../utils/grid');
+const { getClientIP } = require('../utils/helpers');
 
 module.exports = function (app, ctx) {
   const {
@@ -611,9 +612,7 @@ module.exports = function (app, ctx) {
   const sseConnectionsByIP = new Map();
 
   app.get('/api/pskreporter/stream/:identifier', (req, res) => {
-    // Use req.ip which respects the trust proxy setting, consistent with express-rate-limit.
-    // Manual x-forwarded-for parsing is trivially spoofable on installs without a reverse proxy.
-    const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+    const ip = getClientIP(req);
     const current = sseConnectionsByIP.get(ip) || 0;
     if (current >= MAX_SSE_PER_IP) {
       return res.status(429).json({ error: 'Too many open SSE connections from this IP' });

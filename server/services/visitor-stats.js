@@ -6,7 +6,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { formatDuration } = require('../utils/helpers');
+const { formatDuration, getClientIP } = require('../utils/helpers');
 
 /**
  * Initialize and return the visitor stats service.
@@ -364,7 +364,7 @@ function createVisitorStatsService(ctx) {
   function visitorMiddleware(req, res, next) {
     rolloverVisitorStats();
 
-    const rawIp = req.ip || req.connection?.remoteAddress || 'unknown';
+    const rawIp = getClientIP(req);
     const isTrackable = req.path !== '/api/health' && !req.path.startsWith('/assets/');
 
     if (isTrackable) {

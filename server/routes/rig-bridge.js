@@ -13,6 +13,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { getClientIP } = require('../utils/helpers');
 const crypto = require('crypto');
 const { validateCustomHost } = require('../utils/ssrf');
 
@@ -535,7 +536,7 @@ module.exports = function (app, ctx) {
         return res.json({ commands: [] });
       }
 
-      const clientIP = req.ip || req.socket?.remoteAddress || 'unknown';
+      const clientIP = getClientIP(req);
       const ipCount = relayPollCountByIP.get(clientIP) ?? 0;
       if (ipCount >= MAX_LONG_POLL_PER_IP) {
         return res.status(429).json({ error: 'Too many concurrent long-polls from this IP' });
