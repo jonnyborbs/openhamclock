@@ -17,17 +17,23 @@ app.use(express.json());
 
 // Configuration
 const CONFIG = {
-  // DX Spider nodes to try (in order)
+  // DX Spider nodes to try (in order).
+  // NOTE: dxc.nc7j.com (and the NG7M cluster) were removed at the sysop's
+  // request — those run ArcConnect, which rejects SSID logins and treats the
+  // proxy's reconnects as abuse. Do NOT re-add them. See dxClusterLoginCallsign
+  // notes below and the good-neighbour policy.
   nodes: [
-    { host: 'dxc.nc7j.com', port: 7373, name: 'NC7J' },
-    { host: 'dxc.ai9t.com', port: 7373, name: 'AI9T' },
     { host: 'dxspider.co.uk', port: 7300, name: 'DX Spider UK (G6NHU)' },
+    { host: 'dxc.ai9t.com', port: 7373, name: 'AI9T' },
   ],
-  // Callsign with SSID - use env var as-is, or default to OPENHAMCLOCK-56
-  // Set CALLSIGN=YOURCALL-56 for production, CALLSIGN=YOURCALL-57 for staging
-  callsign: process.env.CALLSIGN?.trim() || 'OPENHAMCLOCK-56',
+  // Login callsign for the shared proxy. MUST be a real, valid amateur
+  // callsign — DX cluster nodes reject anything else (the old default,
+  // 'OPENHAMCLOCK-56', is not a valid callsign and was getting us flagged).
+  // Override per-environment with the CALLSIGN env var.
+  callsign: process.env.CALLSIGN?.trim() || 'K0CJH',
   spotRetentionMs: 30 * 60 * 1000, // 30 minutes
-  reconnectDelayMs: 10000, // 10 seconds between reconnect attempts
+  reconnectDelayMs: 10000, // 10 seconds base; backs off exponentially on repeated failure
+  maxReconnectDelayMs: 5 * 60 * 1000, // 5 minutes — cap so we never hammer a node
   maxReconnectAttempts: 3,
   cleanupIntervalMs: 60000, // 1 minute
   keepAliveIntervalMs: 60000, // 1 minute - send keepalive (must stay < socketTimeoutMs)
@@ -39,12 +45,25 @@ const CONFIG = {
   socketTimeoutMs: 300000, // 5 minutes
 };
 
+// Validate an amateur callsign (optionally with an SSID like -56).
+// Deliberately permissive about real callsign shapes, but rejects junk such as
+// 'OPENHAMCLOCK-56' so we never present an invalid login to a cluster node.
+const isValidCallsign = (call) =>
+  typeof call === 'string' && /^[A-Z0-9]{1,3}\d[A-Z]{1,4}(-\d{1,2})?$/i.test(call.trim());
+
+// Phrases a node sends when it refuses our login. If we see any of these we
+// must stop talking to that node immediately — never blindly fire follow-up
+// commands (sh/dx, set/dx), which the node would read as more bad logins.
+const LOGIN_REJECTION_RE =
+  /(invalid|unknown|not a valid|incorrect|illegal|bad)\s+call|please enter.*call|login incorrect/i;
+
 // State
 let spots = [];
 let client = null;
 let connected = false;
 let connecting = false; // Prevent concurrent connection attempts
 let authenticated = false; // Track whether login completed
+let loginRejected = false; // Node refused our callsign — stop sending commands
 let currentNode = null;
 let currentNodeIndex = 0;
 let reconnectAttempts = 0;
@@ -252,6 +271,7 @@ const connect = () => {
     connected = true;
     connecting = false;
     authenticated = false;
+    loginRejected = false;
     connectionStartTime = new Date();
     lastDataTime = Date.now();
     buffer = '';
@@ -265,16 +285,19 @@ const connect = () => {
         client.write(CONFIG.callsign + '\r\n');
         log('AUTH', `Sent callsign: ${CONFIG.callsign}`);
 
-        // After login, enable DX spot announcements
+        // After login, enable DX spot announcements.
+        // Guard every follow-up command on !loginRejected: if the node already
+        // refused our callsign, sending sh/dx here is exactly what the sysop
+        // complained about (the node reads it as another bad login attempt).
         setTimeout(() => {
-          if (client && connected) {
+          if (client && connected && !loginRejected) {
             // Request recent spots first
             client.write('sh/dx 30\r\n');
             log('CMD', 'Sent: sh/dx 30');
 
             // Then enable the spot stream (some nodes need this)
             setTimeout(() => {
-              if (client && connected) {
+              if (client && connected && !loginRejected) {
                 client.write('set/dx\r\n');
                 log('CMD', 'Sent: set/dx (enable spot stream)');
 
@@ -337,6 +360,24 @@ const connect = () => {
           }
         }
         continue;
+      }
+
+      // Detect the node refusing our login. Stop immediately: don't send any
+      // further commands, tear the socket down, and let handleDisconnect apply
+      // its backoff. Re-hammering a node that rejects us is what got the proxy
+      // flagged by cluster sysops.
+      if (!authenticated && !loginRejected && LOGIN_REJECTION_RE.test(trimmed)) {
+        loginRejected = true;
+        log('ERROR', `Login rejected by ${currentNode?.name}: ${trimmed.substring(0, 120)}`);
+        if (client) {
+          try {
+            client.removeAllListeners();
+            client.destroy();
+          } catch (e) {}
+          client = null;
+        }
+        handleDisconnect();
+        return;
       }
 
       // Detect auth completion - DX Spider sends "callsign de NODE >" prompt.
@@ -493,12 +534,19 @@ const handleDisconnect = () => {
     );
   }
 
-  log('RECONNECT', `Attempting reconnect in ${CONFIG.reconnectDelayMs}ms (attempt ${reconnectAttempts})`);
+  // Exponential backoff: base * 2^(attempts-1), capped. Prevents the old
+  // fixed-10s loop from hammering a node that keeps refusing or dropping us.
+  const backoffDelay = Math.min(
+    CONFIG.reconnectDelayMs * 2 ** Math.max(0, reconnectAttempts - 1),
+    CONFIG.maxReconnectDelayMs,
+  );
+
+  log('RECONNECT', `Attempting reconnect in ${backoffDelay}ms (attempt ${reconnectAttempts})`);
 
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connect();
-  }, CONFIG.reconnectDelayMs);
+  }, backoffDelay);
 };
 
 // ============================================
@@ -683,6 +731,15 @@ app.listen(PORT, () => {
   log('CONFIG', `CALLSIGN env var: ${process.env.CALLSIGN === undefined ? '(not set)' : `"${process.env.CALLSIGN}"`}`);
   log('CONFIG', `Spot retention: ${CONFIG.spotRetentionMs / 60000} minutes`);
   log('CONFIG', `Available nodes: ${CONFIG.nodes.map((n) => n.name).join(', ')}`);
+
+  // Fail closed on a bad callsign rather than spamming nodes with junk logins.
+  if (!isValidCallsign(CONFIG.callsign)) {
+    log(
+      'ERROR',
+      `Configured callsign "${CONFIG.callsign}" is not a valid amateur callsign — refusing to connect. Set a valid CALLSIGN env var.`,
+    );
+    return;
+  }
 
   // Connect to DX Spider
   connect();

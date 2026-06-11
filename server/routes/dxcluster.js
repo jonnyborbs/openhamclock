@@ -76,9 +76,10 @@ module.exports = function (app, ctx) {
 
   // DX Spider nodes - dxspider.co.uk primary per G6NHU
   // SSID -56 for OpenHamClock (HamClock uses -55)
+  // dxc.nc7j.com (NG7M/NC7J, ArcConnect) removed at the sysop's request — do
+  // not re-add. See dxspider-proxy/server.js for the full rationale.
   const DXSPIDER_NODES = [
     { host: 'dxspider.co.uk', port: 7300 },
-    { host: 'dxc.nc7j.com', port: 7373 },
     { host: 'dxc.ai9t.com', port: 7373 },
   ];
   const DXSPIDER_SSID = '-56'; // OpenHamClock SSID

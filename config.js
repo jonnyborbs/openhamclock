@@ -95,8 +95,8 @@ const OpenHamClockConfig = {
     enabled: false, // Set to true when API is implemented
 
     // Cluster node (Telnet)
-    node: 'dxc.nc7j.com',
-    port: 7373,
+    node: 'dxspider.co.uk',
+    port: 7300,
 
     // Login callsign (usually your call)
     login: 'K0CJH',
