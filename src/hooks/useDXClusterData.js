@@ -14,6 +14,7 @@ export const useDXClusterData = (filters = {}, config = {}) => {
   const [spots, setSpots] = useState([]); // For list display
   const [paths, setPaths] = useState([]); // For map display
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const lastFetchRef = useRef(0);
   const fetchRef = useRef(null);
 
@@ -75,6 +76,7 @@ export const useDXClusterData = (filters = {}, config = {}) => {
         if (response?.ok) {
           const newData = await response.json();
           const now = Date.now();
+          setError(null);
 
           setAllData((prev) => {
             // Create map of existing items by unique key
@@ -96,6 +98,16 @@ export const useDXClusterData = (filters = {}, config = {}) => {
           });
 
           lastFetchRef.current = now;
+        } else if (response) {
+          // Config errors (e.g. custom cluster without a valid callsign) come
+          // back as 400s with a useful message — surface it instead of an
+          // eternally empty panel.
+          let message = `DX cluster error (HTTP ${response.status})`;
+          try {
+            const body = await response.json();
+            if (body?.error) message = body.error;
+          } catch {}
+          setError(message);
         }
       } catch (err) {
         console.error('DX cluster data error:', err);
@@ -168,6 +180,7 @@ export const useDXClusterData = (filters = {}, config = {}) => {
     spots, // For DXClusterPanel list
     paths, // For WorldMap
     loading,
+    error,
     totalSpots: allData.length,
     clearSpots,
   };

@@ -1,0 +1,30 @@
+{
+  "name": "ohc-cluster",
+  "version": "0.1.0",
+  "description": "OpenHamClock Cluster - independent DX spot aggregation node with telnet and HTTP interfaces",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "LOG_LEVEL=debug node server.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "keywords": [
+    "ham-radio",
+    "dx-cluster",
+    "rbn",
+    "amateur-radio",
+    "telnet"
+  ],
+  "author": "OpenHamClock",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2"
+  },
+  "overrides": {
+    "qs": ">=6.15.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

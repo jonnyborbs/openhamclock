@@ -5,6 +5,40 @@ import { detectMode, getBandFromFreq, getCallsignInfo } from './callsign';
  */
 
 /**
+ * Contest presets for the "Contest" filter tab. Cluster spots carry no
+ * contest metadata, so each preset is a comment-signature regex — for Field
+ * Day that's "FD", "Field Day", or a class+section exchange ("3A MO").
+ * Word boundaries keep short tokens like FD from matching inside callsigns.
+ */
+export const CONTEST_PRESETS = [
+  {
+    key: 'field-day',
+    label: 'ARRL Field Day',
+    pattern: /\bFD\b|FIELD\s*DAY|\b\d{1,2}[A-F]\s+[A-Z]{2,3}\b/i,
+  },
+  {
+    key: 'winter-field-day',
+    label: 'Winter Field Day',
+    pattern: /\bWFD\b|WINTER\s*FIELD\s*DAY/i,
+  },
+  {
+    key: 'cqww',
+    label: 'CQ WW',
+    pattern: /\bCQ\s*WW\b|\bCQWW\b/i,
+  },
+  {
+    key: 'wpx',
+    label: 'CQ WPX',
+    pattern: /\bWPX\b/i,
+  },
+  {
+    key: 'generic-contest',
+    label: 'Any contest',
+    pattern: /\bTEST\b|\bCONTEST\b|\bCQWW\b|\bWPX\b|\bFD\b|\bWFD\b/i,
+  },
+];
+
+/**
  * Applies the WatchList filter, which is specified in the UI 'Watchlist' tab of the DXCluster's 'Filters' dialog
  * Includes only spots with a callsign that matches the Watchlist (applied only if 'watchlistOnly' is true
  * <br/>
@@ -239,6 +273,22 @@ export const applyDXFilters = (item, filters) => {
 
   if (!applyWatchlistFilter(filters, dxCall)) {
     return false;
+  }
+
+  // DXpeditions-only: keep just spots the server tagged against the active
+  // DXpedition list (NG3K data). Untagged items (e.g. from sources that skip
+  // the paths enrichment) are treated as non-DXpeditions.
+  if (filters.dxpeditionsOnly && !item.isDXpedition) {
+    return false;
+  }
+
+  // Contest filter: keep only spots whose comment matches the selected
+  // contest's signature (see CONTEST_PRESETS).
+  if (filters.contest) {
+    const preset = CONTEST_PRESETS.find((p) => p.key === filters.contest);
+    if (preset && !preset.pattern.test(item.comment || '')) {
+      return false;
+    }
   }
 
   if (!applySpotterInclusionFilters(filters, spotterInfo, dxInfo)) {

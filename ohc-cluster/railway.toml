@@ -1,0 +1,12 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "node server.js"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "always"
+
+# NOTE: the telnet cluster port (7300) needs a Railway TCP Proxy attached to the
+# service (Settings -> Networking -> TCP Proxy -> internal port 7300). Railway
+# assigns the public host:port pair; publish that in the README/docs once live.

@@ -22,10 +22,13 @@ Many cloud hosting platforms (including Railway) don't support outbound telnet c
 
 ## Environment Variables
 
-| Variable   | Default      | Description                       |
-| ---------- | ------------ | --------------------------------- |
-| `PORT`     | 3001         | HTTP server port                  |
-| `CALLSIGN` | OPENHAMCLOCK | Callsign used for DX Spider login |
+| Variable   | Default | Description                                                          |
+| ---------- | ------- | ------------------------------------------------------------------- |
+| `PORT`     | 3001    | HTTP server port                                                    |
+| `CALLSIGN` | K0CJH   | Callsign for DX Spider login — **must be a valid amateur callsign** |
+
+> The proxy refuses to connect if `CALLSIGN` is not a valid amateur callsign
+> (e.g. the old `OPENHAMCLOCK` default), rather than spamming nodes with junk logins.
 
 ## API Endpoints
 
@@ -132,8 +135,8 @@ List available DX Spider nodes.
 ```json
 {
   "nodes": [
-    { "index": 0, "name": "DX Spider UK", "host": "dxspider.co.uk", "port": 7300, "active": true },
-    { "index": 1, "name": "W6KK", "host": "w6kk.no-ip.org", "port": 7300, "active": false }
+    { "index": 0, "name": "DX Spider UK (G6NHU)", "host": "dxspider.co.uk", "port": 7300, "active": true },
+    { "index": 1, "name": "AI9T", "host": "dxc.ai9t.com", "port": 7373, "active": false }
   ],
   "currentIndex": 0
 }
@@ -214,10 +217,11 @@ https://your-proxy-url.railway.app/api/dxcluster/spots
 
 The proxy cycles through these nodes on failure:
 
-1. dxspider.co.uk:7300 (UK)
-2. w6kk.no-ip.org:7300 (California)
-3. dxc.nc7j.com:7373 (NC7J)
-4. dx.k3lr.com:7300 (K3LR)
+1. dxspider.co.uk:7300 (DX Spider UK, G6NHU)
+2. dxc.ai9t.com:7373 (AI9T)
+
+> Note: `dxc.nc7j.com` (NC7J/NG7M, ArcConnect) was removed at the sysop's request —
+> it rejects SSID logins and treated our reconnects as abuse. **Do not re-add it.**
 
 ## License
 
