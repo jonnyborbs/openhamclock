@@ -22,7 +22,7 @@ Many cloud hosting platforms (including Railway) don't support outbound telnet c
 
 ## Environment Variables
 
-| Variable   | Default | Description                                                          |
+| Variable   | Default | Description                                                         |
 | ---------- | ------- | ------------------------------------------------------------------- |
 | `PORT`     | 3001    | HTTP server port                                                    |
 | `CALLSIGN` | K0CJH   | Callsign for DX Spider login — **must be a valid amateur callsign** |
