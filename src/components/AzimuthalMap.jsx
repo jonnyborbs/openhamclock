@@ -317,6 +317,7 @@ export default function AzimuthalMap({
       panX: vs.cx - size.w / 2,
       panY: vs.cy - size.h / 2,
       lowMemory: lowMemoryMode,
+      pixelRatio: Math.max(1, window.devicePixelRatio || 1),
     })
       .then(() => setTilesReady(true))
       .catch(() => {});
@@ -377,7 +378,7 @@ export default function AzimuthalMap({
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
     canvas.width = size.w * dpr;
     canvas.height = size.h * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -413,6 +414,7 @@ export default function AzimuthalMap({
           panY: cy - size.h / 2,
           halfRes: interactingRef.current,
           lowMemory: lowMemoryMode,
+          pixelRatio: dpr,
         });
         if (imageData) {
           // putImageData ignores canvas transforms (DPR scaling), so paint
@@ -421,7 +423,9 @@ export default function AzimuthalMap({
           tmp.width = imageData.width;
           tmp.height = imageData.height;
           tmp.getContext('2d').putImageData(imageData, 0, 0);
-          ctx.drawImage(tmp, 0, 0);
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(tmp, 0, 0, size.w, size.h);
           tileImageDrawn = true;
         }
       } catch (e) {

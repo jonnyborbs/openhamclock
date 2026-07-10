@@ -150,7 +150,7 @@ export default function useTimeState(configLocation, dxLocation, timezone) {
     return { ...sunTimes, local };
   }, [configLocation, currentTime, safeTimezone]);
 
-  // Sunrise/sunset for DX station (UTC only — local shown via DXLocalTime)
+  // Sunrise/sunset for DX station (UTC only)
   const dxSunTimes = useMemo(
     () => calculateSunTimes(dxLocation.lat, dxLocation.lon, currentTime),
     [dxLocation, currentTime],

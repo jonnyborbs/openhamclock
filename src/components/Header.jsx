@@ -5,7 +5,6 @@
  */
 import { IconGear, IconExpand, IconShrink } from './Icons.jsx';
 import DonateButton from './DonateButton.jsx';
-import { QRZToggle } from './CallsignLink.jsx';
 import { ctyLookup, isCtyLoaded } from '../utils/ctyLookup';
 import { getFlagUrl } from '../utils/countryFlags';
 import { formatTemperature, formatTemperatureBoth } from '../utils/formatWeather.js';
@@ -102,7 +101,6 @@ export const Header = ({
             v{config.version}
           </span>
         )}
-        {!isMobile && <QRZToggle />}
       </div>
 
       {/* Clocks — order controlled by swapHeaderClocks config */}

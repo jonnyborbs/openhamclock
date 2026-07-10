@@ -776,12 +776,24 @@ module.exports = function (app, ctx) {
       // Get endpoint monitoring stats
       const apiStats = endpointStats.getStats();
 
+      const subsystems = ctx.getSubsystemsHealth ? ctx.getSubsystemsHealth() : null;
+
       res.json({
         status: 'ok',
         version: APP_VERSION,
         uptime: process.uptime(),
         uptimeFormatted: `${Math.floor(process.uptime() / 86400)}d ${Math.floor((process.uptime() % 86400) / 3600)}h ${Math.floor((process.uptime() % 3600) / 60)}m`,
         timestamp: new Date().toISOString(),
+        // Subsystem status block — public so external watchtowers (no auth) can see
+        // whether fletcher/rbn/satellites/propagation are healthy through one probe.
+        // Snapshot is refreshed every 30s by server/health.js; reads here are cache hits.
+        subsystemStatus: subsystems?.aggregate ?? 'unknown',
+        // Echo every subsystem health.js tracks — hardcoding the keys here
+        // hid new subsystems (ohc-cluster) while they still drove the
+        // aggregate, producing "down" with all visible subsystems ok.
+        subsystems: subsystems
+          ? Object.fromEntries(Object.entries(subsystems).filter(([key]) => key !== 'aggregate'))
+          : null,
 
         // SECURITY: Only expose file paths and detailed internals to authenticated requests
         // everything after this point is not output unless (isAuthed === true)

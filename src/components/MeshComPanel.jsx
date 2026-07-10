@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { useMeshCom } from '../hooks/useMeshCom.js';
 import { useRig } from '../contexts/RigContext.jsx';
 import CallsignLink from './CallsignLink.jsx';
+import { useCallsignPopup } from './CallsignPopupManager.jsx';
 import { primaryCall } from '../utils/callsign.js';
 import { IconMap } from './Icons.jsx';
 
@@ -87,6 +88,7 @@ function WeatherRow({ wx }) {
 
 function NodesTab({ nodes, loading, onSpotClick, onHoverSpot }) {
   const { t } = useTranslation();
+  const { showPopup } = useCallsignPopup();
   if (loading) {
     return (
       <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>
@@ -130,7 +132,13 @@ function NodesTab({ nodes, loading, onSpotClick, onHoverSpot }) {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <CallsignLink call={call} color="var(--text-primary)" fontWeight="700" />
+                <CallsignLink
+                  call={call}
+                  color="var(--text-primary)"
+                  fontWeight="700"
+                  onPopup={showPopup}
+                  location={hasPos ? { lat: node.lat, lon: node.lon } : undefined}
+                />
                 {!hasPos && (
                   <span style={{ fontSize: '9px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
                     {t('meshcomPanel.noPosition')}

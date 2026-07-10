@@ -15,6 +15,7 @@ import EmcommLayout from './layouts/EmcommLayout.jsx';
 
 import { resetLayout } from './store/layoutStore.js';
 import { RigProvider } from './contexts/RigContext.jsx';
+import { CallsignPopupProvider } from './components/CallsignPopupManager.jsx';
 
 import {
   useSpaceWeather,
@@ -54,10 +55,14 @@ import useLocalInstall from './hooks/app/useLocalInstall';
 import useVersionCheck from './hooks/app/useVersionCheck';
 import usePresence from './hooks/app/usePresence';
 import useAudioAlerts from './hooks/app/useAudioAlerts';
+import { useSatelliteAnnouncements } from './hooks/app/useSatelliteAnnouncements';
 import WhatsNew from './components/WhatsNew.jsx';
 import { initCtyLookup } from './utils/ctyLookup.js';
 import { getAllLayers } from './plugins/layerRegistry.js';
 import ActivateFilterManager from './components/ActivateFilterManager.jsx';
+import { useLightningAnnouncements } from './hooks/app/useLightningAnnouncements';
+import { useDXSpotAnnouncements } from './hooks/app/useDXSpotAnnouncements';
+import { useWeatherAlertAnnouncements } from './hooks/app/useWeatherAlertAnnouncements';
 
 // Load DXCC entity database on app startup (non-blocking)
 initCtyLookup();
@@ -321,15 +326,21 @@ const App = () => {
     contests: contests.data,
   });
 
+  const { announcement: lightningAnnouncement } = useLightningAnnouncements();
+  const { announcement: dxSpotAnnouncement } = useDXSpotAnnouncements(dxClusterData.spots);
+
   const propagation = usePropagation(config.location, dxLocation, config.propagation);
   const mySpots = useMySpots(config.callsign);
   const filterState = useSatelliteFilterState();
   const { satelliteFilters, setSatelliteFilters } = filterState;
   const satellites = useSatellites(config.location, config.satellite, satelliteFilters);
+  const { riseAnnouncement, setAnnouncement: satelliteSetAnnouncement } = useSatelliteAnnouncements(satellites.data);
   const localWeather = useWeather(config.location, config.allUnits);
   const dxWeather = useWeather(dxLocation, config.allUnits);
   const localAlerts = useWeatherAlerts(config.location);
   const dxAlerts = useWeatherAlerts(dxLocation);
+  // DE alerts only — DX-location alerts aren't an operator-safety concern (#1088)
+  const { announcement: weatherAlertAnnouncement } = useWeatherAlertAnnouncements(localAlerts.alerts);
   // User-selectable PSK retention window (issue #991). PSKReporterPanel writes
   // `ohc_psk_age` to localStorage and fires `ohc-psk-age-changed`; we mirror it
   // here so the hook re-runs with the new window and both the map dots and the
@@ -364,7 +375,12 @@ const App = () => {
     gridSquare: config.locator || '',
   });
   const wsjtx = useWSJTX();
-  const aprsData = useAPRS();
+  // Only poll the APRS endpoints when APRS can actually be shown: the map
+  // layer toggle, the EmComm layout (always draws APRS), or the dockable
+  // layout (APRS panel may be docked). Everyone else generates zero traffic.
+  const aprsData = useAPRS({
+    enabled: mapLayers.showAPRS || config.layout === 'emcomm' || config.layout === 'dockable',
+  });
   const ibp = useIBP(config.location?.lat ?? null, config.location?.lon ?? null);
   const meshcomData = useMeshCom();
   const emcommData = useEmcommData({
@@ -668,7 +684,8 @@ const App = () => {
   }, []);
 
   return (
-    <div
+    <main
+      id="main-content"
       style={{
         width: '100vw',
         height: '100vh',
@@ -716,22 +733,24 @@ const App = () => {
         onResetLayout={handleResetLayout}
       />
 
-      <RigProvider rigConfig={config.rigControl || { enabled: false, host: 'http://localhost', port: 5555 }}>
-        {config.layout === 'emcomm' ? (
-          <EmcommLayout {...layoutProps} />
-        ) : config.layout === 'dockable' ? (
-          <DockableLayout
-            key={layoutResetKey}
-            {...layoutProps}
-            layoutLocked={layoutLocked}
-            onToggleLayoutLock={toggleLayoutLock}
-          />
-        ) : config.layout === 'classic' || config.layout === 'tablet' || config.layout === 'compact' ? (
-          <ClassicLayout {...layoutProps} />
-        ) : (
-          <ModernLayout {...layoutProps} />
-        )}
-      </RigProvider>
+      <CallsignPopupProvider>
+        <RigProvider rigConfig={config.rigControl || { enabled: false, host: 'http://localhost', port: 5555 }}>
+          {config.layout === 'emcomm' ? (
+            <EmcommLayout {...layoutProps} />
+          ) : config.layout === 'dockable' ? (
+            <DockableLayout
+              key={layoutResetKey}
+              {...layoutProps}
+              layoutLocked={layoutLocked}
+              onToggleLayoutLock={toggleLayoutLock}
+            />
+          ) : config.layout === 'classic' || config.layout === 'tablet' || config.layout === 'compact' ? (
+            <ClassicLayout {...layoutProps} />
+          ) : (
+            <ModernLayout {...layoutProps} />
+          )}
+        </RigProvider>
+      </CallsignPopupProvider>
 
       {/* Modals */}
       <SettingsPanel
@@ -803,7 +822,27 @@ const App = () => {
         onClose={() => setShowWwbotaFilters(false)}
       />
       <WhatsNew showWhatsNew={config.showWhatsNew} />
-    </div>
+      {/* Assertive: satellite rising above horizon is time-critical for a ham operator */}
+      <div className="visually-hidden" aria-live="assertive" aria-atomic="true" data-testid="satellite-rise-announcer">
+        {riseAnnouncement}
+      </div>
+      {/* Polite: satellite setting is informational */}
+      <div className="visually-hidden" aria-live="polite" aria-atomic="true" data-testid="satellite-set-announcer">
+        {satelliteSetAnnouncement}
+      </div>
+      {/* Assertive: lightning proximity is a safety alert — announce immediately */}
+      <div className="visually-hidden" aria-live="assertive" aria-atomic="true" data-testid="lightning-announcer">
+        {lightningAnnouncement}
+      </div>
+      {/* Polite: new DX spot matching active filters — informational */}
+      <div className="visually-hidden" aria-live="polite" aria-atomic="true" data-testid="dx-spot-announcer">
+        {dxSpotAnnouncement}
+      </div>
+      {/* Assertive: severe weather at the DE location — operator may need to secure antennas */}
+      <div className="visually-hidden" aria-live="assertive" aria-atomic="true" data-testid="weather-alert-announcer">
+        {weatherAlertAnnouncement}
+      </div>
+    </main>
   );
 };
 

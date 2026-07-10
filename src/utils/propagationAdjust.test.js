@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   calculateSignalMargin,
   modeAdvantageDb,
+  modeRequiredSNR,
+  P533_REF_SNR_DB,
   adjustReliability,
   calculateSNR,
   getStatus,
@@ -82,5 +84,20 @@ describe('propagationAdjust — table exports', () => {
     expect(modeAdvantageDb('CW')).toBe(10);
     expect(modeAdvantageDb('WSPR')).toBe(41);
     expect(modeAdvantageDb('UNKNOWN_MODE')).toBe(0);
+  });
+
+  it('modeRequiredSNR derives the engine Path.SNRr from the SSB reference', () => {
+    // These go straight into the P.533 input (3 kHz reference bandwidth).
+    // SSB must equal the reference so SSB output is unchanged; unknown modes
+    // fall back to the SSB threshold.
+    expect(P533_REF_SNR_DB).toBe(15);
+    expect(modeRequiredSNR('SSB')).toBe(15);
+    expect(modeRequiredSNR('CW')).toBe(5);
+    expect(modeRequiredSNR('FT8')).toBe(-19);
+    expect(modeRequiredSNR('FT4')).toBe(-15);
+    expect(modeRequiredSNR('WSPR')).toBe(-26);
+    expect(modeRequiredSNR('JT65')).toBe(-23);
+    expect(modeRequiredSNR('AM')).toBe(21);
+    expect(modeRequiredSNR('UNKNOWN_MODE')).toBe(15);
   });
 });

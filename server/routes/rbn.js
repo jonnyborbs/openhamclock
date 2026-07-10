@@ -29,6 +29,9 @@ module.exports = function (app, ctx) {
     estimateLocationFromPrefix,
   } = ctx;
 
+  // Shared health snapshot read by server/health.js for /api/health.
+  ctx.rbnHealth = { connected: false, authenticated: false, lastSpotAt: null };
+
   // ============================================
   // REVERSE BEACON NETWORK (RBN) API
   // ============================================
@@ -86,7 +89,13 @@ module.exports = function (app, ctx) {
 
     let dataBuffer = '';
     let authenticated = false;
-    const userCallsign = 'OPENHAMCLOCK'; // Generic callsign for the app
+    // Log in with a REAL callsign: the instance owner's if configured, else
+    // the project callsign. RBN is tolerant of junk logins, but presenting
+    // invalid callsigns to other people's infrastructure is how OpenHamClock
+    // ends up in sysop screenshots — never again (see dxspider-proxy notes).
+    const isValidCall = (c) => typeof c === 'string' && /^[A-Z0-9]{1,3}\d[A-Z]{1,4}(-\d{1,2})?$/i.test(c.trim());
+    const configuredCall = (CONFIG.callsign || '').trim().toUpperCase();
+    const userCallsign = isValidCall(configuredCall) && configuredCall !== 'N0CALL' ? configuredCall : 'K0CJH-3';
 
     const client = net.createConnection(
       {
@@ -95,6 +104,7 @@ module.exports = function (app, ctx) {
       },
       () => {
         console.log(`[RBN] Persistent connection established`);
+        ctx.rbnHealth.connected = true;
       },
     );
 
@@ -109,6 +119,7 @@ module.exports = function (app, ctx) {
         console.log(`[RBN] Authenticating as ${userCallsign}`);
         client.write(`${userCallsign}\r\n`);
         authenticated = true;
+        ctx.rbnHealth.authenticated = true;
         dataBuffer = '';
         return;
       }
@@ -194,6 +205,7 @@ module.exports = function (app, ctx) {
           }
 
           rbnSpotCount++;
+          ctx.rbnHealth.lastSpotAt = timestamp;
         }
       }
     });
@@ -201,6 +213,8 @@ module.exports = function (app, ctx) {
     client.on('error', (err) => {
       console.error(`[RBN] Connection error: ${err.message}`);
       rbnConnection = null;
+      ctx.rbnHealth.connected = false;
+      ctx.rbnHealth.authenticated = false;
       // Reconnect after 5 seconds
       setTimeout(() => maintainRBNConnection(port), 5000);
     });
@@ -208,6 +222,8 @@ module.exports = function (app, ctx) {
     client.on('close', () => {
       console.log(`[RBN] Connection closed, reconnecting in 5s...`);
       rbnConnection = null;
+      ctx.rbnHealth.connected = false;
+      ctx.rbnHealth.authenticated = false;
       setTimeout(() => maintainRBNConnection(port), 5000);
     });
 

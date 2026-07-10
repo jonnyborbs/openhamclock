@@ -67,34 +67,37 @@ export function DXGridInput({ dxGrid, onDXChange, dxLocked, style }) {
   };
 
   return (
-    <input
-      ref={inputRef}
-      type="text"
-      value={inputValue}
-      readOnly={dxLocked}
-      maxLength={6}
-      onChange={handleChange}
-      onBlur={handleBlur}
-      onFocus={handleFocus}
-      onKeyDown={handleKeyDown}
-      title={
-        dxLocked
-          ? t('app.dxLocation.gridInputTitleLocked', 'Unlock DX position to enter a locator')
-          : t('app.dxLocation.gridInputTitle', 'Type a Maidenhead locator (e.g. JN58sm), press Enter')
-      }
-      style={{
-        background: 'transparent',
-        border: 'none',
-        borderBottom: '1px solid transparent',
-        outline: 'none',
-        cursor: dxLocked ? 'not-allowed' : 'text',
-        width: '7ch',
-        padding: 0,
-        margin: 0,
-        fontFamily: 'var(--font-mono)',
-        ...style,
-      }}
-    />
+    <div style={{ flex: '1' }}>
+      <input
+        ref={inputRef}
+        type="text"
+        value={inputValue}
+        readOnly={dxLocked}
+        maxLength={6}
+        onChange={handleChange}
+        onBlur={handleBlur}
+        onFocus={handleFocus}
+        onKeyDown={handleKeyDown}
+        title={
+          dxLocked
+            ? t('app.dxLocation.gridInputTitleLocked', 'Unlock DX position to enter a locator')
+            : t('app.dxLocation.gridInputTitle', 'Type a Maidenhead locator (e.g. JN58sm), press Enter')
+        }
+        style={{
+          background: 'transparent',
+          border: 'none',
+          borderBottom: '1px solid transparent',
+          outline: 'none',
+          cursor: dxLocked ? 'not-allowed' : 'text',
+          padding: 0,
+          margin: 0,
+          fontFamily: 'var(--font-mono)',
+          width: '100%',
+          minWidth: '6ch',
+          ...style,
+        }}
+      />
+    </div>
   );
 }
 

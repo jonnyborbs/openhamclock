@@ -1,22 +1,20 @@
 /**
- * CallsignLink — clickable callsign that opens the user's chosen callbook
+ * CallsignLink — clickable callsign that opens a popup with station info.
  *
  * Usage:
- *   <CallsignLink call="K1ABC" color="#fff" fontWeight="700" />
+ *   const { showPopup } = useCallsignPopup();
+ *   <CallsignLink call={spot.call} onPopup={showPopup} />
  *
- * Reads the global toggle from localStorage (ohc_qrz_links).
- * When enabled, clicking opens the callsign's page on the selected callbook
- * (QRZ.com by default — see src/utils/callbook.js) in a new tab.
+ * If `onPopup` is not provided, the callsign is rendered as plain text (no click).
  */
-import { createContext, useContext, useState, useCallback } from 'react';
-import { getCallbookUrl } from '../utils/callbook.js';
+import { useRef, useCallback } from 'react';
 
 // ── Extract base callsign from decorated/portable calls ──
 // 5Z4/OZ6ABL → OZ6ABL, UA1TAN/M → UA1TAN, W1ABC/6 → W1ABC
 // OE1XYZ-12 → OE1XYZ  (MeshCom / APRS SSID suffix stripped before QRZ lookup)
 // Picks the segment that looks most like a home callsign.
 const MODIFIERS = new Set(['M', 'P', 'QRP', 'MM', 'AM', 'R', 'T', 'B', 'BCN', 'LH', 'A', 'E', 'J', 'AG', 'AE', 'KT']);
-function extractBaseCall(raw) {
+export function extractBaseCall(raw) {
   if (!raw) return '';
   // Strip SSID suffix (-12, -99, etc.) used by MeshCom and APRS
   const withoutSsid = raw.replace(/-\d+$/, '');
@@ -32,60 +30,9 @@ function extractBaseCall(raw) {
   return candidates[0];
 }
 
-// ── Context for the global QRZ toggle ──
-const QRZContext = createContext({ enabled: true, toggle: () => {} });
-
-export function QRZProvider({ children }) {
-  const [enabled, setEnabled] = useState(() => {
-    try {
-      return localStorage.getItem('ohc_qrz_links') !== 'false';
-    } catch {
-      return true;
-    }
-  });
-
-  const toggle = useCallback(() => {
-    setEnabled((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem('ohc_qrz_links', String(next));
-      } catch {}
-      return next;
-    });
-  }, []);
-
-  return <QRZContext.Provider value={{ enabled, toggle }}>{children}</QRZContext.Provider>;
-}
-
-export function useQRZ() {
-  return useContext(QRZContext);
-}
-
-// ── Toggle button for panel headers ──
-export function QRZToggle({ style }) {
-  const { enabled, toggle } = useQRZ();
-  return (
-    <span
-      onClick={(e) => {
-        e.stopPropagation();
-        toggle();
-      }}
-      title={enabled ? 'Click callsigns to open the callbook lookup (ON)' : 'Callsign links disabled (OFF)'}
-      style={{
-        cursor: 'pointer',
-        fontSize: '11px',
-        opacity: enabled ? 1 : 0.4,
-        userSelect: 'none',
-        transition: 'opacity 0.2s',
-        ...style,
-      }}
-    >
-      🔍
-    </span>
-  );
-}
-
 // ── The callsign link itself ──
+// onPopup(call, anchorEl, location?) — callback for popup mode
+// location — { grid: string } or { lat: number, lon: number } (optional)
 export default function CallsignLink({
   call,
   color = 'inherit',
@@ -93,68 +40,60 @@ export default function CallsignLink({
   fontSize = 'inherit',
   style = {},
   children,
+  onPopup,
+  location,
 }) {
-  const { enabled } = useQRZ();
+  const spanRef = useRef(null);
+
+  const triggerPopup = useCallback(
+    (e) => {
+      if (e.type === 'click' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
+        onPopup(call, spanRef.current, location);
+      }
+    },
+    [call, location, onPopup],
+  );
 
   if (!call) return children || null;
 
-  // Strip portable suffixes and prefixes for QRZ lookup (5Z4/OZ6ABL → OZ6ABL, UA1TAN/M → UA1TAN)
-  const baseCall = extractBaseCall(call);
+  if (onPopup) {
+    const handleClick = (e) => {
+      e.stopPropagation();
+      onPopup(call, spanRef.current, location);
+    };
 
-  const handleClick = (e) => {
-    if (!enabled) return;
-    e.stopPropagation();
-    window.open(getCallbookUrl(baseCall), '_blank', 'noopener,noreferrer');
-  };
+    return (
+      <span
+        ref={spanRef}
+        role="button"
+        tabIndex={0}
+        aria-label={`Look up ${call}`}
+        onClick={handleClick}
+        onKeyDown={triggerPopup}
+        style={{
+          color,
+          fontWeight,
+          fontSize,
+          cursor: 'pointer',
+          borderBottom: '1px dotted rgba(255,255,255,0.15)',
+          transition: 'color 0.15s',
+          ...style,
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.color = 'var(--accent-cyan)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = color;
+        }}
+        title={`Look up ${call}`}
+      >
+        {children || call}
+      </span>
+    );
+  }
 
-  return (
-    <span
-      onClick={handleClick}
-      style={{
-        color,
-        fontWeight,
-        fontSize,
-        cursor: enabled ? 'pointer' : 'inherit',
-        borderBottom: enabled ? '1px dotted rgba(255,255,255,0.15)' : 'none',
-        transition: 'color 0.15s',
-        ...style,
-      }}
-      onMouseEnter={(e) => {
-        if (enabled) e.target.style.color = 'var(--accent-cyan)';
-      }}
-      onMouseLeave={(e) => {
-        if (enabled) e.target.style.color = color;
-      }}
-      title={enabled ? `Look up ${call}` : call}
-    >
-      {children || call}
-    </span>
-  );
-}
-
-// ── Global handler for Leaflet HTML popups ──
-// Call setupMapQRZHandler() once on app mount.
-// In popup HTML, use: <b data-qrz-call="K1ABC" style="cursor:pointer">K1ABC</b>
-let _mapHandlerInstalled = false;
-export function setupMapQRZHandler() {
-  if (_mapHandlerInstalled) return;
-  _mapHandlerInstalled = true;
-
-  document.addEventListener('click', (e) => {
-    const el = e.target.closest('[data-qrz-call]');
-    if (!el) return;
-
-    // Check if QRZ links are enabled
-    let enabled = true;
-    try {
-      enabled = localStorage.getItem('ohc_qrz_links') !== 'false';
-    } catch {}
-    if (!enabled) return;
-
-    const call = el.getAttribute('data-qrz-call');
-    if (call) {
-      const baseCall = extractBaseCall(call);
-      window.open(getCallbookUrl(baseCall), '_blank', 'noopener,noreferrer');
-    }
-  });
+  // No popup handler — render as plain text
+  return <span style={{ color, fontWeight, fontSize, ...style }}>{children || call}</span>;
 }

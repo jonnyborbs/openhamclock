@@ -69,6 +69,15 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemory
     };
   }, [enabled, pollMs]);
 
+  // Broadcast the fetched aircraft list to the text view panel (#1002).
+  // Updates arrive at poll cadence (30-60s), no throttling needed.
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent('mapdata:aircraft', { detail: enabled ? { enabled: true, aircraft } : { enabled: false } }),
+    );
+  }, [enabled, aircraft]);
+  useEffect(() => () => window.dispatchEvent(new CustomEvent('mapdata:aircraft', { detail: { enabled: false } })), []);
+
   // Bump viewportTick on map pan/zoom so the render effect refilters.
   useEffect(() => {
     if (!map || !enabled) return;

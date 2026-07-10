@@ -83,18 +83,33 @@ describe('runBrowserEngine', () => {
     }
   });
 
-  it('applies signal margin (FT8 @ 100W = +34dB) to raw P.533 reliability', async () => {
+  it('passes the mode decode threshold into the engine as requiredSNR (FT8 = -19, SSB = 15)', async () => {
     predictMock.mockResolvedValue(fakeHourResult({ reliability: 50 }));
 
     const ssb = await runBrowserEngine({ deLocation: DE, dxLocation: DX, mode: 'SSB', power: 100 });
-    const ft8 = await runBrowserEngine({ deLocation: DE, dxLocation: DX, mode: 'FT8', power: 100 });
+    const ssbSNRs = new Set(predictMock.mock.calls.map((c) => c[0].requiredSNR));
+    expect(ssbSNRs).toEqual(new Set([15]));
 
-    // Same 50% raw reliability → higher number under FT8 margin
-    const ssbRel = ssb.currentBands[0].reliability;
-    const ft8Rel = ft8.currentBands[0].reliability;
-    expect(ft8Rel).toBeGreaterThan(ssbRel);
+    predictMock.mockClear();
+    predictMock.mockResolvedValue(fakeHourResult({ reliability: 50 }));
+    const ft8 = await runBrowserEngine({ deLocation: DE, dxLocation: DX, mode: 'FT8', power: 100 });
+    const ft8SNRs = new Set(predictMock.mock.calls.map((c) => c[0].requiredSNR));
+    expect(ft8SNRs).toEqual(new Set([15 - 34]));
+
+    // The margin badge still reflects the mode for the UI.
     expect(ssb.signalMargin).toBe(0);
     expect(ft8.signalMargin).toBe(34);
+  });
+
+  it('does NOT post-process the engine BCR — mode lives in the engine input now', async () => {
+    // Regression for the FT8 restricted-coverage bug: a post-hoc +34 dB bump
+    // could never reopen a band the engine scored 0% at the SSB threshold,
+    // and it distorted non-zero bands. The engine runs at the FT8 threshold
+    // instead, so its output must be passed through untouched.
+    predictMock.mockResolvedValue(fakeHourResult({ reliability: 50 }));
+
+    const ft8 = await runBrowserEngine({ deLocation: DE, dxLocation: DX, mode: 'FT8', power: 100 });
+    expect(ft8.currentBands[0].reliability).toBe(50);
   });
 
   it('does NOT double-count power: 1000W and 100W produce identical reliability', async () => {

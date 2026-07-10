@@ -204,13 +204,24 @@ function calculateSignalMargin(mode, powerWatts, antGain) {
   return modeAdv + powerOffset + (antGain || 0);
 }
 
-// Mode-only advantage for post-processing P.533 BCR. The proppy service
-// passes the user's actual TX power (Path.txpower) and antenna gain (TXGOS)
-// straight into ITURHFProp, so power and antenna are already reflected in
-// the BCR. Only the mode advantage is missing — ITURHFProp runs with a
-// fixed SSB-equivalent BW=3000 / SNRr=15.
+// Mode-only advantage (dB) over SSB. Still used by calculateSignalMargin for
+// the heuristic engine, and as a post-hoc fallback when a legacy
+// iturhfprop-service ignores the requiredSNR parameter.
 function modeAdvantageDb(mode) {
   return MODE_ADVANTAGE_DB[mode] || 0;
+}
+
+// Path.SNRr the P.533 engines use for SSB, in dB within the fixed
+// Path.BW=3000 reference bandwidth. Mirror of P533_REF_SNR_DB in
+// src/utils/propagationAdjust.js — if you touch one file, touch both.
+const P533_REF_SNR_DB = 15;
+
+// Required SNR for a mode, passed into the P.533 input so digital-mode
+// decode thresholds are part of the engine run itself rather than a
+// post-hoc BCR bump (which can never reopen a band the engine scored 0%
+// for SSB). SSB maps to the reference value, keeping SSB output identical.
+function modeRequiredSNR(mode) {
+  return P533_REF_SNR_DB - modeAdvantageDb(mode);
 }
 
 /**
@@ -343,6 +354,8 @@ module.exports = {
   calculateLUF,
   calculateSignalMargin,
   modeAdvantageDb,
+  P533_REF_SNR_DB,
+  modeRequiredSNR,
   adjustReliability,
   calculateEnhancedReliability,
   calculateSNR,

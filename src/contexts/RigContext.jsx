@@ -542,6 +542,41 @@ export const RigProvider = ({ children, rigConfig }) => {
     [rigState.mode, rigConfig, setFreq, setMode],
   );
 
+  // ── Accessibility: aria-live announcements for status changes (#1000) ───────
+  // Two separate regions: assertive for urgent (connect/disconnect), polite for
+  // informational (mode/band changes). Clearing after 1 s allows the same
+  // message to re-trigger if the state bounces (e.g. reconnect after brief drop).
+  const [connectionAnnouncement, setConnectionAnnouncement] = useState('');
+  const [modeAnnouncement, setModeAnnouncement] = useState('');
+  const prevConnected = useRef(null); // null = initial mount, skip first announcement
+  const prevMode = useRef('');
+
+  useEffect(() => {
+    if (prevConnected.current === null) {
+      prevConnected.current = rigState.connected;
+      return;
+    }
+    if (prevConnected.current === rigState.connected) return;
+    prevConnected.current = rigState.connected;
+    const label = isCloudRelay ? 'Cloud relay' : 'Rig';
+    setConnectionAnnouncement(rigState.connected ? `${label} connected` : `${label} disconnected`);
+    const t = setTimeout(() => setConnectionAnnouncement(''), 1000);
+    return () => clearTimeout(t);
+  }, [rigState.connected, isCloudRelay]);
+
+  useEffect(() => {
+    if (!prevMode.current || prevMode.current === rigState.mode) {
+      prevMode.current = rigState.mode;
+      return;
+    }
+    prevMode.current = rigState.mode;
+    if (rigState.mode) {
+      setModeAnnouncement(`Mode changed to ${rigState.mode}`);
+      const t = setTimeout(() => setModeAnnouncement(''), 1000);
+      return () => clearTimeout(t);
+    }
+  }, [rigState.mode]);
+
   const value = {
     ...rigState,
     enabled: rigConfig?.enabled,
@@ -558,5 +593,17 @@ export const RigProvider = ({ children, rigConfig }) => {
     tuneTo,
   };
 
-  return <RigContext.Provider value={value}>{children}</RigContext.Provider>;
+  return (
+    <RigContext.Provider value={value}>
+      {children}
+      {/* Assertive: rig/relay connect-disconnect is urgent — announced immediately */}
+      <div className="visually-hidden" aria-live="assertive" aria-atomic="true" data-testid="rig-connection-announcer">
+        {connectionAnnouncement}
+      </div>
+      {/* Polite: mode/band changes are informational — wait for current speech to finish */}
+      <div className="visually-hidden" aria-live="polite" aria-atomic="true" data-testid="rig-mode-announcer">
+        {modeAnnouncement}
+      </div>
+    </RigContext.Provider>
+  );
 };

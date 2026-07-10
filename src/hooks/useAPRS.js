@@ -10,6 +10,11 @@ import { apiFetch } from '../utils/apiFetch';
 
 const STORAGE_KEY = 'openhamclock_aprsWatchlist';
 const POLL_INTERVAL = 15000; // 15 seconds
+// Backoff cadence when the server reports APRS-IS disabled with no TNC data —
+// idle instances shouldn't pay the full polling rate for a feature not in use.
+const IDLE_POLL_INTERVAL = 90000; // 90 seconds
+const TNC_POLL_INTERVAL = 10000; // 10 seconds while a TNC is connected
+const TNC_IDLE_POLL_INTERVAL = 60000; // 60 seconds while no TNC is detected
 const RF_MAX_AGE_MS = 60 * 60 * 1000; // 60 minutes — match server APRS_MAX_AGE_MINUTES
 
 export const useAPRS = (options = {}) => {
@@ -28,6 +33,10 @@ export const useAPRS = (options = {}) => {
   // True once SSE confirms aprs-tnc is running — prevents server poll from
   // resetting aprsEnabled to false when the OHC server has APRS_ENABLED=false.
   const tncDetectedViaSse = useRef(false);
+  // Refs mirroring server activity so the poll loops can pick their next delay
+  // without re-arming effects (which would trigger an extra immediate fetch).
+  const stationsIdleRef = useRef(false);
+  const tncConnectedRef = useRef(false);
   // sourceFilter: 'all' | 'internet' | 'rf'
   const [sourceFilter, setSourceFilter] = useState('all');
 
@@ -63,6 +72,9 @@ export const useAPRS = (options = {}) => {
         if (!tncDetectedViaSse.current) {
           setAprsEnabled(data.enabled || data.tncActive || false);
         }
+        // Idle when APRS-IS is off server-side and nothing has been relayed
+        // from a TNC — the next poll backs off to IDLE_POLL_INTERVAL.
+        stationsIdleRef.current = !data.enabled && !data.tncActive && (data.stations || []).length === 0;
         setLastUpdate(new Date());
         setLoading(false);
       }
@@ -79,27 +91,50 @@ export const useAPRS = (options = {}) => {
       const res = await apiFetch('/api/aprs/tnc-status', { cache: 'no-store' });
       if (res?.ok) {
         const data = await res.json();
+        tncConnectedRef.current = data.connected ?? false;
         setTncConnected(data.connected ?? false);
       }
     } catch {
+      tncConnectedRef.current = false;
       setTncConnected(false);
     }
   }, [enabled]);
 
-  // Poll stations
+  // Poll stations — full rate while APRS data is flowing, backed off when the
+  // server reports the feature idle (APRS-IS off, no TNC relays).
   useEffect(() => {
     if (!enabled) return;
-    fetchStations();
-    const interval = setInterval(fetchStations, POLL_INTERVAL);
-    return () => clearInterval(interval);
+    let timer;
+    let cancelled = false;
+    const tick = async () => {
+      await fetchStations();
+      if (cancelled) return;
+      timer = setTimeout(tick, stationsIdleRef.current ? IDLE_POLL_INTERVAL : POLL_INTERVAL);
+    };
+    tick();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [enabled, fetchStations]);
 
-  // Poll TNC status every 10 seconds (less frequent than stations)
+  // Poll TNC status — fast while a TNC is connected (detect disconnects),
+  // slow otherwise (a self-hosted rig-bridge starting up is detected within
+  // a minute; SSE plugin-init covers the local/direct case instantly).
   useEffect(() => {
     if (!enabled) return;
-    fetchTncStatus();
-    const interval = setInterval(fetchTncStatus, 10000);
-    return () => clearInterval(interval);
+    let timer;
+    let cancelled = false;
+    const tick = async () => {
+      await fetchTncStatus();
+      if (cancelled) return;
+      timer = setTimeout(tick, tncConnectedRef.current ? TNC_POLL_INTERVAL : TNC_IDLE_POLL_INTERVAL);
+    };
+    tick();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [enabled, fetchTncStatus]);
 
   // Age out stale RF stations (mirrors server-side APRS_MAX_AGE_MINUTES)
@@ -133,6 +168,7 @@ export const useAPRS = (options = {}) => {
 
       if (msg.type === 'plugin-init') {
         const hasTnc = msg.plugins?.includes('aprs-tnc') ?? false;
+        tncConnectedRef.current = hasTnc;
         setTncConnected(hasTnc);
         if (hasTnc) {
           tncDetectedViaSse.current = true;
@@ -160,6 +196,7 @@ export const useAPRS = (options = {}) => {
         return next;
       });
       tncDetectedViaSse.current = true;
+      tncConnectedRef.current = true;
       setTncConnected(true);
       setAprsEnabled(true);
       setLastUpdate(new Date());

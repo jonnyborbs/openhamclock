@@ -2,17 +2,25 @@
  * DXClusterPanel Component
  * Displays DX cluster spots with filtering controls and ON/OFF toggle
  */
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getBandColor } from '../utils/callsign.js';
 import { matchesDXSpotPath } from '../utils/dxClusterSpotMatcher';
+import { balanceSpotWindow } from '../utils/dxClusterFilters';
 import { IconSearch, IconMap, IconGlobe } from './Icons.jsx';
 import CallsignLink from './CallsignLink.jsx';
+import { useCallsignPopup } from './CallsignPopupManager.jsx';
 import { classifySpotMode } from '../hooks/useBandHealth.js';
+import { apiFetch } from '../utils/apiFetch';
+
+// Mirrors the server-side validator — good enough to gate the Spot button.
+const isValidCallsign = (call) =>
+  typeof call === 'string' && /^[A-Z0-9]{1,3}\d[A-Z]{1,4}(-\d{1,2})?$/i.test(call.trim());
 
 export const DXClusterPanel = ({
   data,
   loading,
+  error,
   totalSpots,
   filters,
   onFilterChange,
@@ -22,8 +30,68 @@ export const DXClusterPanel = ({
   hoveredSpot,
   showOnMap,
   onToggleMap,
+  userCallsign,
 }) => {
   const { t } = useTranslation();
+  const { showPopup } = useCallsignPopup();
+
+  // ── Spot submission (only when this instance has an OHC Cluster) ────
+  const [canSpot, setCanSpot] = useState(false);
+  const [showSpotForm, setShowSpotForm] = useState(false);
+  const [spotCall, setSpotCall] = useState('');
+  const [spotFreq, setSpotFreq] = useState('');
+  const [spotComment, setSpotComment] = useState('');
+  const [spotStatus, setSpotStatus] = useState(null); // {ok, msg} | 'sending'
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch('/api/dxcluster/sources')
+      .then((r) => (r?.ok ? r.json() : []))
+      .then((sources) => {
+        if (!cancelled && Array.isArray(sources)) setCanSpot(sources.some((s) => s.id === 'ohc'));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const callsignOk = isValidCallsign(userCallsign || '') && (userCallsign || '').toUpperCase() !== 'N0CALL';
+
+  const submitSpot = async () => {
+    const freqRaw = parseFloat(spotFreq);
+    // Hams type either kHz (14025.5) or MHz (14.0255) — values under 1000
+    // can only be MHz on the bands people actually spot from a web UI.
+    const freqKhz = Number.isFinite(freqRaw) && freqRaw < 1000 ? freqRaw * 1000 : freqRaw;
+
+    setSpotStatus('sending');
+    try {
+      const response = await apiFetch('/api/dxcluster/spot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          spotter: userCallsign,
+          call: spotCall.trim().toUpperCase(),
+          freqKhz,
+          comment: spotComment.trim(),
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (response.ok) {
+        setSpotStatus({ ok: true, msg: t('dxClusterPanel.spot.sent', { defaultValue: 'Spot sent!' }) });
+        setSpotCall('');
+        setSpotComment('');
+        setTimeout(() => setSpotStatus(null), 4000);
+      } else {
+        setSpotStatus({ ok: false, msg: body.error || `HTTP ${response.status}` });
+      }
+    } catch {
+      setSpotStatus({
+        ok: false,
+        msg: t('dxClusterPanel.spot.failed', { defaultValue: 'Could not send spot' }),
+      });
+    }
+  };
 
   // Spotter column visibility (#995). Default on to match historical behaviour;
   // users with tight vertical space can hide it to roughly double the spot
@@ -121,6 +189,8 @@ export const DXClusterPanel = ({
     if (filters?.commentText?.length) count++;
     if (filters?.callsign) count++;
     if (filters?.watchlistOnly) count++;
+    if (filters?.dxpeditionsOnly) count++;
+    if (filters?.contest) count++;
     if (filters?.excludeContinents) count += filters.excludeContinents.length;
     if (filters?.excludeCqZones) count += filters.excludeCqZones.length;
     if (filters?.excludeItuZones) count += filters.excludeItuZones.length;
@@ -143,8 +213,11 @@ export const DXClusterPanel = ({
   };
 
   const spots = useMemo(() => {
-    if (sortField === 'time') return rawSpots;
-    const copy = [...rawSpots];
+    // Pick the display window before sorting so mode balance survives: a raw
+    // "newest 50" slice is all FT8/FT4 skimmer churn and SSB never shows.
+    const windowed = balanceSpotWindow(rawSpots, 50);
+    if (sortField === 'time') return windowed;
+    const copy = [...windowed];
     if (sortField === 'freq') {
       copy.sort((a, b) => freqToMHz(a) - freqToMHz(b));
     } else if (sortField === 'call') {
@@ -205,9 +278,37 @@ export const DXClusterPanel = ({
             <option value="freq">Freq</option>
             <option value="call">Call</option>
           </select>
+          {canSpot && (
+            <button
+              type="button"
+              onClick={() => setShowSpotForm((v) => !v)}
+              disabled={!callsignOk}
+              title={
+                callsignOk
+                  ? t('dxClusterPanel.spot.tooltip', { defaultValue: 'Spot a station on the OpenHamClock Cluster' })
+                  : t('dxClusterPanel.spot.needCallsign', { defaultValue: 'Set your callsign in Settings to spot' })
+              }
+              aria-label={t('dxClusterPanel.spot.tooltip', { defaultValue: 'Spot a station' })}
+              aria-pressed={showSpotForm}
+              style={{
+                background: showSpotForm ? 'rgba(0, 255, 136, 0.3)' : 'rgba(100, 100, 100, 0.3)',
+                border: `1px solid ${showSpotForm ? 'var(--accent-green)' : '#666'}`,
+                color: callsignOk ? (showSpotForm ? 'var(--accent-green)' : '#888') : '#555',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                fontSize: '10px',
+                fontFamily: 'var(--font-mono)',
+                cursor: callsignOk ? 'pointer' : 'not-allowed',
+              }}
+            >
+              +DX
+            </button>
+          )}
           <button
+            type="button"
             onClick={onOpenFilters}
             title={t('dxClusterPanel.filterTooltip')}
+            aria-label={t('dxClusterPanel.filterTooltip')}
             style={{
               background: filterCount > 0 ? 'rgba(255, 170, 0, 0.3)' : 'rgba(100, 100, 100, 0.3)',
               border: `1px solid ${filterCount > 0 ? '#ffaa00' : '#666'}`,
@@ -220,7 +321,7 @@ export const DXClusterPanel = ({
             }}
           >
             <IconSearch size={10} style={{ verticalAlign: 'middle', marginRight: '3px' }} />
-            {t('dxClusterPanel.filtersButton')}
+            {filterCount > 0 ? filterCount : ''}
           </button>
           <button
             onClick={toggleSpotter}
@@ -241,6 +342,7 @@ export const DXClusterPanel = ({
             de
           </button>
           <button
+            type="button"
             onClick={onToggleMap}
             title={showOnMap ? t('dxClusterPanel.mapToggleHide') : t('dxClusterPanel.mapToggleShow')}
             aria-label={showOnMap ? t('dxClusterPanel.mapToggleHide') : t('dxClusterPanel.mapToggleShow')}
@@ -257,14 +359,17 @@ export const DXClusterPanel = ({
             }}
           >
             <IconMap size={10} style={{ verticalAlign: 'middle', marginRight: '3px' }} />
-            {showOnMap ? t('dxClusterPanel.mapToggleOn') : t('dxClusterPanel.mapToggleOff')}
           </button>
         </div>
       </div>
 
       {/* Quick search */}
       <div style={{ display: 'flex', gap: '4px', marginBottom: '6px' }}>
+        <label htmlFor="dx-cluster-search" className="visually-hidden">
+          {t('dxClusterPanel.quickSearchLabel', { defaultValue: 'Search DX cluster spots by callsign' })}
+        </label>
         <input
+          id="dx-cluster-search"
           type="text"
           placeholder={t('dxClusterPanel.quickSearch')}
           value={filters?.callsign || ''}
@@ -281,7 +386,106 @@ export const DXClusterPanel = ({
           }}
         />
       </div>
-
+      {/* Spot submission form */}
+      {canSpot && showSpotForm && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (spotStatus !== 'sending') submitSpot();
+          }}
+          style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '6px' }}
+        >
+          <div style={{ display: 'flex', gap: '4px' }}>
+            <input
+              type="text"
+              placeholder={t('dxClusterPanel.spot.call', { defaultValue: 'DX call' })}
+              aria-label={t('dxClusterPanel.spot.call', { defaultValue: 'DX callsign to spot' })}
+              value={spotCall}
+              onChange={(e) => setSpotCall(e.target.value)}
+              required
+              style={{
+                flex: 2,
+                padding: '4px 8px',
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '3px',
+                color: 'var(--text-primary)',
+                fontSize: '11px',
+                fontFamily: 'var(--font-mono)',
+                textTransform: 'uppercase',
+              }}
+            />
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder={t('dxClusterPanel.spot.freq', { defaultValue: 'kHz' })}
+              aria-label={t('dxClusterPanel.spot.freqLabel', { defaultValue: 'Frequency in kHz' })}
+              value={spotFreq}
+              onChange={(e) => setSpotFreq(e.target.value)}
+              required
+              style={{
+                flex: 1.5,
+                padding: '4px 8px',
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '3px',
+                color: 'var(--text-primary)',
+                fontSize: '11px',
+                fontFamily: 'var(--font-mono)',
+              }}
+            />
+            <button
+              type="submit"
+              disabled={spotStatus === 'sending'}
+              style={{
+                background: 'rgba(0, 255, 136, 0.2)',
+                border: '1px solid var(--accent-green)',
+                color: 'var(--accent-green)',
+                padding: '2px 10px',
+                borderRadius: '3px',
+                fontSize: '11px',
+                fontFamily: 'var(--font-mono)',
+                cursor: spotStatus === 'sending' ? 'wait' : 'pointer',
+              }}
+            >
+              {spotStatus === 'sending'
+                ? t('dxClusterPanel.spot.sending', { defaultValue: '...' })
+                : t('dxClusterPanel.spot.send', { defaultValue: 'Spot' })}
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+            <input
+              type="text"
+              placeholder={t('dxClusterPanel.spot.comment', { defaultValue: 'Comment (optional)' })}
+              aria-label={t('dxClusterPanel.spot.comment', { defaultValue: 'Spot comment' })}
+              value={spotComment}
+              onChange={(e) => setSpotComment(e.target.value)}
+              maxLength={60}
+              style={{
+                flex: 1,
+                padding: '4px 8px',
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '3px',
+                color: 'var(--text-primary)',
+                fontSize: '11px',
+                fontFamily: 'var(--font-mono)',
+              }}
+            />
+            <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+              de {(userCallsign || '').toUpperCase()}
+            </span>
+          </div>
+          {spotStatus && spotStatus !== 'sending' && (
+            <div
+              role="status"
+              style={{ fontSize: '10px', color: spotStatus.ok ? 'var(--accent-green)' : 'var(--accent-red)' }}
+            >
+              {spotStatus.msg}
+            </div>
+          )}
+        </form>
+      )}
       {/* Spots list */}
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}>
@@ -292,11 +496,11 @@ export const DXClusterPanel = ({
           style={{
             textAlign: 'center',
             padding: '20px',
-            color: 'var(--text-muted)',
+            color: error ? 'var(--accent-red)' : 'var(--text-muted)',
             fontSize: '12px',
           }}
         >
-          {filterCount > 0 ? t('dxClusterPanel.noSpotsFiltered') : t('dxClusterPanel.noSpots')}
+          {error ? error : filterCount > 0 ? t('dxClusterPanel.noSpotsFiltered') : t('dxClusterPanel.noSpots')}
         </div>
       ) : (
         <div
@@ -316,7 +520,7 @@ export const DXClusterPanel = ({
             {showSpotter && <span role="columnheader">Spotter</span>}
             <span role="columnheader">Age</span>
           </div>
-          {spots.slice(0, 25).map((spot, i) => {
+          {spots.map((spot, i) => {
             // Frequency can be in MHz (string like "14.070") or kHz (number like 14070)
             let freqDisplay = '?';
             let freqMHz = 0;
@@ -349,6 +553,12 @@ export const DXClusterPanel = ({
                 onClick={() => {
                   onSpotClick?.(spot);
                 }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSpotClick?.(spot);
+                  }
+                }}
                 style={{
                   display: 'grid',
                   gridTemplateColumns: showSpotter ? '55px 1fr auto auto auto' : '55px 1fr auto auto',
@@ -380,7 +590,13 @@ export const DXClusterPanel = ({
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  <CallsignLink call={spot.call} color="var(--text-primary)" fontWeight="700" />
+                  <CallsignLink
+                    call={spot.call}
+                    color="var(--text-primary)"
+                    fontWeight="700"
+                    onPopup={showPopup}
+                    location={{ grid: spot.dxGrid, lat: spot.dxLat, lon: spot.dxLon }}
+                  />
                 </div>
                 <div
                   role="cell"
@@ -414,7 +630,14 @@ export const DXClusterPanel = ({
                       alignSelf: 'center',
                     }}
                   >
-                    de <CallsignLink call={spot.spotter || '?'} color="var(--text-muted)" fontSize="10px" />
+                    de{' '}
+                    <CallsignLink
+                      call={spot.spotter || '?'}
+                      color="var(--text-muted)"
+                      fontSize="10px"
+                      onPopup={showPopup}
+                      location={{ grid: spot.spotterGrid, lat: spot.spotterLat, lon: spot.spotterLon }}
+                    />
                   </div>
                 )}
                 <div

@@ -101,7 +101,7 @@ export function useLayer({ enabled = false, opacity = 0.85, map = null, callsign
       const popupColor = isMe ? '#22c55e' : '#6366f1';
       marker.bindPopup(`
         <div style="font-family: var(--font-mono); min-width: 140px;">
-          <div data-qrz-call="${esc(user.call)}" style="font-size: 14px; font-weight: bold; color: ${popupColor}; margin-bottom: 4px;">
+          <div data-map-call="${esc(user.call)}" style="font-size: 14px; font-weight: bold; color: ${popupColor}; margin-bottom: 4px;">
             👥 ${esc(user.call)}${isMe ? ' (you)' : ''}
           </div>
           <div style="font-size: 11px; color: #888;">

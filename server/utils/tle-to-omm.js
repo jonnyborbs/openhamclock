@@ -1,9 +1,6 @@
 /**
- * Convert classical Two-Line Element (TLE) set to an OMM-shaped JSON object
- * matching what CelesTrak returns from /NORAD/elements/gp.php?FORMAT=json.
- *
- * Used by the satellite resolver to pour TLE data from AMSAT and SatNOGS
- * (TLE-only feeds) into the same ommCache structure the rest of the code expects.
+ * Convert classical Two-Line Element (TLE) set to an OMM-shaped JSON object.
+ * Used by the satellite resolver to simulate OMM data from TLE/3LE only data sources.
  *
  * TLE column layout reference: https://celestrak.org/NORAD/documentation/tle-fmt.php
  * OMM format reference:        https://celestrak.org/NORAD/documentation/gp-data-formats.php
@@ -59,12 +56,12 @@ function epochToIso(epochField) {
 }
 
 /**
- * Convert a TLE (name + line1 + line2) into an OMM-shaped JSON object.
+ * Convert a 3LE (name + line1 + line2) into an OMM-shaped JSON object.
  * Returns null if parsing fails so callers can skip bad records cleanly.
  *
- * @param {string} name   Satellite name (line 0)
- * @param {string} line1  TLE line 1
- * @param {string} line2  TLE line 2
+ * @param {string} name   Satellite name (3LE line 0)
+ * @param {string} line1  3LE line 1
+ * @param {string} line2  3LE line 2
  * @returns {object|null}
  */
 function tleToOmm(name, line1, line2) {
@@ -135,32 +132,98 @@ function tleToOmm(name, line1, line2) {
 }
 
 /**
- * Parse a concatenated TLE text blob (AMSAT nasabare.txt format) into an
- * array of OMM objects. Returns an empty array on parse failure.
- *
- * Format:
- *   NAME
- *   1 NNNNN...
- *   2 NNNNN...
- *   NAME
- *   1 NNNNN...
- *   2 NNNNN...
+ * Parse a concatenated 3LE text blob into a simulated array of OMM objects.
+ * Returns an empty array on parse failure.
  */
 function parseTleBlock(text) {
-  if (typeof text !== 'string') return [];
-  const lines = text.split(/\r?\n/).map((l) => l.replace(/\s+$/, ''));
   const out = [];
-  for (let i = 0; i + 2 < lines.length; i++) {
-    const l0 = lines[i];
-    const l1 = lines[i + 1];
-    const l2 = lines[i + 2];
-    if (l1.startsWith('1 ') && l2.startsWith('2 ')) {
-      const omm = tleToOmm(l0, l1, l2);
-      if (omm) out.push(omm);
-      i += 2; // skip the lines we just consumed
-    }
+
+  const sm = new TleLineParserStateMachine((line0, line1, line2) => {
+    // operation on state machine data emit
+    const omm = tleToOmm(line0, line1, line2);
+    if (omm) out.push(omm);
+  });
+
+  const lines = text
+    .trim()
+    .split('\n')
+    .map((line) => line.replace(/\r$/, ''));
+  for (const line of lines) {
+    sm.next(line); // feed line-by-line
   }
+
   return out;
 }
 
-module.exports = { tleToOmm, parseTleBlock, parseImpliedDecimal, parseExpField, epochToIso };
+// state machine to correctly parse 3LE line-by-line
+// construct instance with call-back, feed line-by-line through next(line)
+class TleLineParserStateMachine {
+  #state;
+  #line0;
+  #line1;
+  #line2;
+  #emitCallback;
+
+  constructor(emitCallback) {
+    this.next(''); // reset all
+    this.#emitCallback = emitCallback; // save callback
+  }
+
+  #LineType(line) {
+    if (!line || typeof line !== 'string') return 3;
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith('1 ')) return 1;
+    if (trimmed.startsWith('2 ')) return 2;
+    return 0;
+  }
+
+  #nextState(lineType) {
+    switch (this.#state) {
+      case 0:
+        if (lineType == 0) this.#state = 1;
+        else if (lineType == 1) this.#state = 2;
+        else this.#state = 0;
+        break;
+      case 1:
+        if (lineType == 0) this.#state = 1;
+        else if (lineType == 1) this.#state = 2;
+        else this.#state = 0;
+        break;
+      case 2:
+        if (lineType == 0) this.#state = 1;
+        else if (lineType == 2) this.#state = 3;
+        else this.#state = 0;
+        break;
+      default:
+        this.#state = 0;
+        break;
+    }
+  }
+
+  next(line) {
+    this.#nextState(this.#LineType(line));
+    switch (this.#state) {
+      case 1:
+        this.#line0 = line; // save line 0
+        break;
+      case 2:
+        this.#line1 = line; // save line 1
+        break;
+      case 3:
+        // save line 2, emit, next state is 0
+        this.#line2 = line;
+        if (this.#emitCallback != null) this.#emitCallback(this.#line0, this.#line1, this.#line2);
+        this.#state = 0;
+        break;
+      default:
+        // reset all
+        this.#state = 0;
+        this.#line0 = '';
+        this.#line1 = '';
+        this.#line2 = '';
+        break;
+    }
+  }
+}
+
+module.exports = { tleToOmm, parseTleBlock };

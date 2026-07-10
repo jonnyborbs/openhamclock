@@ -5,9 +5,15 @@
  * Runs globally for all configured users (callsign != N0CALL).
  */
 import { useEffect, useRef } from 'react';
-import { apiFetch } from '../../utils/apiFetch';
 
 const HEARTBEAT_INTERVAL = 2 * 60 * 1000; // 2 minutes
+// Server locks out repeat presence POSTs from one IP for 1 minute — don't
+// even send a heartbeat earlier than that (tab wake-ups and remounts fire
+// the effect again well before the interval elapses).
+const MIN_HEARTBEAT_SPACING = 61 * 1000;
+
+// Module-level so every mount of the hook in this tab shares the throttle
+let lastHeartbeatAt = 0;
 
 export default function usePresence({ callsign, locator, sharePresence = true }) {
   const locationRef = useRef(null);
@@ -40,8 +46,15 @@ export default function usePresence({ callsign, locator, sharePresence = true })
 
     const sendHeartbeat = async () => {
       if (!locationRef.current) return;
+      if (Date.now() - lastHeartbeatAt < MIN_HEARTBEAT_SPACING) return;
+      lastHeartbeatAt = Date.now();
       try {
-        await apiFetch('/api/presence', {
+        // Plain fetch, NOT apiFetch: the server 429s heartbeats that arrive
+        // inside its per-IP lockout (second tab, shared IP, early wake-up),
+        // and that expected, endpoint-specific throttle must not arm
+        // apiFetch's global 30s backoff — it was freezing every panel in
+        // the app each heartbeat cycle.
+        await fetch('/api/presence', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

@@ -4,8 +4,10 @@
  */
 import React from 'react';
 import CallsignLink from './CallsignLink.jsx';
+import { useCallsignPopup } from './CallsignPopupManager.jsx';
 
 export const DXpeditionPanel = ({ data, loading }) => {
+  const { showPopup } = useCallsignPopup();
   const getStatusStyle = (expedition) => {
     if (expedition.isActive) {
       return { bg: 'rgba(0, 255, 136, 0.15)', border: 'var(--accent-green)', color: 'var(--accent-green)' };
@@ -58,7 +60,7 @@ export const DXpeditionPanel = ({ data, loading }) => {
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <CallsignLink call={exp.callsign} color="var(--accent-amber)" fontWeight="700" />
+                  <CallsignLink call={exp.callsign} color="var(--accent-amber)" fontWeight="700" onPopup={showPopup} />
                   <span style={{ color: style.color, fontSize: '9px' }}>{exp.isActive ? '● NOW' : 'SOON'}</span>
                 </div>
                 <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{exp.entity}</div>

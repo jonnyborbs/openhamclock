@@ -4,9 +4,10 @@
  */
 import React, { useState, useRef } from 'react';
 import { ariaTabKeyDown } from '../utils/ariaTabKeyDown.js';
+import { CONTEST_PRESETS } from '../utils/dxClusterFilters.js';
 
 export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose, onClearSpots }) => {
-  const DX_TABS = ['zones', 'bands', 'modes', 'watchlist', 'text', 'exclude', 'settings'];
+  const DX_TABS = ['zones', 'bands', 'modes', 'watchlist', 'contest', 'text', 'exclude', 'settings'];
   const dxTabRefs = useRef({});
   const [activeTab, setActiveTab] = useState('zones');
   const [newWatchlistCall, setNewWatchlistCall] = useState('');
@@ -76,6 +77,8 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose, onCl
     if (filters?.modes?.length) count += filters.modes.length;
     if (filters?.watchlist?.length) count += filters.watchlist.length;
     if (filters?.commentText?.length) count += filters.commentText.length;
+    if (filters?.dxpeditionsOnly) count += 1;
+    if (filters?.contest) count += 1;
 
     /* excludes */
     if (filters?.excludeContinents?.length) count += filters.excludeContinents.length;
@@ -467,6 +470,74 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose, onCl
           Show only watchlist callsigns
         </label>
       </div>
+      <div style={{ marginTop: '12px' }}>
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            color: 'var(--text-secondary)',
+            fontSize: '12px',
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={filters?.dxpeditionsOnly || false}
+            onChange={(e) => onFilterChange({ ...filters, dxpeditionsOnly: e.target.checked || undefined })}
+          />
+          Show only DXpeditions
+        </label>
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', marginLeft: '24px' }}>
+          Keeps spots whose callsign matches an active or upcoming DXpedition (NG3K list).
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderContestTab = () => (
+    <div>
+      <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)', marginBottom: '10px' }}>
+        Show only contest activity
+      </div>
+      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '14px' }}>
+        Cluster spots carry no contest tag, so this matches the spot comment against each contest's usual signature. For
+        Field Day that's "FD", "Field Day", or a class+section exchange like "3A MO" — spots with bare comments won't
+        match even if the station is participating.
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+        {CONTEST_PRESETS.map((preset) => (
+          <button
+            key={preset.key}
+            onClick={() =>
+              onFilterChange({
+                ...filters,
+                contest: filters?.contest === preset.key ? undefined : preset.key,
+              })
+            }
+            aria-pressed={filters?.contest === preset.key}
+            style={chipStyle(filters?.contest === preset.key)}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+      {filters?.contest && (
+        <div style={{ marginTop: '14px' }}>
+          <button
+            onClick={() => clearFilter('contest')}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--accent-red)',
+              fontSize: '12px',
+              cursor: 'pointer',
+            }}
+          >
+            Clear contest filter
+          </button>
+        </div>
+      )}
     </div>
   );
 
@@ -888,7 +959,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose, onCl
             <input
               type="range"
               min="5"
-              max="30"
+              max="60"
               step="5"
               value={retentionMinutes}
               onChange={(e) => onFilterChange({ ...filters, spotRetentionMinutes: parseInt(e.target.value) })}
@@ -920,7 +991,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose, onCl
             }}
           >
             <span>5 min (freshest)</span>
-            <span>30 min (default)</span>
+            <span>60 min (longest)</span>
           </div>
         </div>
 
@@ -929,7 +1000,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose, onCl
             Quick Presets
           </div>
           <div style={{ display: 'flex', gap: '8px' }}>
-            {[5, 10, 15, 20, 30].map((mins) => (
+            {[5, 10, 15, 20, 30, 60].map((mins) => (
               <button
                 key={mins}
                 onClick={() => onFilterChange({ ...filters, spotRetentionMinutes: mins })}
@@ -1000,24 +1071,24 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose, onCl
               onClick={clearAllFilters}
               style={{
                 padding: '8px 16px',
-                background: 'rgba(255, 68, 102, 0.2)',
-                border: '1px solid var(--accent-red)',
+                background: 'color-mix(in srgb, var(--accent-amber) 20%, transparent)',
+                border: '1px solid var(--accent-amber)',
                 borderRadius: '6px',
-                color: 'var(--accent-red)',
+                color: 'var(--accent-amber)',
                 fontSize: '13px',
                 cursor: 'pointer',
               }}
             >
-              Clear All
+              Clear Filters
             </button>
             <button
               onClick={onClearSpots}
               style={{
                 padding: '8px 16px',
-                background: 'color-mix(in srgb, var(--accent-amber) 20%, transparent)',
-                border: '1px solid var(--accent-amber)',
+                background: 'color-mix(in srgb, var(--accent-red) 20%, transparent)',
+                border: '1px solid var(--accent-red)',
                 borderRadius: '6px',
-                color: 'var(--accent-amber)',
+                color: 'var(--accent-red)',
                 fontSize: '13px',
                 cursor: 'pointer',
               }}
@@ -1054,6 +1125,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose, onCl
             ['bands', 'Bands'],
             ['modes', 'Modes'],
             ['watchlist', 'Watchlist'],
+            ['contest', 'Contest'],
             ['text', 'Text'],
             ['exclude', 'Exclude'],
             ['settings', '⊙ Settings'],
@@ -1085,6 +1157,7 @@ export const DXFilterManager = ({ filters, onFilterChange, isOpen, onClose, onCl
           {activeTab === 'bands' && renderBandsTab()}
           {activeTab === 'modes' && renderModesTab()}
           {activeTab === 'watchlist' && renderWatchlistTab()}
+          {activeTab === 'contest' && renderContestTab()}
           {activeTab === 'text' && renderTextTab()}
           {activeTab === 'exclude' && renderExcludeTab()}
           {activeTab === 'settings' && renderSettingsTab()}

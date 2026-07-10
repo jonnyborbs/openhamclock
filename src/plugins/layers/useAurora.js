@@ -109,7 +109,35 @@ function buildAuroraCanvas(coordinates) {
   return smoothCanvas.toDataURL('image/png');
 }
 
-export function useLayer({ enabled = false, opacity = 0.6, map = null }) {
+// Reduce the 360×181 OVATION grid to the handful of values that read well
+// in the text view panel (#1002): peak probability, how far toward the
+// equator each oval reaches, and the probability at the user's location.
+function summarizeAurora(coords, forecastTime, deLat, deLon) {
+  const EXTENT_THRESHOLD = 20; // % probability that counts as "aurora likely"
+  let maxProbability = 0;
+  let maxLat = null;
+  let southernExtentNorth = null; // southernmost latitude of the northern oval
+  let northernExtentSouth = null; // northernmost latitude of the southern oval
+  let probabilityAtDe = null;
+  const deLonGrid = Number.isFinite(deLon) ? (Math.round(deLon) + 360) % 360 : null;
+  const deLatGrid = Number.isFinite(deLat) ? Math.round(deLat) : null;
+
+  for (const [lon, lat, prob] of coords) {
+    if (prob > maxProbability) {
+      maxProbability = prob;
+      maxLat = lat;
+    }
+    if (prob >= EXTENT_THRESHOLD) {
+      if (lat > 0 && (southernExtentNorth == null || lat < southernExtentNorth)) southernExtentNorth = lat;
+      if (lat < 0 && (northernExtentSouth == null || lat > northernExtentSouth)) northernExtentSouth = lat;
+    }
+    if (deLonGrid != null && lon === deLonGrid && lat === deLatGrid) probabilityAtDe = prob;
+  }
+
+  return { forecastTime, maxProbability, maxLat, southernExtentNorth, northernExtentSouth, probabilityAtDe };
+}
+
+export function useLayer({ enabled = false, opacity = 0.6, map = null, deLat = null, deLon = null }) {
   const [overlayLayer, setOverlayLayer] = useState(null);
   const [auroraData, setAuroraData] = useState(null);
   const [forecastTime, setForecastTime] = useState(null);
@@ -143,6 +171,24 @@ export function useLayer({ enabled = false, opacity = 0.6, map = null }) {
     const interval = setInterval(fetchAurora, 600000);
     return () => clearInterval(interval);
   }, [enabled]);
+
+  // Broadcast a textual summary to the text view panel (#1002). Data changes
+  // every 10 minutes at most, so this is effectively free.
+  useEffect(() => {
+    if (!enabled) {
+      window.dispatchEvent(new CustomEvent('mapdata:aurora', { detail: { enabled: false } }));
+      return;
+    }
+    window.dispatchEvent(
+      new CustomEvent('mapdata:aurora', {
+        detail: {
+          enabled: true,
+          summary: auroraData ? summarizeAurora(auroraData, forecastTime, deLat, deLon) : null,
+        },
+      }),
+    );
+  }, [enabled, auroraData, forecastTime, deLat, deLon]);
+  useEffect(() => () => window.dispatchEvent(new CustomEvent('mapdata:aurora', { detail: { enabled: false } })), []);
 
   // Render overlay when data or map changes
   useEffect(() => {

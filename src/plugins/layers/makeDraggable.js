@@ -28,8 +28,8 @@ function clampToViewport(el, margin = 40) {
   if (left > vw - margin) left = vw - margin;
   if (top > vh - margin) top = vh - margin;
 
-  el.style.left = left + 'px';
-  el.style.top = top + 'px';
+  if (left !== rect.left) el.style.left = left + 'px';
+  if (top !== rect.top) el.style.top = top + 'px';
 }
 
 /**
@@ -65,6 +65,7 @@ export function makeDraggable(
       try {
         const data = JSON.parse(saved);
         el.style.position = 'fixed';
+        el.style.margin = '0';
         if (data.topPercent !== undefined && data.leftPercent !== undefined) {
           el.style.top = data.topPercent + '%';
           el.style.left = data.leftPercent + '%';
@@ -83,6 +84,7 @@ export function makeDraggable(
     } else {
       const rect = el.getBoundingClientRect();
       el.style.position = 'fixed';
+      el.style.margin = '0';
       el.style.top = rect.top + 'px';
       el.style.left = rect.left + 'px';
       el.style.right = 'auto';
@@ -132,6 +134,7 @@ export function makeDraggable(
       // Re-fix to current computed position
       const rect = el.getBoundingClientRect();
       el.style.position = 'fixed';
+      el.style.margin = '0';
       el.style.top = rect.top + 'px';
       el.style.left = rect.left + 'px';
       el.style.right = 'auto';
@@ -161,8 +164,9 @@ export function makeDraggable(
       didDrag = false;
       startX = e.clientX;
       startY = e.clientY;
-      startLeft = el.offsetLeft;
-      startTop = el.offsetTop;
+      const startRect = el.getBoundingClientRect();
+      startLeft = startRect.left;
+      startTop = startRect.top;
       previousTransition = el.style.transition;
       el.style.transition = 'none';
       dragHandle.style.cursor = 'grabbing';
@@ -208,14 +212,16 @@ export function makeDraggable(
       suppressClick = didDrag;
 
       if (snap) {
-        el.style.left = snapToGrid(el.offsetLeft, snap) + 'px';
-        el.style.top = snapToGrid(el.offsetTop, snap) + 'px';
+        const snapRect = el.getBoundingClientRect();
+        el.style.left = snapToGrid(snapRect.left, snap) + 'px';
+        el.style.top = snapToGrid(snapRect.top, snap) + 'px';
       }
 
       clampToViewport(el);
 
-      const topPercent = (el.offsetTop / window.innerHeight) * 100;
-      const leftPercent = (el.offsetLeft / window.innerWidth) * 100;
+      const saveRect = el.getBoundingClientRect();
+      const topPercent = (saveRect.top / window.innerHeight) * 100;
+      const leftPercent = (saveRect.left / window.innerWidth) * 100;
       localStorage.setItem(
         storageKey,
         JSON.stringify({

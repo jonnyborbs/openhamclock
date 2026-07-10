@@ -9,9 +9,10 @@ printable speaker notes.
 
 ## Decks
 
-| Folder                                             | Audience                 | Length        | Style            |
-| -------------------------------------------------- | ------------------------ | ------------- | ---------------- |
-| [`dvra-w2zq-2026-05-13/`](./dvra-w2zq-2026-05-13/) | Ham radio club (general) | ~25 min + Q&A | Tour + live demo |
+| Folder                                             | Audience                 | Length        | Style                       |
+| -------------------------------------------------- | ------------------------ | ------------- | --------------------------- |
+| [`dvra-w2zq-2026-05-13/`](./dvra-w2zq-2026-05-13/) | Ham radio club (general) | ~25 min + Q&A | Tour + live demo            |
+| [`sfdxa-2026-07-08/`](./sfdxa-2026-07-08/)         | DX club (via Zoom)       | ~26 min + Q&A | DX-focused tour + live demo |
 
 ## Using a deck
 

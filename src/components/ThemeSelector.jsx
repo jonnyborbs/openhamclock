@@ -11,8 +11,19 @@ export default function ThemeSelector({ id, theme, setTheme }) {
     <>
       <div id={id} style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px' }}>
         {Object.entries(AVAILABLE_THEMES).map(([key, t]) => (
-          <button className={`${key}-theme-select-button theme-select-button`} key={key} onClick={() => setTheme(key)}>
-            <span className="icon">{t.icon}</span> {t.label}
+          <button
+            type="button"
+            className={`${key}-theme-select-button theme-select-button`}
+            key={key}
+            onClick={() => setTheme(key)}
+            aria-pressed={theme === key}
+            aria-label={`${t.label} theme`}
+            title={`${t.label} theme`}
+          >
+            <span aria-hidden="true" className="icon">
+              {t.icon}
+            </span>{' '}
+            {t.label}
           </button>
         ))}
       </div>

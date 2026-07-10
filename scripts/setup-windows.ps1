@@ -1,5 +1,5 @@
 # OpenHamClock - Windows Setup Script
-# 
+#
 # Run in PowerShell as Administrator:
 #   Set-ExecutionPolicy Bypass -Scope Process -Force
 #   .\setup-windows.ps1
@@ -8,9 +8,9 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host ""
-Write-Host "╔═══════════════════════════════════════════════════════════╗" -ForegroundColor Blue
-Write-Host "║           OpenHamClock Windows Setup                      ║" -ForegroundColor Blue
-Write-Host "╚═══════════════════════════════════════════════════════════╝" -ForegroundColor Blue
+Write-Host "===========================================================" -ForegroundColor Blue
+Write-Host "           OpenHamClock Windows Setup                      " -ForegroundColor Blue
+Write-Host "===========================================================" -ForegroundColor Blue
 Write-Host ""
 
 $InstallDir = "$env:USERPROFILE\openhamclock"
@@ -20,14 +20,14 @@ function Check-Node {
     try {
         $nodeVersion = node -v
         $versionNumber = [int]($nodeVersion -replace 'v(\d+)\..*', '$1')
-        
+
         if ($versionNumber -lt 18) {
             Write-Host "Node.js version 18 or later required. Current: $nodeVersion" -ForegroundColor Yellow
             Write-Host "Download from: https://nodejs.org/" -ForegroundColor Yellow
             exit 1
         }
-        
-        Write-Host "✓ Node.js $nodeVersion detected" -ForegroundColor Green
+
+        Write-Host "[OK] Node.js $nodeVersion detected" -ForegroundColor Green
     }
     catch {
         Write-Host "Node.js not found. Please install Node.js 18 or later from https://nodejs.org/" -ForegroundColor Yellow
@@ -39,7 +39,7 @@ function Check-Node {
 function Check-Git {
     try {
         git --version | Out-Null
-        Write-Host "✓ Git detected" -ForegroundColor Green
+        Write-Host "[OK] Git detected" -ForegroundColor Green
     }
     catch {
         Write-Host "Git not found. Please install Git from https://git-scm.com/" -ForegroundColor Yellow
@@ -50,22 +50,31 @@ function Check-Git {
 # Setup repository
 function Setup-Repository {
     Write-Host ">>> Setting up OpenHamClock..." -ForegroundColor Blue
-    
+
     if (Test-Path $InstallDir) {
         Write-Host "Updating existing installation..."
         Set-Location $InstallDir
         git pull
+        Write-Host "Installing dependencies..."
+        $env:ELECTRON_SKIP_BINARY_DOWNLOAD = "1"
+        npm ci --ignore-scripts
+        if ($LASTEXITCODE -ne 0) { npm install }
+        Write-Host "Building frontend..."
+        if (Test-Path "dist") { Remove-Item "dist" -Recurse -Force }
+        npm run build
     }
     else {
         Write-Host "Cloning repository..."
         git clone https://github.com/accius/openhamclock.git $InstallDir
         Set-Location $InstallDir
+        Write-Host "Installing dependencies..."
+        $env:ELECTRON_SKIP_BINARY_DOWNLOAD = "1"
+        npm ci --ignore-scripts
+        Write-Host "Building frontend..."
+        npm run build
     }
-    
-    Write-Host "Installing dependencies..."
-    npm install
-    
-    Write-Host "✓ Installation complete" -ForegroundColor Green
+
+    Write-Host "[OK] Installation complete" -ForegroundColor Green
 }
 
 # Create desktop shortcut
@@ -77,31 +86,37 @@ function Create-Shortcut {
     $Shortcut.WorkingDirectory = $InstallDir
     $Shortcut.Description = "OpenHamClock - Amateur Radio Dashboard"
     $Shortcut.Save()
-    
-    Write-Host "✓ Desktop shortcut created" -ForegroundColor Green
+
+    Write-Host "[OK] Desktop shortcut created" -ForegroundColor Green
 }
 
 # Create batch file launcher
 function Create-Launcher {
-    $batchContent = @"
-@echo off
-cd /d "$InstallDir"
-echo Starting OpenHamClock...
-echo Open http://localhost:3000 in your browser
-npm start
-pause
-"@
-    
-    Set-Content -Path "$InstallDir\start.bat" -Value $batchContent
-    Write-Host "✓ Launcher created: $InstallDir\start.bat" -ForegroundColor Green
+    $lines = @(
+        '@echo off',
+        "cd /d `"$InstallDir`"",
+        'if not exist "node_modules" (',
+        '    echo node_modules not found - running npm install...',
+        '    call npm install',
+        '    if errorlevel 1 ( echo Install failed ^& pause ^& exit /b 1 )',
+        '    call npm run build',
+        '    if errorlevel 1 ( echo Build failed ^& pause ^& exit /b 1 )',
+        ')',
+        'echo Starting OpenHamClock...',
+        'echo Open http://localhost:3000 in your browser',
+        'npm start',
+        'pause'
+    )
+    Set-Content -Path "$InstallDir\start.bat" -Value $lines -Encoding UTF8
+    Write-Host "[OK] Launcher created: $InstallDir\start.bat" -ForegroundColor Green
 }
 
 # Print instructions
 function Print-Instructions {
     Write-Host ""
-    Write-Host "╔═══════════════════════════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "║              Installation Complete!                       ║" -ForegroundColor Green
-    Write-Host "╚═══════════════════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host "===========================================================" -ForegroundColor Green
+    Write-Host "              Installation Complete!                       " -ForegroundColor Green
+    Write-Host "===========================================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "  To start OpenHamClock:" -ForegroundColor Blue
     Write-Host ""

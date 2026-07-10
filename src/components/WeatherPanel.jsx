@@ -163,7 +163,9 @@ export const WeatherPanel = ({
     <div ref={contentRef} style={{ marginTop: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
       {/* Compact summary row — always visible */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <div
+        <button
+          type="button"
+          id="weather-summary-btn"
           onClick={() => {
             const next = !weatherExpanded;
             setWeatherExpanded(next);
@@ -171,6 +173,8 @@ export const WeatherPanel = ({
               localStorage.setItem('openhamclock_weatherExpanded', next.toString());
             } catch {}
           }}
+          aria-expanded={weatherExpanded}
+          aria-controls="weather-details"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -179,6 +183,12 @@ export const WeatherPanel = ({
             userSelect: 'none',
             flex: 1,
             minWidth: 0,
+            background: 'none',
+            border: 'none',
+            padding: 0,
+            color: 'inherit',
+            font: 'inherit',
+            textAlign: 'left',
           }}
         >
           <span style={{ fontSize: '20px', lineHeight: 1 }}>{w.icon}</span>
@@ -209,6 +219,7 @@ export const WeatherPanel = ({
             💨{w.windSpeed}
           </span>
           <span
+            aria-hidden="true"
             style={{
               fontSize: '10px',
               color: 'var(--text-muted)',
@@ -218,7 +229,7 @@ export const WeatherPanel = ({
           >
             ▼
           </span>
-        </div>
+        </button>
       </div>
 
       {/* Error badge — show when data is stale but we have cached data */}
@@ -335,7 +346,7 @@ export const WeatherPanel = ({
 
       {/* Expanded details */}
       {weatherExpanded && (
-        <div style={{ marginTop: '10px' }}>
+        <div id="weather-details" style={{ marginTop: '10px' }}>
           {/* Feels like + hi/lo */}
           <div
             style={{

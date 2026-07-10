@@ -45,11 +45,14 @@ import { useRig } from './contexts/RigContext.jsx';
 import { calculateBearing, calculateDistance, formatDistance } from './utils/geo.js';
 import { findDXPathForSpot } from './utils/dxClusterSpotMatcher';
 import { DXGridInput } from './components/DXGridInput.jsx';
+import { DXCallsignInput } from './components/DXCallsignInput.jsx';
 import { DXFavorites } from './components/DXFavorites.jsx';
 import DXCCSelect from './components/DXCCSelect.jsx';
 import './styles/flexlayout-openhamclock.css';
 import useMapLayers from './hooks/app/useMapLayers';
+import { useMapTextData } from './hooks/useMapTextData.js';
 import useRotator from './hooks/useRotator';
+import { useCallsignPopup } from './components/CallsignPopupManager.jsx';
 
 // Icons
 const PlusIcon = () => (
@@ -206,6 +209,8 @@ export const DockableApp = ({
     }
   }, []);
   const [showDxccSelect, setShowDxccSelect] = useState(false);
+  const { showPopup } = useCallsignPopup();
+  const callsignInfoRef = useRef(null);
 
   // ── Tabset auto-rotation (persistent per tabset) ──
   const [tabsetRotation, setTabsetRotation] = useState(() => {
@@ -265,6 +270,10 @@ export const DockableApp = ({
       [tabsetId]: { ...prev[tabsetId], interval: parseInt(secs, 10) },
     }));
   }, []);
+
+  // Lightning / aircraft / aurora / Winlink data broadcast out of the map
+  // plugins for the text view panel (#1002 v2).
+  const mapTextData = useMapTextData();
 
   // Fallback: if parent did not provide map-layer toggles (seen with rotator),
   // use the internal hook so the map buttons still work.
@@ -554,21 +563,16 @@ export const DockableApp = ({
                     flex: '0 0 auto',
                   }}
                 />
-                {dxCallsign && (
-                  <span
-                    style={{
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: '22px',
-                      fontWeight: '900',
-                      color: 'var(--accent-amber)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {dxCallsign}
-                  </span>
-                )}
+                <DXCallsignInput
+                  dxCallsign={dxCallsign}
+                  onDXChange={handleDXChange}
+                  dxLocked={dxLocked}
+                  style={{
+                    color: 'var(--accent-amber)',
+                    fontSize: '22px',
+                    fontWeight: '900',
+                  }}
+                />
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <DXFavorites dxLocation={dxLocation} dxGrid={dxGrid} onDXChange={handleDXChange} dxLocked={dxLocked} />
@@ -576,6 +580,7 @@ export const DockableApp = ({
                   type="button"
                   onClick={() => setShowDxccSelect((prev) => !prev)}
                   title={t('app.dxLocation.dxccToggleTitle')}
+                  aria-label={t('app.dxLocation.dxccToggleTitle')}
                   style={{
                     background: showDxccSelect ? 'var(--accent-amber)' : 'var(--bg-tertiary)',
                     color: showDxccSelect ? '#000' : 'var(--text-secondary)',
@@ -590,6 +595,33 @@ export const DockableApp = ({
                 >
                   DXCC
                 </button>
+                <span ref={callsignInfoRef} style={{ flex: '0 0 auto' }}>
+                  <button
+                    onClick={() => dxCallsign && showPopup(dxCallsign, callsignInfoRef.current)}
+                    title={
+                      dxCallsign
+                        ? t('app.dxLocation.callsignLookupTitle', { callsign: dxCallsign })
+                        : t('app.dxLocation.callsignLookupEmptyTitle')
+                    }
+                    aria-label={t('app.dxLocation.callsignLookupAriaLabel')}
+                    aria-disabled={!dxCallsign}
+                    disabled={!dxCallsign}
+                    style={{
+                      background: dxCallsign ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
+                      color: dxCallsign ? 'var(--text-secondary)' : 'var(--text-muted)',
+                      border: '1px solid ' + (dxCallsign ? 'var(--border-color)' : 'transparent'),
+                      borderRadius: '4px',
+                      padding: '4px 8px',
+                      fontSize: '12px',
+                      cursor: dxCallsign ? 'pointer' : 'not-allowed',
+                      opacity: dxCallsign ? 1 : 0.5,
+                      lineHeight: 1,
+                      flex: '0 0 auto',
+                    }}
+                  >
+                    i
+                  </button>
+                </span>
               </div>
             </div>
             {showDxccSelect && (
@@ -757,6 +789,10 @@ export const DockableApp = ({
               sotaSpots={filteredSotaSpots || sotaSpots?.data}
               wwffSpots={filteredWwffSpots || wwffSpots?.data}
               wwbotaSpots={filteredWwbotaSpots || wwbotaSpots?.data}
+              lightning={mapTextData.lightning}
+              aircraft={mapTextData.aircraft}
+              aurora={mapTextData.aurora}
+              winlink={mapTextData.winlink}
               deLocation={config.location}
               units={config.allUnits?.dist}
             />
@@ -873,6 +909,7 @@ export const DockableApp = ({
             <DXClusterPanel
               data={dxClusterData.spots}
               loading={dxClusterData.loading}
+              error={dxClusterData.error}
               totalSpots={dxClusterData.totalSpots}
               filters={dxFilters}
               onFilterChange={setDxFilters}
@@ -882,6 +919,7 @@ export const DockableApp = ({
               hoveredSpot={hoveredSpot}
               showOnMap={mapLayersEff.showDXPaths}
               onToggleMap={toggleDXPathsEff}
+              userCallsign={config.callsign}
             />
           );
           break;

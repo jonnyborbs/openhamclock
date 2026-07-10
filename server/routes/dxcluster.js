@@ -6,7 +6,7 @@
 const dgram = require('dgram');
 const net = require('net');
 const { maidenheadToLatLon } = require('../utils/grid.js');
-const { areDXPathsDuplicate } = require('../utils/dxClusterPathIdentity');
+const { areDXPathsDuplicate, collapseDuplicateDXPaths } = require('../utils/dxClusterPathIdentity');
 const { isPrivateIP, validateCustomHost } = require('../utils/ssrf');
 
 module.exports = function (app, ctx) {
@@ -82,7 +82,16 @@ module.exports = function (app, ctx) {
 
   // OpenHamClock's own cluster node (ohc-cluster/ sibling service).
   // Unset = not deployed yet; the source is hidden and auto mode skips it.
-  const OHC_CLUSTER_URL = (process.env.OHC_CLUSTER_URL || '').replace(/\/$/, '');
+  // A schemeless value (e.g. "ohc-cluster.railway.internal:3002") would make
+  // every fetch throw "Only absolute URLs are supported" — normalize it.
+  const OHC_CLUSTER_URL = (() => {
+    const raw = (process.env.OHC_CLUSTER_URL || '').trim().replace(/\/$/, '');
+    if (raw && !/^https?:\/\//i.test(raw)) {
+      console.warn(`[DX Cluster] OHC_CLUSTER_URL has no scheme — assuming http://${raw}`);
+      return `http://${raw}`;
+    }
+    return raw;
+  })();
 
   // Hosted-instance lockdown. Set OHC_HOSTED=1 ONLY on our Railway deployments:
   // the hosted site serves many users from one egress IP, so user-directed
@@ -90,6 +99,11 @@ module.exports = function (app, ctx) {
   // everything comes from our own cluster node. Self-hosted installs never set
   // this and keep the full source list (with their own callsign enforced).
   const IS_HOSTED = process.env.OHC_HOSTED === '1' || process.env.OHC_HOSTED === 'true';
+  if (IS_HOSTED && !OHC_CLUSTER_URL) {
+    console.error(
+      '[DX Cluster] OHC_HOSTED is set but OHC_CLUSTER_URL is not — the hosted source list offers only the OHC node, and every fetch to it will fail. Set OHC_CLUSTER_URL.',
+    );
+  }
 
   // Cache for DX Spider telnet spots (to avoid excessive connections)
   let dxSpiderCache = { spots: [], timestamp: 0 };
@@ -240,6 +254,7 @@ module.exports = function (app, ctx) {
   const CUSTOM_DX_RECONNECT_MIN_MS = 10000; // hard floor between dial attempts — a poll can never dial sooner
   const CUSTOM_DX_MAX_RECONNECT_DELAY_MS = 5 * 60 * 1000; // cap — never hammer a node (mirror proxy)
   const CUSTOM_DX_RAPID_DISCONNECT_MS = 15000; // kicked within 15s ⇒ likely auth reject / SSID bump
+  const CUSTOM_DX_MAX_DEAD_ATTEMPTS = 4; // park a node that NEVER once authenticated after this many attempts
   const CUSTOM_DX_KEEPALIVE_MS = 30000;
   const CUSTOM_DX_STALE_MS = 5 * 60 * 1000; // Force reconnect after 5 min with no data
   const CUSTOM_DX_IDLE_TIMEOUT = 15 * 60 * 1000; // Reap sessions idle for 15 minutes
@@ -367,6 +382,21 @@ module.exports = function (app, ctx) {
       session.reconnectAttempts = Math.min((session.reconnectAttempts || 0) + 2, 20);
     } else {
       session.reconnectAttempts = Math.min((session.reconnectAttempts || 0) + 1, 20);
+    }
+
+    // Give up on a node that has NEVER authenticated after repeated attempts — it
+    // accepts TCP but never sends a banner/prompt/spot (a dead or blackholing node,
+    // the dominant source of endless "No data … forcing reconnect" churn in prod).
+    // Nodes that authenticated at least once are exempt: a transient drop just backs
+    // off. The idle-reaper removes the parked session once the client stops polling.
+    if (!session.everAuthenticated && session.reconnectAttempts >= CUSTOM_DX_MAX_DEAD_ATTEMPTS) {
+      if (!session.parked) {
+        logWarn(
+          `[DX Cluster] Parking ${session.node.host} — no data / never authenticated after ${session.reconnectAttempts} attempts (dead node)`,
+        );
+      }
+      session.parked = true;
+      return;
     }
 
     scheduleCustomSessionReconnect(session);
@@ -522,6 +552,7 @@ module.exports = function (app, ctx) {
       ) {
         session.commandSent = true;
         session.authenticated = true; // node is responding to our login
+        session.everAuthenticated = true;
         setTimeout(() => {
           if (session.client && session.connected && !session.loginRejected) {
             if (!session.initialSnapshotDone) {
@@ -549,6 +580,7 @@ module.exports = function (app, ctx) {
           addCustomSessionSpot(session, parsed);
           // A flowing spot proves login succeeded; reset backoff once stable >60s.
           if (!session.authenticated) session.authenticated = true;
+          session.everAuthenticated = true;
           const uptime = session.lastConnectedAt ? Date.now() - session.lastConnectedAt : 0;
           if (session.reconnectAttempts > 0 && uptime > 60000) session.reconnectAttempts = 0;
         }
@@ -603,6 +635,7 @@ module.exports = function (app, ctx) {
         cleanupTimer: null,
         // Good-neighbour hardening (mirrors dxspider-proxy/server.js):
         authenticated: false, // positive auth proven this connection
+        everAuthenticated: false, // has this session EVER authenticated (gates dead-node park)
         loginRejected: false, // node refused our login on the current socket
         reconnectAttempts: 0, // consecutive failures; resets only when healthy
         lastConnectAttemptAt: 0, // enforces the hard reconnect floor
@@ -868,7 +901,7 @@ module.exports = function (app, ctx) {
       const timeout = setTimeout(() => controller.abort(), 10000);
 
       try {
-        const response = await fetch(`${OHC_CLUSTER_URL}/api/dxcluster/spots?limit=50`, {
+        const response = await fetch(`${OHC_CLUSTER_URL}/api/dxcluster/spots?limit=150`, {
           headers: { 'User-Agent': `OpenHamClock/${APP_VERSION}` },
           signal: controller.signal,
         });
@@ -1096,7 +1129,49 @@ module.exports = function (app, ctx) {
   // Cache for DX spot paths to avoid excessive lookups (per source/profile)
   const dxSpotPathsCacheByKey = new Map();
   const DXPATHS_CACHE_TTL = 25000; // 25 seconds cache (just under 30s poll interval to maximize cache hits)
-  const DXPATHS_RETENTION = 30 * 60 * 1000; // 30 minute spot retention
+  const DXPATHS_RETENTION = 60 * 60 * 1000; // 60 min — deep enough that mode filters (SSB-only) have real history
+  // DXpedition-tagged paths get longer retention and are exempt from display
+  // caps: under RBN skimmer volume (OHC Cluster source) a newest-N window
+  // spans only minutes, which starved the dxpeditionsOnly filter of the
+  // handful of spots it exists to surface.
+  const DXPEDITION_RETENTION = 2 * 60 * 60 * 1000;
+  const isPathLive = (p, now) => now - p.timestamp < (p.isDXpedition ? DXPEDITION_RETENTION : DXPATHS_RETENTION);
+  // Mode-balanced cap. A plain newest-N slice is almost pure FT8/FT4 skimmer
+  // churn (freshest timestamps always), which starves the window of SSB
+  // entirely — SSB only exists as human spots, and RBN can't decode phone.
+  // RBN comments always lead with the mode ("FT8 -13 dB", "CW 26 dB 22 WPM"),
+  // so a spot without a mode marker is human traffic and gets the reserve.
+  const balancePathsByMode = (paths, limit) => {
+    if (paths.length <= limit) return paths;
+    const voice = [];
+    const ft8ft4 = [];
+    const other = [];
+    for (const p of paths) {
+      const c = String(p.comment || '').toUpperCase();
+      if (/\bFT[84]\b/.test(c)) ft8ft4.push(p);
+      else if (/\b(CW|RTTY|PSK)/.test(c)) other.push(p);
+      else voice.push(p); // voice keywords or no mode marker — human spots
+    }
+    const out = voice.slice(0, Math.ceil(limit * 0.25));
+    out.push(...ft8ft4.slice(0, Math.min(Math.ceil(limit * 0.5), limit - out.length)));
+    out.push(...other.slice(0, limit - out.length));
+    if (out.length < limit) {
+      const chosen = new Set(out);
+      for (const p of paths) {
+        if (out.length >= limit) break;
+        if (!chosen.has(p)) out.push(p);
+      }
+    }
+    return out;
+  };
+  const capWithDXpeditions = (paths, limit) => {
+    const dxpeditions = paths.filter((p) => p.isDXpedition);
+    const regular = balancePathsByMode(
+      paths.filter((p) => !p.isDXpedition),
+      limit,
+    );
+    return [...dxpeditions, ...regular].sort((a, b) => b.timestamp - a.timestamp);
+  };
   const DXPATHS_MAX_KEYS = 100; // Hard cap on cache keys
 
   // Periodic cleanup: purge stale dxSpotPaths entries every 5 minutes
@@ -1747,7 +1822,7 @@ module.exports = function (app, ctx) {
         const ohcController = new AbortController();
         const ohcTimeout = setTimeout(() => ohcController.abort(), 10000);
         try {
-          const ohcResponse = await fetch(`${OHC_CLUSTER_URL}/api/dxcluster/spots?limit=100`, {
+          const ohcResponse = await fetch(`${OHC_CLUSTER_URL}/api/dxcluster/spots?limit=150`, {
             headers: { 'User-Agent': `OpenHamClock/${APP_VERSION}` },
             signal: ohcController.signal,
           });
@@ -1882,8 +1957,8 @@ module.exports = function (app, ctx) {
 
       if (newSpots.length === 0) {
         // Return existing paths if fetch failed
-        const validPaths = pathsCache.allPaths.filter((p) => now - p.timestamp < DXPATHS_RETENTION);
-        return res.json(validPaths.slice(0, 50));
+        const validPaths = pathsCache.allPaths.filter((p) => isPathLive(p, now));
+        return res.json(capWithDXpeditions(validPaths, 150));
       }
 
       // Get unique callsigns to look up (sanitize and strip modifiers)
@@ -1912,8 +1987,13 @@ module.exports = function (app, ctx) {
       });
 
       // Look up prefix-based locations for all callsigns (includes grid squares!)
+      // estimateLocationFromPrefix is a local CTY-table lookup — cheap enough
+      // to run for every call in the batch. A 100-call cap here silently left
+      // spots past it uncharted once fetches grew past 50 spots (the map
+      // filters out paths with no spotter coordinates). The remote HamQTH
+      // batch below has its own 10-per-cycle cap.
       const prefixLocations = {};
-      const callsToLookup = [...allCalls].slice(0, 100);
+      const callsToLookup = [...allCalls].slice(0, 1000);
 
       for (const call of callsToLookup) {
         const loc = estimateLocationFromPrefix(call);
@@ -2130,7 +2210,7 @@ module.exports = function (app, ctx) {
         .filter(Boolean);
 
       // Merge with existing paths, removing expired and duplicates
-      const existingValidPaths = pathsCache.allPaths.filter((p) => now - p.timestamp < DXPATHS_RETENTION);
+      const existingValidPaths = pathsCache.allPaths.filter((p) => isPathLive(p, now));
 
       // Add new paths, avoiding duplicates (same dxCall+freq within 2 minutes)
       const mergedPaths = [...existingValidPaths];
@@ -2141,8 +2221,15 @@ module.exports = function (app, ctx) {
         }
       }
 
-      // Sort by timestamp (newest first) and limit
-      const sortedPaths = mergedPaths.sort((a, b) => b.timestamp - a.timestamp).slice(0, 100);
+      // Sort by timestamp (newest first), collapse re-spots of the same
+      // station (same call within ~2 kHz keeps only the newest row — every
+      // extra spotter of an activator was another visible duplicate), then
+      // cap. 600 holds a full hour of balanced history — the accumulator is
+      // what mode filters draw from.
+      const sortedPaths = capWithDXpeditions(
+        collapseDuplicateDXPaths(mergedPaths.sort((a, b) => b.timestamp - a.timestamp)),
+        600,
+      );
 
       logDebug(
         '[DX Paths]',
@@ -2173,12 +2260,12 @@ module.exports = function (app, ctx) {
 
       // Update cache
       dxSpotPathsCacheByKey.set(cacheKey, {
-        paths: sortedPaths.slice(0, 50), // Return 50 for display
+        paths: capWithDXpeditions(sortedPaths, 150), // Return 150 for display/filtering
         allPaths: sortedPaths, // Keep all for accumulation
         timestamp: now,
       });
 
-      res.json(sortedPaths.slice(0, 50));
+      res.json(capWithDXpeditions(sortedPaths, 150));
     } catch (error) {
       logErrorOnce('DX Paths', error.message);
       // Return cached data on error

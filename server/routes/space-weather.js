@@ -142,13 +142,14 @@ module.exports = function (app, ctx) {
         return res.json(noaaCache.solarIndices.data);
       }
 
-      const [fluxRes, kIndexRes, kForecastRes, sunspotRes, sfiSummaryRes, magRes] = await Promise.allSettled([
+      const [fluxRes, kIndexRes, kForecastRes, sunspotRes, sfiSummaryRes, magRes, kpEstRes] = await Promise.allSettled([
         fetch('https://services.swpc.noaa.gov/json/f107_cm_flux.json'),
         fetch('https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json'),
         fetch('https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json'),
         fetch('https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json'),
         fetch('https://services.swpc.noaa.gov/products/summary/10cm-flux.json'),
         fetch('https://services.swpc.noaa.gov/products/solar-wind/mag-1-day.json'),
+        fetch('https://services.swpc.noaa.gov/json/planetary_k_index_1m.json'),
       ]);
 
       const result = {
@@ -207,6 +208,19 @@ module.exports = function (app, ctx) {
           }));
           result.kp.current = result.kp.history[result.kp.history.length - 1]?.value ?? null;
         }
+      }
+
+      // Kp current: prefer the 1-minute estimated product — the observed
+      // product above only publishes a new value every 3 hours, which made
+      // the displayed Kp lag real conditions. History/forecast stay 3-hourly.
+      if (kpEstRes.status === 'fulfilled' && kpEstRes.value.ok) {
+        try {
+          const data = await kpEstRes.value.json();
+          const kp = parseFloat(data?.[data.length - 1]?.estimated_kp);
+          if (Number.isFinite(kp) && kp >= 0 && kp <= 9) {
+            result.kp.current = Math.round(kp * 100) / 100;
+          }
+        } catch {}
       }
 
       // Kp forecast — same format change; forecast uses lowercase 'kp' field.

@@ -200,8 +200,11 @@ export default function SidebarMenu({
             </span>
           )}
           <button
+            type="button"
             onClick={cycleMode}
+            aria-label={modeTitle}
             title={modeTitle}
+            aria-pressed={mode === MODE_PINNED}
             tabIndex={isVisible ? 0 : -1}
             style={{
               background: 'none',
@@ -214,7 +217,7 @@ export default function SidebarMenu({
               flexShrink: 0,
             }}
           >
-            {modeIcon}
+            <span aria-hidden="true">{modeIcon}</span>
           </button>
         </div>
 
@@ -223,7 +226,9 @@ export default function SidebarMenu({
           {MENU_ITEMS.map((item) => (
             <button
               key={item.id}
+              type="button"
               onClick={() => onSettingsClick(item.id)}
+              aria-label={item.label}
               title={item.label}
               tabIndex={isVisible ? 0 : -1}
               style={{
@@ -247,8 +252,10 @@ export default function SidebarMenu({
               onMouseOver={(e) => (e.currentTarget.style.background = 'var(--bg-tertiary)')}
               onMouseOut={(e) => (e.currentTarget.style.background = 'none')}
             >
-              <span style={{ fontSize: '18px', flexShrink: 0, width: '24px', textAlign: 'center' }}>{item.icon}</span>
-              {isExpanded && <span>{item.label}</span>}
+              <span aria-hidden="true" style={{ fontSize: '18px', flexShrink: 0, width: '24px', textAlign: 'center' }}>
+                {item.icon}
+              </span>
+              {isExpanded && <span aria-hidden="true">{item.label}</span>}
             </button>
           ))}
         </div>
@@ -266,8 +273,11 @@ export default function SidebarMenu({
           >
             {/* Layout Lock */}
             <button
+              type="button"
               onClick={onToggleLayoutLock}
+              aria-label={layoutLocked ? 'Unlock layout — allow drag, resize, close' : 'Lock layout — prevent changes'}
               title={layoutLocked ? 'Unlock layout — allow drag, resize, close' : 'Lock layout — prevent changes'}
+              aria-pressed={layoutLocked}
               tabIndex={isVisible ? 0 : -1}
               style={{
                 ...actionBtnStyle(layoutLocked),
@@ -276,14 +286,18 @@ export default function SidebarMenu({
                 color: layoutLocked ? 'var(--accent-amber)' : 'var(--text-secondary)',
               }}
             >
-              <span style={{ fontSize: '14px', flexShrink: 0 }}>{layoutLocked ? '🔒' : '🔓'}</span>
-              {isExpanded && (layoutLocked ? 'Locked' : 'Unlocked')}
+              <span aria-hidden="true" style={{ fontSize: '14px', flexShrink: 0 }}>
+                {layoutLocked ? '🔒' : '🔓'}
+              </span>
+              {isExpanded && <span aria-hidden="true">{layoutLocked ? 'Locked' : 'Unlocked'}</span>}
             </button>
 
             {/* Reset Layout */}
             <button
+              type="button"
               onClick={onResetLayout}
               disabled={layoutLocked}
+              aria-label={layoutLocked ? 'Unlock layout to reset' : 'Reset panel layout to default'}
               title={layoutLocked ? 'Unlock layout to reset' : 'Reset panel layout to default'}
               tabIndex={isVisible ? 0 : -1}
               style={{
@@ -293,6 +307,8 @@ export default function SidebarMenu({
               }}
             >
               <svg
+                aria-hidden="true"
+                focusable="false"
                 width="14"
                 height="14"
                 viewBox="0 0 24 24"
@@ -322,8 +338,10 @@ export default function SidebarMenu({
           {/* Update button */}
           {showUpdateButton && (
             <button
+              type="button"
               onClick={onUpdateClick}
               disabled={updateInProgress}
+              aria-label={updateInProgress ? 'Update in progress' : 'Run update now'}
               title={updateInProgress ? 'Update in progress...' : 'Run update now'}
               tabIndex={isVisible ? 0 : -1}
               style={{
@@ -331,20 +349,24 @@ export default function SidebarMenu({
                 cursor: updateInProgress ? 'wait' : 'pointer',
               }}
             >
-              <span style={{ fontSize: '16px', flexShrink: 0 }}>🔄</span>
-              {isExpanded && (updateInProgress ? 'Updating...' : 'Update')}
+              <span aria-hidden="true" style={{ fontSize: '16px', flexShrink: 0 }}>
+                🔄
+              </span>
+              {isExpanded && <span aria-hidden="true">{updateInProgress ? 'Updating...' : 'Update'}</span>}
             </button>
           )}
 
           {/* Fullscreen */}
           <button
+            type="button"
             onClick={onFullscreenToggle}
+            aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
             title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
             tabIndex={isVisible ? 0 : -1}
             style={actionBtnStyle(isFullscreen)}
           >
             {isFullscreen ? <IconShrink size={14} /> : <IconExpand size={14} />}
-            {isExpanded && (isFullscreen ? 'Exit Full' : 'Fullscreen')}
+            {isExpanded && <span aria-hidden="true">{isFullscreen ? 'Exit Full' : 'Fullscreen'}</span>}
           </button>
 
           {/* Donate */}
@@ -354,13 +376,15 @@ export default function SidebarMenu({
 
           {/* Settings (quick access) */}
           <button
+            type="button"
             onClick={() => onSettingsClick()}
+            aria-label="Open Settings"
             title="Open Settings"
             tabIndex={isVisible ? 0 : -1}
             style={actionBtnStyle(false)}
           >
             <IconGear size={14} />
-            {isExpanded && 'Settings'}
+            {isExpanded && <span aria-hidden="true">Settings</span>}
           </button>
         </div>
       </div>

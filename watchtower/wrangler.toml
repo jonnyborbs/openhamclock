@@ -1,0 +1,18 @@
+name = "watchtower"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Cron trigger fires the `scheduled` handler every minute.
+[triggers]
+crons = ["* * * * *"]
+
+# KV namespace for per-(service, subsystem) status + lastHeartbeatDay.
+# After `wrangler kv namespace create WATCHTOWER_STATE` paste the returned id below.
+[[kv_namespaces]]
+binding = "WATCHTOWER_STATE"
+id = "64c2d301d2434c41b163874ceed5a255"
+
+# Non-secret env vars. DISCORD_WEBHOOK_URL is set via `wrangler secret put`.
+[vars]
+DISCORD_PING_ROLES = "1489643018515517641,1489643017915601147"
+PROBE_TIMEOUT_MS = "8000"

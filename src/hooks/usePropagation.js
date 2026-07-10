@@ -3,13 +3,21 @@
  * Fetches propagation predictions between DE and DX locations
  * Supports mode and power parameters for VOACAP-style calculations
  *
- * B5b progressive-enhancement flow (2026-04-24):
- *   1. Fetch /api/propagation — server orchestrates proppy REST → heuristic.
- *      Renders immediately so first paint is always fast.
- *   2. After REST returns, kick off the browser-side WASM engine with the
- *      SSN from the REST response. On success, swap the data in; on failure
- *      or abort, keep the REST payload. `data.engine` tells the UI which
- *      path is currently rendered: 'rest' | 'heuristic' | 'wasm'.
+ * WASM-first flow (2026-06-05):
+ *   1. Fetch /api/propagation only for its SSN + LUF + distance + solarData.
+ *      Do NOT render it. The endpoint serves heuristic data when proppy is
+ *      down, and EST is wrong on hard paths — we'd rather show a brief
+ *      loading state than misleading green bands.
+ *   2. Run the browser-side WASM engine. On success, render WASM. On
+ *      failure (WASM bundle missing, coefficient download blocked, etc.)
+ *      fall back to the REST/heuristic payload so something still renders
+ *      instead of a permanent skeleton — that's the only path that ever
+ *      produces an EST badge now.
+ *
+ *   `data.engine` is one of 'wasm' | 'rest' | 'heuristic'. On the hosted
+ *   site, WASM is the steady state; REST/heuristic appear only on the
+ *   error path. Self-hosters without the WASM bundle land on REST or
+ *   heuristic immediately because the WASM import fails fast.
  */
 import { useState, useEffect } from 'react';
 import { runBrowserEngine } from '../services/p533/engineBrowser.js';
@@ -29,7 +37,9 @@ export const usePropagation = (deLocation, dxLocation, propagationConfig = {}) =
     const wasmAbort = new AbortController();
 
     const run = async () => {
-      // 1. REST first — fast initial paint.
+      // 1. REST in the background. We need its SSN to feed WASM and its
+      // solar/LUF/distance fields to overlay on the WASM result, but we
+      // intentionally do NOT setData(rest) — see file header.
       let rest = null;
       try {
         const params = new URLSearchParams({
@@ -48,13 +58,8 @@ export const usePropagation = (deLocation, dxLocation, propagationConfig = {}) =
       }
 
       if (!alive) return;
-      if (rest) {
-        setData({ ...rest, engine: rest.iturhfprop?.available ? 'rest' : 'heuristic' });
-      }
-      setLoading(false);
 
-      // 2. WASM in background — progressive-enhance to VOACAP-accurate data.
-      // Silently skip if WASM isn't reachable (self-hosters without the asset).
+      // 2. WASM is the authoritative renderer.
       try {
         const wasm = await runBrowserEngine({
           deLocation,
@@ -77,9 +82,7 @@ export const usePropagation = (deLocation, dxLocation, propagationConfig = {}) =
           muf: wasm.muf ?? rest?.muf,
           distance: rest?.distance,
         });
-        // Single-line benchmark dump for Doug / field validators — searchable
-        // for "[p533 benchmark]" in the console. Non-DEV builds still emit it
-        // since the whole point of B5c is collecting field timing data.
+        setLoading(false);
         if (wasm.benchmark) {
           const b = wasm.benchmark;
           console.info(
@@ -89,11 +92,19 @@ export const usePropagation = (deLocation, dxLocation, propagationConfig = {}) =
           );
         }
       } catch (err) {
-        // Expected when /wasm/p533.mjs is missing (self-hoster) or the 10 MB
-        // coefficient download fails — keep the REST data we already rendered.
-        if (!wasmAbort.signal.aborted) {
-          console.debug('[usePropagation] WASM engine skipped:', err.message);
+        if (wasmAbort.signal.aborted) return;
+        // Fall back to REST/heuristic only on the error path so the panel
+        // shows something instead of a stuck skeleton. Self-hosters without
+        // the WASM bundle land here on every refresh.
+        console.warn(
+          '[usePropagation] WASM engine unavailable, falling back to REST/EST. ' +
+            'Self-hosters: run "node scripts/fetch-wasm.js && npm run build" to install the WASM bundle. ' +
+            `(${err.message})`,
+        );
+        if (rest) {
+          setData({ ...rest, engine: rest.iturhfprop?.available ? 'rest' : 'heuristic' });
         }
+        setLoading(false);
       }
     };
 

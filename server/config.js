@@ -61,6 +61,11 @@ const TRUST_PROXY =
 // Security: API key for write operations
 const API_WRITE_KEY = process.env.API_WRITE_KEY || '';
 
+// Security: API key for the Prometheus metrics endpoint. When set, requires
+// a matching ?key= or Authorization: Bearer= header to access /metrics.
+// Leave unset for public metrics (default, safe for local/private installs).
+const METRICS_AUTH_KEY = process.env.METRICS_AUTH_KEY || '';
+
 // Get locator from env (support both LOCATOR and GRID_SQUARE)
 const locator = process.env.LOCATOR || process.env.GRID_SQUARE || '';
 
@@ -121,9 +126,25 @@ const CONFIG = {
 
   // Satellites configuration
   satellites: {
+    // Optional internal proxy for upstream element-set fetches. When set
+    // (e.g. http://fletcher.railway.internal:3000) the CelesTrak / AMSAT /
+    // SatNOGS fetches in routes/satellites.js are rewritten to traverse the
+    // proxy service so they use its egress IP instead of OpenHamClock's.
+    // Empty string = direct upstream (default).
+    fletcherUrl: (process.env.FLETCHER_URL || '').trim().replace(/\/+$/, ''),
     celestrak: {
       get enabled() {
         return !(process.env.CELESTRAK_ENABLED && process.env.CELESTRAK_ENABLED === 'false');
+      },
+    },
+    amsat_tle: {
+      get enabled() {
+        return !(process.env.AMSAT_TLE_ENABLED && process.env.AMSAT_TLE_ENABLED === 'false');
+      },
+    },
+    satnogs_tle: {
+      get enabled() {
+        return !(process.env.SATNOGS_TLE_ENABLED && process.env.SATNOGS_TLE_ENABLED === 'false');
       },
     },
     spaceTrack: {
@@ -165,6 +186,8 @@ const CONFIG = {
   _openWeatherApiKey: process.env.OPENWEATHER_API_KEY || '',
   _qrzUsername: process.env.QRZ_USERNAME || '',
   _qrzPassword: process.env.QRZ_PASSWORD || '',
+  _hamqthUsername: process.env.HAMQTH_USERNAME || '',
+  _hamqthPassword: process.env.HAMQTH_PASSWORD || '',
 };
 
 // Check if required config is missing
@@ -249,6 +272,7 @@ module.exports = {
   HOST,
   TRUST_PROXY,
   API_WRITE_KEY,
+  METRICS_AUTH_KEY,
   ITURHFPROP_URL,
   WSJTX_ENABLED,
   WSJTX_UDP_PORT,

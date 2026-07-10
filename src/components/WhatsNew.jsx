@@ -8,8 +8,8 @@ import { useState, useEffect } from 'react';
 // ─── Announcement Banner ────────────────────────────────────
 // Set to null to hide. Shown at the top of the What's New modal.
 const ANNOUNCEMENT = {
-  emoji: '⭐',
-  text: 'Meet the core maintainers. The project has grown well past what one operator can carry alone, and four people have been doing the day-to-day heavy lifting alongside Chris this past cycle — pull requests, reviews, issue triage, translations, and a steady stream of polish. Please give them a wave on the air or a star on GitHub:\n\n• Jörg Holzapfel (DO1HOZ / @ceotjoe) — rig-bridge plugin work, Cloud Relay, MeshCom LoRa integration, the SmartSDR PTT fix, and consistent dependency / accessibility cleanup\n• Alan Hargreaves (@alanhargreaves) — useLocalInstall refactor, QRZ credentials consolidation, server reliability bug reports, and a lot of patient post-merge triage\n• Laura Batalha (@lbatalha) — accurate-timezone API, the Docker workflow split that gave dxspider-proxy and iturhfprop-service their own GHCR images, callsign-lookup picker\n• Michael R Wheeley (@MichaelWheeley) — by far the most prolific PR author this cycle: satellite OMM rewrite, the +180 Maidenhead antimeridian fix on both client and server, satellite list curation, the lang-sort CI gate, plus a long list of smaller fixes that add up\n\nThis release exists because of you four. 73 from K0CJH.',
+  emoji: '📬',
+  text: "This release was steered by your bug reports. Two of the headline fixes below — the FT8/digital-mode VOACAP accuracy fix and the real-time Kp index — came straight from user emails received this same week (thanks Jason W3AAX and Manuel EA7JRS). If something in OpenHamClock looks wrong to you, write in or open an issue: detailed reports like those are exactly how the stubborn bugs get found. And a wave to this cycle's contributors: Laura Batalha (@lbatalha), Michael R Wheeley (@MichaelWheeley), Jörg (DO1HOZ / @ceotjoe), Ben (KC1UEK / @stearnsy33), @chrisdebian, @w9fyi, Anthony (@AntDiClementi), and @Oukagen. 73 from K0CJH.",
   color: '#ffd700',
   bg: 'rgba(255, 215, 0, 0.10)',
   border: 'rgba(255, 215, 0, 0.30)',
@@ -28,6 +28,89 @@ const ANNOUNCEMENT = {
 // The jump to v26 resets the scheme to something meaningful going forward.
 
 const CHANGELOG = [
+  {
+    version: '26.5.0',
+    date: '2026-07-08',
+    heading:
+      "July monthly drop. Two headline accuracy fixes came straight from user emails this cycle: FT8 and the other digital modes finally get honest VOACAP predictions (the engine now runs at each mode's real decode threshold instead of faking it after the fact), and the Kp index now tracks NOAA's 1-minute estimated product instead of lagging up to 3 hours behind real geomagnetic conditions. Headline additions: full N3FJP integration configured right from Settings (with the logged-QSO 0,0 bug fixed), a callsign info popup with station details and local time anywhere a call appears, our own DX cluster node (OHC Cluster) now serving the hosted site, Simplified Chinese joins the language picker, and a map style rotator for shack displays. Self-hosters get a big one too: local builds now actually ship the P.533 WASM engine, so the Propagation panel runs the real model instead of being stuck on the EST heuristic. Plus round two of the accessibility push, a hardened satellite data pipeline, a Windows install/update overhaul, and Prometheus metrics for the ops-minded.",
+    features: [
+      {
+        icon: '📡',
+        title: 'HOTFIX: FT8 / Digital Mode VOACAP Predictions Were Way Off',
+        desc: "Jason (W3AAX) emailed exactly the right diagnosis: switching the Propagation panel to FT8 produced drastically restricted coverage regardless of power, while SSB looked accurate. Root cause confirmed — every prediction ran the P.533 engine at the SSB listening threshold, then tried to bolt the FT8 advantage on afterwards as a post-hoc dB bump on the reliability number. That bump could never reopen a band the engine had scored 0% for SSB, which is precisely where FT8 shines. The engine (browser WASM and the REST service both) now runs at each mode's actual decode threshold — FT8 at -19 dB, FT4 -15, WSPR -26, JT65 -23, CW +5, relative to the same 3 kHz reference — so the physics happens inside the model. Verified against real paths: Atlanta→Tokyo at noon on 15m goes from 0% (SSB) to 67% (FT8), matching on-air reality. SSB predictions are bit-identical to before.",
+      },
+      {
+        icon: '📻',
+        title: 'NEW: N3FJP Integration — Configure from Settings, 0,0 Bug Fixed',
+        desc: "If you log with N3FJP, the integration is now fully built in. The bridge script ships with OpenHamClock and the server manages it for you — enter your N3FJP host and port in Settings → Integrations, hit test, and QSOs and live entry previews flow onto the map. The long-standing bug where logged QSOs landed at 0,0 (or at N3FJP's New-England placeholder coordinates when it hadn't resolved a real location) is fixed: placeholder coordinates are intercepted and the real grid lookup runs instead, and an active preview line is reused for the logged QSO so the map doesn't stutter. The configuration endpoint honors the server's write-auth key on shared instances. Built by Ben (KC1UEK) across several patient review rounds — thanks Ben.",
+      },
+      {
+        icon: '📊',
+        title: 'Real-Time Kp Index',
+        desc: "Manuel (EA7JRS) wrote in that the propagation console values didn't reflect current conditions — and he was right. The displayed Kp came from NOAA's observed 3-hourly product, so it only moved every 3 hours no matter how often the panel refreshed. Current Kp now comes from NOAA's 1-minute estimated planetary K-index, with the 3-hourly product still driving the history bars and forecast. During fast-moving geomagnetic events the console now reacts in minutes, not hours.",
+      },
+      {
+        icon: '🔍',
+        title: 'NEW: Callsign Info Popup',
+        desc: "Click a callsign in the DX Cluster panel or map popups and you now get an inline station card — name, QTH with grid and local time at the DX end, country, and a one-click jump to your configured callbook — instead of bouncing straight out to a browser tab. Lookups run through HamQTH's authenticated API with local caching so repeat lookups are instant, and DXCC data moved to the JSON endpoints. The DX target section also gained a callsign lookup input (issue #1036): type a call, get its location as your DX target. Thanks Laura (lbatalha) and Jörg (ceotjoe).",
+      },
+      {
+        icon: '🌐',
+        title: 'NEW: OHC Cluster — Our Own DX Cluster Node',
+        desc: 'OpenHamClock now runs its own DX cluster node, and the hosted site is connected to it. This ends our dependence on the goodwill of public DXSpider nodes for the shared instance — which had produced several rounds of reconnect-storm and login-hammering incidents when upstream nodes went sideways. Custom cluster logins in Settings are now fully independent of the OHC node, custom sessions are hardened against reconnect storms and invalid-login loops, and permanently dead nodes get parked instead of being retried forever. Self-hosters can keep using any node they like.',
+      },
+      {
+        icon: '🌏',
+        title: 'NEW: Simplified Chinese (简体中文)',
+        desc: 'Simplified Chinese is now selectable in the language picker, joining the 15 existing languages. The translation file had been contributed earlier but was never wired into the language registry — it now is, covering the full UI. 谢谢 Anthony (AntDiClementi) for the contribution.',
+      },
+      {
+        icon: '🗺️',
+        title: 'NEW: Map Style Rotation + Earthquake Magnitude Filter',
+        desc: 'Two map additions. A new rotation control cycles your base map through a set of styles you pick, on your chosen interval (default 60s) — nice for wall-mounted shack displays that get boring on one basemap; your selection and interval persist. And the Earthquakes layer gained a magnitude selector so you can hide the magnitude-2 noise and only plot the quakes you care about. Thanks Anthony (AnthonyOHC) and Michael Wheeley. Azimuthal projection tiles also render noticeably sharper this cycle.',
+      },
+      {
+        icon: '📋',
+        title: 'DX Cluster Panel — Send Spots, Contest + DXpedition Filters',
+        desc: 'You can now spot a station directly from the DX Cluster panel — no separate telnet session needed. Filtering gained two new tools: a contest filter, and a one-click "Show only DXpeditions" toggle that cross-references the DXpedition calendar so you only see the ATNOs. Panel button styling was also aligned with the rest of the app and a couple of filter color bugs fixed.',
+      },
+      {
+        icon: '♿',
+        title: 'Accessibility — Round Two',
+        desc: 'The Map Data text view introduced last cycle is now localized into all 16 languages and expanded with v2 sections for lightning, aircraft, aurora, and Winlink gateways. New aria-live announcements cover DX spot arrivals, lightning proximity alerts, satellite rise/set events, band conditions changes, DE weather alerts, and rig connect/disconnect/mode changes — a screen-reader user now hears the shack come alive without touching the map. A WCAG 2.1 AA compliance pass cleaned up contrast and semantics app-wide, and icon-only buttons got their hover tooltips back alongside the aria-labels. Thanks chrisdebian and w9fyi for carrying this one.',
+      },
+      {
+        icon: '🛰️',
+        title: 'Satellite Data Pipeline — Hardened End to End',
+        desc: 'Continuing from June\'s fallback work: the satellite data path got a full refactor around a proper TLE state machine with unit tests, a new lightweight HTTP relay service ("fletcher") for deployments whose egress IPs CelesTrak blocks, the OMM cache extended from 12 to 24 hours to match NORAD\'s actual release cadence, SatNOGS transmitter metadata added for the birds that have it, and a bug fixed where the AMSAT fallback could duplicate satellites in the cache. New .env flags (AMSAT_TLE_ENABLED / SATNOGS_TLE_ENABLED) let you disable individual backup sources if you need to. Also fixed: the satellite window minimize button crash. Thanks Michael Wheeley for the sustained push here.',
+      },
+      {
+        icon: '🪟',
+        title: 'Windows Install + Update Overhaul',
+        desc: 'Windows self-hosting got real attention. update.bat is replaced by a proper update.ps1, the setup scripts parse cleanly on stock PowerShell 5.1 (here-strings and non-ASCII characters removed), the README documents a one-line iwr install, and the launcher creation is fixed. If a previous Windows install failed partway for you, this cycle is worth a retry. Thanks Jörg (ceotjoe).',
+      },
+      {
+        icon: '⚡',
+        title: 'Propagation WASM — Self-Hosters Get the Real Engine',
+        desc: "If your self-hosted Propagation panel always showed the EST badge, this was why: local builds didn't include the P.533 WASM bundle at all, so the panel silently fell back to the heuristic forever. Builds now ship the engine. Related polish: the panel waits for WASM instead of flashing EST numbers first, the console states the reason plainly when WASM genuinely can't load, the WASM downloader is now a cross-platform Node script with checksum verification that skips the multi-megabyte download entirely when files are already current, and your antenna selection persists across restarts (a config deep-merge bug was resetting it). Thanks Michael Wheeley for the checksum work.",
+      },
+      {
+        icon: '📈',
+        title: 'Observability — Prometheus Metrics + External Watchtower',
+        desc: "For the ops-minded self-hoster: the server now exposes an authenticated Prometheus /metrics endpoint with automatic route monitoring, careful cardinality limits, and README documentation. The hosted infrastructure gained an external Cloudflare Worker watchtower that probes all OHC services from outside, posts up/down flips to Discord with a log tail attached, and debounces flapping. /api/health grew a subsystem snapshot for exactly this kind of monitoring and is now exempt from rate limiting so uptime monitors don't get 429s. Thanks Laura (lbatalha) — the most prolific contributor this cycle.",
+      },
+      {
+        icon: '🔒',
+        title: 'Security + Dependency Updates',
+        desc: 'A critical vitest advisory (GHSA-5xrq-8626-4rwp) closed by upgrading to vitest 4, the qs null-entry DoS vulnerability patched, and all six outstanding Dependabot alerts resolved via a lockfile refresh. The new metrics endpoint requires authentication out of the box, and unknown API routes are bucketed to keep metrics cardinality bounded. Thanks chrisdebian and Michael Wheeley.',
+      },
+      {
+        icon: '🐛',
+        title: 'Grab Bag Fixes',
+        desc: "The band legend no longer disappears when DX Spots are hidden. Floating windows stop drifting when snapped (and stop drifting in Firefox, full stop) — thanks Jörg. The WSPR tab no longer stays selected after it's hidden. APRS endpoints aren't polled when nothing is using APRS. Contest listings replace a dead source and gained links to each contest's page. setup-pi detects Wayland vs X11 kiosk session type at install time (#1026) — fixes black-screen kiosks on Raspberry Pi OS Trixie. PSK Reporter style fixes, visitor stats are correct behind Cloudflare, and grid-square popups in the DX Cluster panel carry proper location data.",
+      },
+    ],
+  },
   {
     version: '26.4.1',
     date: '2026-06-02',

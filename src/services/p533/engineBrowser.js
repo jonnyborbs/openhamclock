@@ -15,8 +15,7 @@ import { predictInWorker } from './predictInWorker.js';
 import {
   ANTENNA_PROFILES,
   calculateSignalMargin,
-  modeAdvantageDb,
-  adjustReliability,
+  modeRequiredSNR,
   calculateSNR,
   getStatus,
 } from '../../utils/propagationAdjust.js';
@@ -44,9 +43,10 @@ function freqToBand(freq) {
 
 /**
  * Run a full 24h × 9-band prediction in the browser and return a
- * /api/propagation-compatible payload. The hourly WASM call is identical to
- * the server's `fetchITURHFPropHourly` result — we reuse the same
- * adjustReliability/signal-margin math on both sides.
+ * /api/propagation-compatible payload. Mode, power, and antenna gain all go
+ * into the P.533 input (Path.SNRr / Path.txpower / TXGOS), so the BCR the
+ * engine returns is used as-is — same contract as the server's
+ * `fetchITURHFPropHourly` path when the service honors requiredSNR.
  *
  * @param {Object}          opts
  * @param {{lat,lon}}       opts.deLocation
@@ -78,11 +78,12 @@ export async function runBrowserEngine({
   const txPower = parseFloat(power) || 100;
   const antProfile = ANTENNA_PROFILES[antenna] || ANTENNA_PROFILES.isotropic;
   const txGain = antProfile.gain;
-  // Full margin is reported back in the response for the UI's "+/-NdB" badge,
-  // but post-processing the BCR uses mode advantage only — power and gain
-  // are already inside the WASM input (Path.txpower / TXGOS).
+  // Full margin is reported back in the response for the UI's "+/-NdB" badge
+  // only. Power and gain go into the WASM input (Path.txpower / TXGOS), and
+  // the mode's decode threshold goes in as Path.SNRr — the BCR that comes
+  // back already reflects all three, so no post-processing is applied.
   const signalMarginDb = calculateSignalMargin(mode, txPower, txGain);
-  const postAdjustDb = modeAdvantageDb(mode);
+  const requiredSNR = modeRequiredSNR(mode);
 
   const now = new Date();
   const year = now.getUTCFullYear();
@@ -115,6 +116,7 @@ export async function runBrowserEngine({
         ssn,
         txPower,
         txGain,
+        requiredSNR,
       },
       wasmUrl ? { wasmUrl } : undefined,
     );
@@ -124,8 +126,7 @@ export async function runBrowserEngine({
     for (const f of hourResult.frequencies || []) {
       const band = freqToBand(f.freq);
       if (band) {
-        const raw = Math.max(0, Math.min(99, Math.round(f.reliability)));
-        perBand[band] = adjustReliability(raw, postAdjustDb);
+        perBand[band] = Math.max(0, Math.min(99, Math.round(f.reliability)));
       }
     }
 

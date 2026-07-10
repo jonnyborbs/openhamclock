@@ -1,0 +1,14 @@
+# Railway config for the fletcher service.
+# In Railway dashboard set the service's rootDirectory to `fletcher` so
+# this file is picked up (and the Dockerfile path stays relative).
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "node server.js"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

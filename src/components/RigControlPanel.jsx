@@ -41,7 +41,7 @@ const RigControlPanel = () => {
           <span className="icon">📻</span> {t('app.rigControl.title')}
         </h3>
         <div className="panel-controls">
-          <span className={`status-led ${statusColor}`} title={statusTitle} />
+          <span className={`status-led ${statusColor}`} role="status" aria-label={statusTitle} title={statusTitle} />
         </div>
       </div>
 
@@ -66,7 +66,11 @@ const RigControlPanel = () => {
 
         <div className="rig-controls">
           <form onSubmit={handleSubmitFreq} className="flex-row">
+            <label htmlFor="rig-freq-input" className="visually-hidden">
+              {t('app.rigControl.setFreqLabel', { defaultValue: 'Set frequency (MHz)' })}
+            </label>
             <input
+              id="rig-freq-input"
               type="number"
               step="0.0001"
               placeholder={t('app.rigControl.setFreqPlaceholder')}

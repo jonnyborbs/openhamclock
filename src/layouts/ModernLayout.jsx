@@ -9,7 +9,7 @@
  * Tablet (768–1024):  Header | Map (full width) | Panels in 2-col grid
  * Mobile (<768):      Compact header | Map | Panels stacked one per row, scroll
  */
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import {
   Header,
   WorldMap,
@@ -28,9 +28,11 @@ import { useRig } from '../contexts/RigContext.jsx';
 import { calculateDistance, formatDistance } from '../utils/geo.js';
 import { findDXPathForSpot } from '../utils/dxClusterSpotMatcher';
 import { DXGridInput } from '../components/DXGridInput.jsx';
+import { DXCallsignInput } from '../components/DXCallsignInput.jsx';
 import { DXFavorites } from '../components/DXFavorites.jsx';
 import DXCCSelect from '../components/DXCCSelect.jsx';
 import useBreakpoint from '../hooks/app/useBreakpoint';
+import { useCallsignPopup } from '../components/CallsignPopupManager.jsx';
 
 export default function ModernLayout(props) {
   const {
@@ -127,6 +129,8 @@ export default function ModernLayout(props) {
   const { tuneTo } = useRig();
   const { breakpoint } = useBreakpoint();
   const [showDxccSelect, setShowDxccSelect] = useState(false);
+  const { showPopup } = useCallsignPopup();
+  const callsignInfoRef = useRef(null);
   const isMobile = breakpoint === 'mobile';
   const isTablet = breakpoint === 'tablet';
 
@@ -247,21 +251,42 @@ export default function ModernLayout(props) {
         <div style={{ fontSize: '14px', color: 'var(--accent-green)', fontWeight: '700' }}>
           {t('app.dxLocation.dxTitle')}
         </div>
-        <button
-          onClick={handleToggleDxLock}
-          title={dxLocked ? t('app.dxLock.unlockTooltip') : t('app.dxLock.lockTooltip')}
-          style={{
-            background: dxLocked ? 'var(--accent-amber)' : 'var(--bg-tertiary)',
-            color: dxLocked ? '#000' : 'var(--text-secondary)',
-            border: '1px solid ' + (dxLocked ? 'var(--accent-amber)' : 'var(--border-color)'),
-            borderRadius: '4px',
-            padding: '2px 6px',
-            fontSize: '10px',
-            cursor: 'pointer',
-          }}
-        >
-          {dxLocked ? '🔒' : '🔓'}
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button
+            type="button"
+            onClick={() => setShowDxccSelect((prev) => !prev)}
+            title={t('app.dxLocation.dxccToggleTitle')}
+            aria-label={t('app.dxLocation.dxccToggleTitle')}
+            style={{
+              background: showDxccSelect ? 'var(--accent-amber)' : 'var(--bg-tertiary)',
+              color: showDxccSelect ? '#000' : 'var(--text-secondary)',
+              border: '1px solid ' + (showDxccSelect ? 'var(--accent-amber)' : 'var(--border-color)'),
+              borderRadius: '4px',
+              padding: '2px 6px',
+              fontSize: '10px',
+              cursor: 'pointer',
+            }}
+          >
+            DXCC
+          </button>
+          <DXFavorites dxLocation={dxLocation} dxGrid={dxGrid} onDXChange={handleDXChange} dxLocked={dxLocked} />
+          <button
+            onClick={handleToggleDxLock}
+            title={dxLocked ? t('app.dxLock.unlockTooltip') : t('app.dxLock.lockTooltip')}
+            aria-label={dxLocked ? t('app.dxLock.unlockTooltip') : t('app.dxLock.lockTooltip')}
+            style={{
+              background: dxLocked ? 'var(--accent-amber)' : 'var(--bg-tertiary)',
+              color: dxLocked ? '#000' : 'var(--text-secondary)',
+              border: '1px solid ' + (dxLocked ? 'var(--accent-amber)' : 'var(--border-color)'),
+              borderRadius: '4px',
+              padding: '2px 6px',
+              fontSize: '10px',
+              cursor: 'pointer',
+            }}
+          >
+            {dxLocked ? '🔒' : '🔓'}
+          </button>
+        </div>
       </div>
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: '14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -273,41 +298,43 @@ export default function ModernLayout(props) {
               color: 'var(--accent-green)',
               fontSize: '22px',
               fontWeight: '700',
-              letterSpacing: '1px',
-              flex: '1 1 auto',
             }}
           />
-          {dxCallsign && (
-            <span
-              style={{
-                fontFamily: 'var(--font-mono)',
-                fontSize: '22px',
-                fontWeight: '900',
-                color: 'var(--accent-amber)',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {dxCallsign}
-            </span>
-          )}
-          <DXFavorites dxLocation={dxLocation} dxGrid={dxGrid} onDXChange={handleDXChange} dxLocked={dxLocked} />
-          <button
-            type="button"
-            onClick={() => setShowDxccSelect((prev) => !prev)}
-            title={t('app.dxLocation.dxccToggleTitle')}
+          <DXCallsignInput
+            dxCallsign={dxCallsign}
+            onDXChange={handleDXChange}
+            dxLocked={dxLocked}
             style={{
-              background: showDxccSelect ? 'var(--accent-amber)' : 'var(--bg-tertiary)',
-              color: showDxccSelect ? '#000' : 'var(--text-secondary)',
-              border: '1px solid var(--border-color)',
+              color: 'var(--accent-amber)',
+              fontSize: '22px',
+              fontWeight: '700',
+            }}
+          />
+          <button
+            ref={callsignInfoRef}
+            onClick={() => dxCallsign && showPopup(dxCallsign, callsignInfoRef.current)}
+            title={
+              dxCallsign
+                ? t('app.dxLocation.callsignLookupTitle', { callsign: dxCallsign })
+                : t('app.dxLocation.callsignLookupEmptyTitle')
+            }
+            aria-label={t('app.dxLocation.callsignLookupAriaLabel')}
+            aria-disabled={!dxCallsign}
+            disabled={!dxCallsign}
+            style={{
+              background: dxCallsign ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
+              color: dxCallsign ? 'var(--text-secondary)' : 'var(--text-muted)',
+              border: '1px solid ' + (dxCallsign ? 'var(--border-color)' : 'transparent'),
               borderRadius: '4px',
-              padding: '4px 8px',
+              padding: '2px 6px',
               fontSize: '12px',
-              fontFamily: 'var(--font-mono)',
-              cursor: 'pointer',
+              cursor: dxCallsign ? 'pointer' : 'not-allowed',
+              opacity: dxCallsign ? 1 : 0.5,
+              maxWidth: '20px',
               flex: '0 0 auto',
             }}
           >
-            DXCC
+            i
           </button>
         </div>
         {showDxccSelect && (
@@ -361,6 +388,7 @@ export default function ModernLayout(props) {
     <DXClusterPanel
       data={dxClusterData.spots}
       loading={dxClusterData.loading}
+      error={dxClusterData.error}
       totalSpots={dxClusterData.totalSpots}
       filters={dxFilters}
       onFilterChange={setDxFilters}
@@ -370,6 +398,7 @@ export default function ModernLayout(props) {
       hoveredSpot={hoveredSpot}
       showOnMap={mapLayers.showDXPaths}
       onToggleMap={toggleDXPaths}
+      userCallsign={config.callsign}
     />
   );
 

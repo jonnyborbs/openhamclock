@@ -1,0 +1,16 @@
+{
+  "name": "watchtower",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker that probes openhamclock infrastructure and posts state-change alerts to Discord",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

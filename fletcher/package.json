@@ -1,0 +1,13 @@
+{
+  "name": "fletcher",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Internal Railway service: bridges HTTP fetches from an isolated egress IP",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

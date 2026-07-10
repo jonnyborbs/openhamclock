@@ -148,7 +148,13 @@ export const AnalogClockPanel = ({ currentTime, sunTimes }) => {
       </div>
 
       {/* Clock face */}
-      <svg width={size} height={size} style={{ flexShrink: 0 }}>
+      <svg
+        width={size}
+        height={size}
+        style={{ flexShrink: 0 }}
+        role="img"
+        aria-label={`Analog clock showing ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')} local time`}
+      >
         {/* Outer ring */}
         <circle
           cx={center}
@@ -204,13 +210,17 @@ export const AnalogClockPanel = ({ currentTime, sunTimes }) => {
             fontSize: size > 150 ? '12px' : '10px',
           }}
         >
-          <span style={{ color: 'var(--accent-amber)' }}>
-            <span style={{ marginRight: '2px' }}>&#9788;</span>
+          <span style={{ color: 'var(--accent-amber)' }} aria-label={`Sunrise ${localSunrise}`}>
+            <span aria-hidden="true" style={{ marginRight: '2px' }}>
+              &#9788;
+            </span>
             {localSunrise}
           </span>
-          <span style={{ color: 'var(--accent-purple)' }}>
+          <span style={{ color: 'var(--accent-purple)' }} aria-label={`Sunset ${localSunset}`}>
             {localSunset}
-            <span style={{ marginLeft: '2px' }}>&#9790;</span>
+            <span aria-hidden="true" style={{ marginLeft: '2px' }}>
+              &#9790;
+            </span>
           </span>
         </div>
       )}

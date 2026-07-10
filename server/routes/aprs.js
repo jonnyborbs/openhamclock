@@ -613,19 +613,46 @@ module.exports = function (app, ctx) {
 
   // REST endpoint: GET /api/aprs/tnc-status — proxy to rig-bridge APRS TNC status
   // Lets the browser query TNC connection state without needing to know the rig-bridge port.
-  app.get('/api/aprs/tnc-status', async (req, res) => {
+  // The probe result is cached so N polling clients share one upstream check per TTL
+  // instead of each request spawning its own rig-bridge fetch. Hosted instances never
+  // have a rig-bridge on the server's localhost, so they answer without probing at all.
+  const TNC_STATUS_HOSTED = process.env.OHC_HOSTED === '1' || process.env.OHC_HOSTED === 'true';
+  const TNC_STATUS_TTL_MS = 10000;
+  const TNC_STATUS_TIMEOUT_MS = 2000;
+  const TNC_STATUS_OFFLINE = { enabled: false, running: false, connected: false };
+  let tncStatusCache = { data: TNC_STATUS_OFFLINE, fetchedAt: 0 };
+  let tncStatusInflight = null;
+
+  async function probeTncStatus() {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TNC_STATUS_TIMEOUT_MS);
     try {
       const rigHost = CONFIG.rigControl?.host || 'http://localhost';
       const rigPort = CONFIG.rigControl?.port || 5555;
-      const response = await ctx.fetch(`${rigHost}:${rigPort}/api/aprs-tnc/status`);
-      if (response.ok) {
-        const data = await response.json();
-        return res.json(data);
-      }
-      return res.json({ enabled: false, running: false, connected: false });
+      const response = await ctx.fetch(`${rigHost}:${rigPort}/api/aprs-tnc/status`, {
+        signal: controller.signal,
+      });
+      const data = response.ok ? await response.json() : TNC_STATUS_OFFLINE;
+      tncStatusCache = { data, fetchedAt: Date.now() };
     } catch (e) {
-      return res.json({ enabled: false, running: false, connected: false });
+      tncStatusCache = { data: TNC_STATUS_OFFLINE, fetchedAt: Date.now() };
+    } finally {
+      clearTimeout(timer);
+      tncStatusInflight = null;
     }
+  }
+
+  app.get('/api/aprs/tnc-status', async (req, res) => {
+    if (TNC_STATUS_HOSTED) {
+      return res.json(TNC_STATUS_OFFLINE);
+    }
+    if (Date.now() - tncStatusCache.fetchedAt >= TNC_STATUS_TTL_MS) {
+      if (!tncStatusInflight) {
+        tncStatusInflight = probeTncStatus();
+      }
+      await tncStatusInflight;
+    }
+    return res.json(tncStatusCache.data);
   });
 
   // REST endpoint: POST /api/aprs/local — inject local TNC packets (from cloud relay)

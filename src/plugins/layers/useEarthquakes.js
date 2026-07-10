@@ -1,5 +1,7 @@
 import i18n from '../../lang/i18n';
 import { esc, sanitizeUrl } from '../../utils/escapeHtml.js';
+import { addMinimizeToggle } from './addMinimizeToggle.js';
+import { makeDraggable } from './makeDraggable.js';
 
 import { useState, useEffect, useRef } from 'react';
 
@@ -23,11 +25,41 @@ export const metadata = {
   version: '1.2.0',
 };
 
+const EARTHQUAKE_FEEDS = [
+  {
+    id: 'significant_day',
+    label: 'Significant (1-day)',
+    url: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/significant_day.geojson',
+  },
+  {
+    id: '4.5_day',
+    label: 'M4.5+ (1-day)',
+    url: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson',
+  },
+  {
+    id: '2.5_day',
+    label: 'M2.5+ (1-day)',
+    url: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson',
+  },
+  {
+    id: '1.0_day',
+    label: 'M1.0+ (1-day)',
+    url: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/1.0_day.geojson',
+  },
+  {
+    id: 'all_day',
+    label: 'All magnitudes (1-day)',
+    url: 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson',
+  },
+];
+
 export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemoryMode = false }) {
   const [markersRef, setMarkersRef] = useState([]);
   const [earthquakeData, setEarthquakeData] = useState([]);
+  const [feedId, setFeedId] = useState(() => localStorage.getItem('earthquake-feed') || '2.5_day');
   const previousQuakeIds = useRef(new Set());
   const isFirstLoad = useRef(true);
+  const controlRef = useRef(null);
 
   // Low memory mode limits
   const MAX_QUAKES = lowMemoryMode ? 20 : 100;
@@ -39,11 +71,8 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemory
 
     const fetchEarthquakes = async () => {
       try {
-        // USGS GeoJSON feed - All earthquakes from last hour
-        const response = await fetch(
-          'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson',
-          //'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson'
-        );
+        const selectedFeed = EARTHQUAKE_FEEDS.find((feed) => feed.id === feedId) || EARTHQUAKE_FEEDS[2];
+        const response = await fetch(selectedFeed.url);
         const data = await response.json();
         console.info('[Earthquakes] fetched:', data.features?.length || 0, 'quakes');
         // Limit earthquakes in low memory mode
@@ -58,7 +87,7 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemory
     const interval = setInterval(fetchEarthquakes, REFRESH_INTERVAL);
 
     return () => clearInterval(interval);
-  }, [enabled, MAX_QUAKES, REFRESH_INTERVAL]);
+  }, [enabled, MAX_QUAKES, REFRESH_INTERVAL, feedId]);
 
   // Add/remove markers with animation for new quakes
   useEffect(() => {
@@ -279,6 +308,78 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemory
       });
     };
   }, [enabled, earthquakeData, map, opacity]);
+
+  // Control panel — created once, stats updated separately
+  useEffect(() => {
+    if (!enabled || !map || controlRef.current) return;
+
+    const Control = L.Control.extend({
+      options: { position: 'topright' },
+      onAdd() {
+        const wrapper = L.DomUtil.create('div', 'panel-wrapper');
+        const div = L.DomUtil.create('div', 'earthquake-layer-control', wrapper);
+        div.style.minWidth = '240px';
+        div.innerHTML = `
+          <div class="floating-panel-header">Earthquakes</div>
+          <div style="margin-top:8px;font-size:11px;color:var(--text-secondary);">
+            <label for="earthquake-feed-select" style="display:block;margin-bottom:4px;">USGS feed:</label>
+            <select id="earthquake-feed-select" style="width:100%;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border-color);padding:4px;font-size:11px;">
+              ${EARTHQUAKE_FEEDS.map((feed) => `<option value="${feed.id}">${feed.label}</option>`).join('')}
+            </select>
+          </div>
+        `;
+
+        const feedSelect = div.querySelector('#earthquake-feed-select');
+        if (feedSelect) {
+          feedSelect.value = feedId;
+          feedSelect.addEventListener('change', (e) => {
+            const newFeed = e.target.value;
+            setFeedId(newFeed);
+            localStorage.setItem('earthquake-feed', newFeed);
+          });
+        }
+
+        L.DomEvent.disableClickPropagation(div);
+        L.DomEvent.disableScrollPropagation(div);
+        return wrapper;
+      },
+    });
+
+    const control = new Control();
+    map.addControl(control);
+    controlRef.current = control;
+
+    // Double-rAF: first frame Leaflet inserts the element, second frame it's painted
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const container = controlRef.current?.getContainer()?.querySelector('.earthquake-layer-control');
+        if (!container) return;
+        const saved = localStorage.getItem('earthquake-panel-position');
+        if (saved) {
+          try {
+            const { top, left } = JSON.parse(saved);
+            container.style.position = 'fixed';
+            container.style.top = top + 'px';
+            container.style.left = left + 'px';
+            container.style.right = 'auto';
+            container.style.bottom = 'auto';
+          } catch (_) {}
+        }
+        makeDraggable(container, 'earthquake-panel-position', { snap: 5 });
+        addMinimizeToggle(container, 'earthquake-panel-position', {
+          contentClassName: 'earthquake-panel-content',
+          buttonClassName: 'earthquake-minimize-btn',
+        });
+      }),
+    );
+
+    return () => {
+      if (controlRef.current) {
+        map.removeControl(controlRef.current);
+        controlRef.current = null;
+      }
+    };
+  }, [map, enabled]);
 
   return {
     markers: markersRef,

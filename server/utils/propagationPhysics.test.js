@@ -16,6 +16,8 @@ import {
   calculateSignalMargin,
   calculateEnhancedReliability,
   getStatus,
+  modeRequiredSNR,
+  P533_REF_SNR_DB,
   solarDeclinationDeg,
   cosSolarZenith,
 } from './propagationPhysics.js';
@@ -148,6 +150,19 @@ describe('calculateSignalMargin', () => {
   it('combines mode + power + antenna', () => {
     // FT8 + 1kW + 8 dBi Yagi = 34 + 10 + 8 = 52
     expect(calculateSignalMargin('FT8', 1000, 8)).toBeCloseTo(52, 1);
+  });
+});
+
+describe('modeRequiredSNR', () => {
+  it('derives the engine Path.SNRr from the SSB reference — parity with client', () => {
+    // Mirror of the golden values in src/utils/propagationAdjust.test.js.
+    // These go into ITURHFProp / the WASM as Path.SNRr (3 kHz reference BW).
+    expect(P533_REF_SNR_DB).toBe(15);
+    expect(modeRequiredSNR('SSB')).toBe(15);
+    expect(modeRequiredSNR('CW')).toBe(5);
+    expect(modeRequiredSNR('FT8')).toBe(-19);
+    expect(modeRequiredSNR('WSPR')).toBe(-26);
+    expect(modeRequiredSNR('UNKNOWN_MODE')).toBe(15);
   });
 });
 

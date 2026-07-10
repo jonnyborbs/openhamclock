@@ -93,10 +93,13 @@ module.exports = function (app, ctx) {
 
       const dxpeditions = [];
 
-      // Each entry starts with a date pattern like "Jan 1-Feb 16, 2026 DXCC:"
-      // Split on date patterns that are followed by DXCC
+      // Each entry starts with a date RANGE like "Jan 1-Feb 16, 2026 DXCC:".
+      // The next-entry lookahead must require the range dash: every row also
+      // contains a single "Source: OPDX (Jun 22, 2026)" date, and splitting
+      // on bare month-day tokens truncated each entry at its own Source date
+      // — losing the Info text (and with it the real operating callsigns).
       const entryPattern =
-        /((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}[^D]*?DXCC:[^·]+?)(?=(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}|$)/gi;
+        /((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}[^D]*?DXCC:[^·]+?)(?=(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s*[-–]|$)/gi;
       const entries = text.match(entryPattern) || [];
 
       logDebug('[DXpeditions] Found', entries.length, 'potential entries');
@@ -135,8 +138,10 @@ module.exports = function (app, ctx) {
         let info = null;
         let dateStr = null;
 
-        // Strategy 1: "DXCC: xxx Callsign: xxx" format
-        const dxccMatch = entry.match(/DXCC:\s*([^C\n]+?)(?=Callsign:|QSL:|Source:|Info:|$)/i);
+        // Strategy 1: "DXCC: xxx Callsign: xxx" format. The entity must be
+        // matched up to the literal "Callsign:" label — a negated class like
+        // [^C] can never match entities that contain a C (Crete, Cook Is…).
+        const dxccMatch = entry.match(/DXCC:\s*(.+?)\s*(?=Callsign:|QSL:|Source:|Info:|$)/i);
         const callMatch = entry.match(/Callsign:\s*([A-Z0-9\/]+)/i);
 
         if (callMatch && dxccMatch) {
@@ -210,19 +215,29 @@ module.exports = function (app, ctx) {
             const currentYear = new Date().getFullYear();
             const startMonth = monthNames.indexOf(dateParsed[1].toLowerCase());
             const startDay = parseInt(dateParsed[2]);
-            const startYear = dateParsed[3] ? parseInt(dateParsed[3]) : currentYear;
+            // "Feb 15-27, 2027" carries the year only at the END — the start
+            // year must come from there, not from the current year, or a
+            // next-year DXpedition parses as a year-long active one.
+            const endYearGiven = dateParsed[6] ? parseInt(dateParsed[6]) : null;
+            const startYear = dateParsed[3] ? parseInt(dateParsed[3]) : (endYearGiven ?? currentYear);
 
             const endMonthStr = dateParsed[4] || dateParsed[1];
             const endMonth = monthNames.indexOf(endMonthStr.toLowerCase());
             const endDay = parseInt(dateParsed[5]) || startDay + 14;
-            const endYear = dateParsed[6] ? parseInt(dateParsed[6]) : startYear;
+            const endYear = endYearGiven ?? startYear;
 
             if (startMonth >= 0) {
               startDate = new Date(startYear, startMonth, startDay);
               endDate = new Date(endYear, endMonth >= 0 ? endMonth : startMonth, endDay);
 
-              if (endDate < startDate && !dateParsed[6]) {
-                endDate.setFullYear(endYear + 1);
+              if (endDate < startDate) {
+                if (dateParsed[6] && !dateParsed[3]) {
+                  // Year came from the end date — a Dec-Jan span means the
+                  // start is in the PREVIOUS year, not the end a year later
+                  startDate.setFullYear(startYear - 1);
+                } else {
+                  endDate.setFullYear(endYear + 1);
+                }
               }
 
               const today = new Date();
@@ -238,22 +253,38 @@ module.exports = function (app, ctx) {
         const bandsMatch = entry.match(/(\d+(?:-\d+)?m)/g);
         const bands = bandsMatch ? [...new Set(bandsMatch)].join(' ') : '';
 
-        const modesMatch = entry.match(/\b(CW|SSB|FT8|FT4|RTTY|PSK|FM|AM|DIGI)\b/gi);
-        const modes = modesMatch ? [...new Set(modesMatch.map((m) => m.toUpperCase()))].join(' ') : '';
+        // Case-sensitive: NG3K writes modes in caps, and lowercase "fm" is
+        // ham shorthand for "from" ("fm Chichijima I"), not the FM mode
+        const modesMatch = entry.match(/\b(CW|SSB|FT8|FT4|RTTY|PSK|FM|AM|DIGI)\b/g);
+        const modes = modesMatch ? [...new Set(modesMatch)].join(' ') : '';
 
-        dxpeditions.push({
-          callsign,
-          entity: entity || 'Unknown',
-          dates: dateStr,
-          qsl,
-          info: (info || '').substring(0, 100),
-          bands,
-          modes,
-          startDate: startDate?.toISOString(),
-          endDate: endDate?.toISOString(),
-          isActive,
-          isUpcoming,
-        });
+        // NG3K often puts only the DXCC prefix in the Callsign column ("JD1",
+        // "SV9") with the real operating calls in the Info text ("as JD1BQP",
+        // "as SV9/HB9EMP"). Prefer those: the panel then shows workable calls
+        // and the DXpedition spot filter — which matches exact calls — can
+        // actually recognize the operation's spots. A bare prefix stays only
+        // when NG3K published nothing better.
+        const looksLikeFullCall = (c) => /^(?:[A-Z0-9]{1,4}\/)?[A-Z0-9]{1,3}\d[A-Z]{1,4}(?:\/[A-Z0-9]{1,4})?$/.test(c);
+        const asCalls = [...(info || '').matchAll(/\bas\s+([A-Z0-9]+(?:\/[A-Z0-9]+)*)/g)]
+          .map((m) => m[1].toUpperCase())
+          .filter(looksLikeFullCall);
+        const operatingCalls = asCalls.length ? [...new Set(asCalls)] : [callsign];
+
+        for (const operatingCall of operatingCalls) {
+          dxpeditions.push({
+            callsign: operatingCall,
+            entity: entity || 'Unknown',
+            dates: dateStr,
+            qsl,
+            info: (info || '').substring(0, 100),
+            bands,
+            modes,
+            startDate: startDate?.toISOString(),
+            endDate: endDate?.toISOString(),
+            isActive,
+            isUpcoming,
+          });
+        }
       }
 
       // Remove duplicates by callsign

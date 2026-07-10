@@ -47,6 +47,16 @@ describe('buildInputConfig', () => {
     expect(buildInputConfig({ ...base, txPower: 1000 })).toMatch(/Path\.txpower 30\.0/);
   });
 
+  it('threads requiredSNR into Path.SNRr, including digital-mode negative values', () => {
+    // Mode decode thresholds arrive as requiredSNR (SSB 15, FT8 -19, WSPR -26
+    // — see modeRequiredSNR in src/utils/propagationAdjust.js). Verified
+    // empirically that the WASM accepts negative SNRr and raises BCR
+    // monotonically as the threshold drops.
+    expect(buildInputConfig(base)).toMatch(/Path\.SNRr 15/); // default = SSB reference
+    expect(buildInputConfig({ ...base, requiredSNR: -19 })).toMatch(/Path\.SNRr -19/);
+    expect(buildInputConfig({ ...base, requiredSNR: -26 })).toMatch(/Path\.SNRr -26/);
+  });
+
   it('remaps hour 0 → 24 to match ITURHFProp semantics (and REST wrapper)', () => {
     expect(buildInputConfig({ ...base, hour: 0 })).toMatch(/Path\.hour 24/);
     expect(buildInputConfig({ ...base, hour: 5 })).toMatch(/Path\.hour 5/);

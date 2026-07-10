@@ -154,6 +154,17 @@ export function useLayer({ enabled = false, opacity = 0.85, map = null }) {
     return () => clearInterval(id);
   }, [enabled, fetchGateways]);
 
+  // Broadcast the aggregated gateway list (callsign + lat/lon + channels) to
+  // the text view panel (#1002). Rows change hourly at most.
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent('mapdata:winlink', {
+        detail: enabled ? { enabled: true, gateways: aggregateByCallsign(rows) } : { enabled: false },
+      }),
+    );
+  }, [enabled, rows]);
+  useEffect(() => () => window.dispatchEvent(new CustomEvent('mapdata:winlink', { detail: { enabled: false } })), []);
+
   // Render markers
   useEffect(() => {
     if (!map || typeof L === 'undefined') return;

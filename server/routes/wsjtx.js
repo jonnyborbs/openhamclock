@@ -663,29 +663,15 @@ module.exports = function (app, ctx) {
             } else if (targetCall.length >= 3 && !wsjtxHamqthInflight.has(targetCall) && wsjtxHamqthInflight.size < 5) {
               // Background lookup for next cycle (fire-and-forget, max 5 concurrent)
               wsjtxHamqthInflight.add(targetCall);
-              fetch(`https://www.hamqth.com/dxcc.php?callsign=${encodeURIComponent(targetCall)}`, {
-                headers: { 'User-Agent': 'OpenHamClock/' + APP_VERSION },
-                signal: AbortSignal.timeout(5000),
-              })
-                .then(async (resp) => {
-                  if (!resp.ok) return;
-                  const text = await resp.text();
-                  const latMatch = text.match(/<lat>([^<]+)<\/lat>/);
-                  const lonMatch = text.match(/<lng>([^<]+)<\/lng>/);
-                  const countryMatch = text.match(/<n>([^<]+)<\/name>/);
-                  if (latMatch && lonMatch) {
-                    cacheCallsignLookup(targetCall, {
-                      data: {
-                        callsign: targetCall,
-                        lat: parseFloat(latMatch[1]),
-                        lon: parseFloat(lonMatch[1]),
-                        country: countryMatch ? countryMatch[1] : '',
-                      },
-                      timestamp: Date.now(),
-                    });
+              // TODO: Refactor lookup chain into callsign.js. Currently we duplicate the full
+              // flow (cache check → HamQTH DXCC → prefix estimation) here instead of using
+              // the shared hamqthLookup() + extractBaseCallsign() chain from callsign.js.
+              hamqthLookup(targetCall)
+                .then((result) => {
+                  if (result) {
+                    cacheCallsignLookup(targetCall, { data: result, timestamp: Date.now() });
                   }
                 })
-                .catch(() => {})
                 .finally(() => {
                   wsjtxHamqthInflight.delete(targetCall);
                 });
@@ -904,6 +890,20 @@ module.exports = function (app, ctx) {
           qso.loc_source = 'bridge';
           locSource = 'bridge';
         }
+
+        // ==========================================
+        // CACHE PATCH: Pull coordinates from active preview line
+        // ==========================================
+        if (!locSource && qso.status === 'log') {
+          const existing = n3fjpQsos.find((q) => q.dx_call === qso.dx_call && q.lat !== 0 && q.lon !== 0);
+          if (existing) {
+            qso.lat = existing.lat;
+            qso.lon = existing.lon;
+            qso.loc_source = 'cache';
+            locSource = 'cache';
+          }
+        }
+        // ==========================================
 
         // 2) Otherwise prefer the exact operating grid (N3FJP “Grid Rec” field).
         if (!locSource && qso.dx_grid) {

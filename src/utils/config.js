@@ -53,10 +53,10 @@ export const DEFAULT_CONFIG = {
     propagation: { visible: true, size: 1.0 },
     // Right sidebar panels
     dxCluster: { visible: true, size: 2.0 },
-    pskReporter: { visible: true, size: 1.0 },
-    dxpeditions: { visible: true, size: 1.0 },
+    pskReporter: { visible: true, size: 1.2 },
+    dxpeditions: { visible: true, size: 0.6 },
     pota: { visible: true, size: 1.0 },
-    contests: { visible: true, size: 1.0 },
+    contests: { visible: true, size: 0.8 },
   },
   refreshIntervals: {
     spaceWeather: 300000, // 5 minutes
@@ -158,6 +158,9 @@ export const loadConfig = () => {
       defaultDX: localConfig.defaultDX || config.defaultDX,
       panels: { ...config.panels, ...localConfig.panels },
       refreshIntervals: { ...config.refreshIntervals, ...localConfig.refreshIntervals },
+      // Deep-merge propagation so saved configs predating the antenna field
+      // (or server-synced configs missing it) don't reset antenna to default.
+      propagation: { ...config.propagation, ...localConfig.propagation },
       udpDxCluster: localConfig.udpDxCluster || config.udpDxCluster,
     };
   }

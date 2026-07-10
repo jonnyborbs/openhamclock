@@ -91,8 +91,15 @@ export function createTileReprojector({ tileUrlTemplate, onProgress }) {
   let tilesLoaded = 0;
   let tilesTotal = 0;
 
-  function chooseTileZoom(azZoom, lowMemory) {
-    if (lowMemory) return 2;
+  function chooseTileZoom(azZoom, lowMemory, pixelRatio = 1) {
+    if (lowMemory) {
+      return 2;
+    }
+
+    if (pixelRatio >= 2) {
+      return 4;
+    }
+
     return azZoom > 1.5 ? 4 : 3;
   }
 
@@ -145,26 +152,68 @@ export function createTileReprojector({ tileUrlTemplate, onProgress }) {
   // Web Mercator tile grid uses Mercator Y, not equirectangular.
   // We need to convert lat → Mercator pixel Y for sampling.
   function latToMercatorY(lat, dim) {
-    const latRad = lat * DEG;
+    const maxMercatorLat = 85.0511287798066;
+    const clampedLat = Math.max(-maxMercatorLat, Math.min(maxMercatorLat, lat));
+    const latRad = clampedLat * DEG;
     const mercN = Math.log(Math.tan(Math.PI / 4 + latRad / 2));
-    // Mercator Y is 0 at top (lat 85.05), dim at bottom (lat -85.05)
     return dim / 2 - (dim * mercN) / (2 * Math.PI);
   }
 
-  function reproject({ canvasWidth, canvasHeight, centerLat, centerLon, zoom, panX, panY, halfRes, lowMemory }) {
+  function sampleBilinear(srcData, width, height, x, y, data, dstIdx) {
+    const x0 = Math.floor(x);
+    const y0 = Math.floor(y);
+    const x1 = x0 + 1;
+    const y1 = y0 + 1;
+    const tx = x - x0;
+    const ty = y - y0;
+
+    const wrapX = (v) => ((v % width) + width) % width;
+    const clampY = (v) => Math.max(0, Math.min(height - 1, v));
+
+    const sx0 = wrapX(x0);
+    const sx1 = wrapX(x1);
+    const sy0 = clampY(y0);
+    const sy1 = clampY(y1);
+
+    const i00 = (sy0 * width + sx0) * 4;
+    const i10 = (sy0 * width + sx1) * 4;
+    const i01 = (sy1 * width + sx0) * 4;
+    const i11 = (sy1 * width + sx1) * 4;
+
+    for (let c = 0; c < 4; c++) {
+      const top = srcData[i00 + c] * (1 - tx) + srcData[i10 + c] * tx;
+      const bottom = srcData[i01 + c] * (1 - tx) + srcData[i11 + c] * tx;
+      data[dstIdx + c] = Math.round(top * (1 - ty) + bottom * ty);
+    }
+  }
+
+  function reproject({
+    canvasWidth,
+    canvasHeight,
+    centerLat,
+    centerLon,
+    zoom,
+    panX,
+    panY,
+    halfRes,
+    lowMemory,
+    pixelRatio = 1,
+  }) {
     if (!eqCanvas || !eqCtx) return null;
 
-    const R = (Math.min(canvasWidth, canvasHeight) / 2 - 20) * zoom;
-    const cxCenter = canvasWidth / 2 + panX;
-    const cyCenter = canvasHeight / 2 + panY;
+    const outputScale = Math.max(1, pixelRatio || 1);
+    const outW = Math.max(1, Math.round(canvasWidth * outputScale));
+    const outH = Math.max(1, Math.round(canvasHeight * outputScale));
+
+    const R = (Math.min(canvasWidth, canvasHeight) / 2 - 20) * zoom * outputScale;
+    const cxCenter = (canvasWidth / 2 + panX) * outputScale;
+    const cyCenter = (canvasHeight / 2 + panY) * outputScale;
     const scale = R / Math.PI;
 
-    const key = `${canvasWidth},${canvasHeight},${centerLat},${centerLon},${zoom},${panX},${panY},${halfRes},${cachedTileZoom}`;
+    const key = `${canvasWidth},${canvasHeight},${outputScale},${centerLat},${centerLon},${zoom},${panX},${panY},${halfRes},${cachedTileZoom}`;
     if (key === cachedKey && cachedImageData) return cachedImageData;
 
     const step = halfRes ? 2 : 1;
-    const outW = canvasWidth;
-    const outH = canvasHeight;
     const imageData = new ImageData(outW, outH);
     const data = imageData.data;
 
@@ -208,16 +257,9 @@ export function createTileReprojector({ tileUrlTemplate, onProgress }) {
         // Y uses Mercator projection (matching the tile grid)
         const eqY = latToMercatorY(lat, eqH);
 
-        // Clamp and nearest-neighbor sample
-        const sx = Math.round(eqX) % eqW;
-        const sy = Math.max(0, Math.min(eqH - 1, Math.round(eqY)));
-        const srcIdx = (sy * eqW + (sx < 0 ? sx + eqW : sx)) * 4;
-
+        // Bilinear sample to avoid blocky labels/borders after reprojection.
         const dstIdx = (py * outW + px) * 4;
-        data[dstIdx] = srcData[srcIdx];
-        data[dstIdx + 1] = srcData[srcIdx + 1];
-        data[dstIdx + 2] = srcData[srcIdx + 2];
-        data[dstIdx + 3] = srcData[srcIdx + 3];
+        sampleBilinear(srcData, eqW, eqH, eqX, eqY, data, dstIdx);
 
         // Fill neighbor pixels when half-res
         if (halfRes && step === 2) {
@@ -265,9 +307,10 @@ export function createTileReprojector({ tileUrlTemplate, onProgress }) {
       panY,
       halfRes = false,
       lowMemory = false,
+      pixelRatio = 1,
     }) {
       if (destroyed) return null;
-      const tileZoom = chooseTileZoom(zoom, lowMemory);
+      const tileZoom = chooseTileZoom(zoom, lowMemory, pixelRatio);
 
       // Rebuild equirectangular canvas if needed
       if (cachedTileZoom !== tileZoom || cachedTemplate !== currentTemplate) {
@@ -275,7 +318,18 @@ export function createTileReprojector({ tileUrlTemplate, onProgress }) {
         await buildEquirectangular(currentTemplate, tileZoom);
       }
 
-      return reproject({ canvasWidth, canvasHeight, centerLat, centerLon, zoom, panX, panY, halfRes, lowMemory });
+      return reproject({
+        canvasWidth,
+        canvasHeight,
+        centerLat,
+        centerLon,
+        zoom,
+        panX,
+        panY,
+        halfRes,
+        lowMemory,
+        pixelRatio,
+      });
     },
 
     // Synchronous reprojection — only works if equirectangular canvas is already built

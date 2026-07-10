@@ -185,6 +185,9 @@ export const KeybindingsPanel = ({ isOpen, onClose, keybindings, nodeId }) => {
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="keybindings-modal-title"
         style={{
           background: 'var(--bg-secondary)',
           border: '1px solid var(--border-color)',
@@ -209,6 +212,7 @@ export const KeybindingsPanel = ({ isOpen, onClose, keybindings, nodeId }) => {
           }}
         >
           <h2
+            id="keybindings-modal-title"
             style={{
               margin: 0,
               fontSize: '18px',
@@ -218,10 +222,13 @@ export const KeybindingsPanel = ({ isOpen, onClose, keybindings, nodeId }) => {
               letterSpacing: '0.5px',
             }}
           >
-            ⌨ {t('keybindings.panel.title', 'KEYBOARD SHORTCUTS')}
+            <span aria-hidden="true">⌨</span> {t('keybindings.panel.title', 'KEYBOARD SHORTCUTS')}
           </h2>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close keyboard shortcuts"
+            title="Close"
             style={{
               background: 'none',
               border: 'none',
@@ -234,7 +241,7 @@ export const KeybindingsPanel = ({ isOpen, onClose, keybindings, nodeId }) => {
             onMouseEnter={(e) => (e.target.style.color = 'var(--accent-red)')}
             onMouseLeave={(e) => (e.target.style.color = 'var(--text-muted)')}
           >
-            ×
+            <span aria-hidden="true">×</span>
           </button>
         </div>
 

@@ -13,6 +13,8 @@ const defaults = { size: 14, color: 'currentColor' };
 // Magnifying glass / Search / Filter
 export const IconSearch = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -30,6 +32,8 @@ export const IconSearch = ({ size = defaults.size, color = defaults.color, ...pr
 // Refresh / Reload
 export const IconRefresh = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -50,6 +54,8 @@ export const IconRefresh = ({ size = defaults.size, color = defaults.color, ...p
 // Map
 export const IconMap = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -69,6 +75,8 @@ export const IconMap = ({ size = defaults.size, color = defaults.color, ...props
 // Gear / Settings
 export const IconGear = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -87,6 +95,8 @@ export const IconGear = ({ size = defaults.size, color = defaults.color, ...prop
 // Globe / World
 export const IconGlobe = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -105,6 +115,8 @@ export const IconGlobe = ({ size = defaults.size, color = defaults.color, ...pro
 // Satellite
 export const IconSatellite = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -125,6 +137,8 @@ export const IconSatellite = ({ size = defaults.size, color = defaults.color, ..
 // Antenna / Radio
 export const IconAntenna = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -146,6 +160,8 @@ export const IconAntenna = ({ size = defaults.size, color = defaults.color, ...p
 // Sun
 export const IconSun = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -170,6 +186,8 @@ export const IconSun = ({ size = defaults.size, color = defaults.color, ...props
 // Moon
 export const IconMoon = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -187,6 +205,8 @@ export const IconMoon = ({ size = defaults.size, color = defaults.color, ...prop
 // Trophy / Contest
 export const IconTrophy = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -209,6 +229,8 @@ export const IconTrophy = ({ size = defaults.size, color = defaults.color, ...pr
 // Tent / POTA / Camping
 export const IconTent = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -228,6 +250,8 @@ export const IconTent = ({ size = defaults.size, color = defaults.color, ...prop
 // Earth / DXpedition
 export const IconEarth = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -246,6 +270,8 @@ export const IconEarth = ({ size = defaults.size, color = defaults.color, ...pro
 // Pin / Location
 export const IconPin = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -264,6 +290,8 @@ export const IconPin = ({ size = defaults.size, color = defaults.color, ...props
 // Tag / Label
 export const IconTag = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -282,6 +310,8 @@ export const IconTag = ({ size = defaults.size, color = defaults.color, ...props
 // Fullscreen expand
 export const IconExpand = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -302,6 +332,8 @@ export const IconExpand = ({ size = defaults.size, color = defaults.color, ...pr
 // Trash / Clear
 export const IconTrash = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -323,6 +355,8 @@ export const IconTrash = ({ size = defaults.size, color = defaults.color, ...pro
 // Fullscreen shrink
 export const IconShrink = ({ size = defaults.size, color = defaults.color, ...props }) => (
   <svg
+    aria-hidden="true"
+    focusable="false"
     width={size}
     height={size}
     viewBox="0 0 16 16"
@@ -337,6 +371,51 @@ export const IconShrink = ({ size = defaults.size, color = defaults.color, ...pr
     <polyline points="11,6 16,1" />
     <polyline points="6,11 6,15 2,15" />
     <polyline points="10,5 10,1 14,1" />
+  </svg>
+);
+
+// External link (arrow pointing up-right)
+export const IconExternalLink = ({ size = defaults.size, color = defaults.color, ...props }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke={color}
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    <path d="M6 3H3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-3" strokeDasharray="0" />
+    <polyline points="8 5 12 5 12 9" />
+    <line x1="9" y1="12" x2="14" y2="7" />
+  </svg>
+);
+
+// ── QTH / Home icon ────────────────────────────────────────────────
+// House with radio antenna on roof — for QTH with signal
+export const IconQth = ({ size = defaults.size, color = defaults.color, ...props }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke={color}
+    strokeWidth="1.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    {...props}
+  >
+    {/* House body */}
+    <path d="M2 8.5l6-5.5L14 8.5V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" />
+    {/* Door */}
+    <path d="M6 15v-4h4v4" />
+    {/* Antenna */}
+    <line x1="10" y1="3" x2="10" y2="1" />
+    {/* Signal arcs */}
+    <path d="M11.5 2a3 3 0 0 1 0 2.5" />
+    <path d="M13 1a5 5 0 0 1 0 4.5" />
   </svg>
 );
 
@@ -358,4 +437,6 @@ export default {
   IconExpand,
   IconShrink,
   IconTrash,
+  IconExternalLink,
+  IconQth,
 };

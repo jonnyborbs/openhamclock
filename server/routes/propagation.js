@@ -24,6 +24,7 @@ module.exports = function (app, ctx) {
     calculateLUF,
     calculateSignalMargin,
     modeAdvantageDb,
+    modeRequiredSNR,
     adjustReliability,
     calculateEnhancedReliability,
     calculateSNR,
@@ -151,21 +152,22 @@ module.exports = function (app, ctx) {
   /**
    * Fetch base prediction from ITURHFProp service
    */
-  async function fetchITURHFPropPrediction(txLat, txLon, rxLat, rxLon, ssn, month, hour, txPower, txGain) {
+  async function fetchITURHFPropPrediction(txLat, txLon, rxLat, rxLon, ssn, month, hour, txPower, txGain, requiredSNR) {
     if (!ITURHFPROP_URL || iturhfpropRetired) return null;
     if (iturhfpropIsDown()) return null;
     if (iturhfpropInFlight >= ITURHFPROP_MAX_INFLIGHT) return null;
 
     const pw = Math.round(txPower || 100);
     const gn = Math.round((txGain || 0) * 10) / 10;
-    const cacheKey = `${txLat.toFixed(1)},${txLon.toFixed(1)}-${rxLat.toFixed(1)},${rxLon.toFixed(1)}-${ssn}-${month}-${hour}-${pw}-${gn}`;
+    const snr = requiredSNR ?? 15;
+    const cacheKey = `${txLat.toFixed(1)},${txLon.toFixed(1)}-${rxLat.toFixed(1)},${rxLon.toFixed(1)}-${ssn}-${month}-${hour}-${pw}-${gn}-${snr}`;
 
     const cached = ituCacheGet(iturhfpropSingleCache, cacheKey);
     if (cached) return cached;
 
     iturhfpropInFlight++;
     try {
-      const url = `${ITURHFPROP_URL}/api/bands?txLat=${txLat}&txLon=${txLon}&rxLat=${rxLat}&rxLon=${rxLon}&ssn=${ssn}&month=${month}&hour=${hour}&txPower=${pw}&txGain=${gn}`;
+      const url = `${ITURHFPROP_URL}/api/bands?txLat=${txLat}&txLon=${txLon}&rxLat=${rxLat}&rxLon=${rxLon}&ssn=${ssn}&month=${month}&hour=${hour}&txPower=${pw}&txGain=${gn}&requiredSNR=${snr}`;
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 12000); // 12s for single hour
@@ -205,21 +207,22 @@ module.exports = function (app, ctx) {
     return `${(Math.round(lat * 2) / 2).toFixed(1)},${(Math.round(lon * 2) / 2).toFixed(1)}`;
   }
 
-  async function fetchITURHFPropHourly(txLat, txLon, rxLat, rxLon, ssn, month, txPower, txGain) {
+  async function fetchITURHFPropHourly(txLat, txLon, rxLat, rxLon, ssn, month, txPower, txGain, requiredSNR) {
     if (!ITURHFPROP_URL || iturhfpropRetired) return null;
     if (iturhfpropIsDown()) return null;
     if (iturhfpropInFlight >= ITURHFPROP_MAX_INFLIGHT) return null;
 
     const pw = Math.round(txPower || 100);
     const gn = Math.round((txGain || 0) * 10) / 10;
-    const cacheKey = `h-${roundPath(txLat, txLon)}-${roundPath(rxLat, rxLon)}-${ssn}-${month}-${pw}-${gn}`;
+    const snr = requiredSNR ?? 15;
+    const cacheKey = `h-${roundPath(txLat, txLon)}-${roundPath(rxLat, rxLon)}-${ssn}-${month}-${pw}-${gn}-${snr}`;
 
     const cached = ituCacheGet(iturhfpropHourlyMap, cacheKey);
     if (cached) return cached;
 
     iturhfpropInFlight++;
     try {
-      const url = `${ITURHFPROP_URL}/api/predict/hourly?txLat=${txLat}&txLon=${txLon}&rxLat=${rxLat}&rxLon=${rxLon}&ssn=${ssn}&month=${month}&txPower=${pw}&txGain=${gn}`;
+      const url = `${ITURHFPROP_URL}/api/predict/hourly?txLat=${txLat}&txLon=${txLon}&rxLat=${rxLat}&rxLon=${rxLon}&ssn=${ssn}&month=${month}&txPower=${pw}&txGain=${gn}&requiredSNR=${snr}`;
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s — P.533 needs time for 24h×10bands
@@ -294,10 +297,14 @@ module.exports = function (app, ctx) {
     const antennaKey = antenna || 'isotropic';
     const txGain = ANTENNA_PROFILES[antennaKey]?.gain ?? 0;
     const signalMarginDb = calculateSignalMargin(txMode, txPower, txGain);
-    // ITURHFProp already consumed txPower (Path.txpower) and txGain (TXGOS),
-    // so post-processing its BCR uses mode advantage only — applying the full
-    // signalMarginDb again would double-count power and antenna gain.
-    const p533PostAdjustDb = modeAdvantageDb(txMode);
+    // The mode's decode threshold is passed into ITURHFProp as Path.SNRr so
+    // the engine handles digital modes natively. A service that honors it
+    // echoes requiredSNR back and its BCR is used as-is; a legacy service
+    // (no echo) still gets the old post-hoc mode advantage. Power and gain
+    // are always inside the engine run (Path.txpower / TXGOS).
+    const modeSNRr = modeRequiredSNR(txMode);
+    const legacyPostAdjustDb = modeAdvantageDb(txMode);
+    const postAdjustFor = (response) => (Number(response?.requiredSNR) === modeSNRr ? 0 : legacyPostAdjustDb);
 
     const useITURHFProp = ITURHFPROP_URL !== null;
     logDebug(
@@ -369,19 +376,39 @@ module.exports = function (app, ctx) {
         // Check cache synchronously first — no network call
         const pw = Math.round(txPower || 100);
         const gn = Math.round((txGain || 0) * 10) / 10;
-        const hourlyKey = `h-${roundPath(de.lat, de.lon)}-${roundPath(dx.lat, dx.lon)}-${effectiveSSN}-${currentMonth}-${pw}-${gn}`;
+        const hourlyKey = `h-${roundPath(de.lat, de.lon)}-${roundPath(dx.lat, dx.lon)}-${effectiveSSN}-${currentMonth}-${pw}-${gn}-${modeSNRr}`;
         const cachedHourly = ituCacheGet(iturhfpropHourlyMap, hourlyKey);
 
         // If not in cache, try a quick inline fetch (10s timeout)
         const hourlyData =
           cachedHourly ||
-          (await fetchITURHFPropHourly(de.lat, de.lon, dx.lat, dx.lon, effectiveSSN, currentMonth, txPower, txGain));
+          (await fetchITURHFPropHourly(
+            de.lat,
+            de.lon,
+            dx.lat,
+            dx.lon,
+            effectiveSSN,
+            currentMonth,
+            txPower,
+            txGain,
+            modeSNRr,
+          ));
 
         // If still no data and service isn't down, queue background fetch
         // so the next poll (10 min) gets precise results
         if (!hourlyData && !iturhfpropIsDown()) {
           queueBackgroundFetch(hourlyKey, () =>
-            fetchITURHFPropHourly(de.lat, de.lon, dx.lat, dx.lon, effectiveSSN, currentMonth, txPower, txGain),
+            fetchITURHFPropHourly(
+              de.lat,
+              de.lon,
+              dx.lat,
+              dx.lon,
+              effectiveSSN,
+              currentMonth,
+              txPower,
+              txGain,
+              modeSNRr,
+            ),
           );
         }
 
@@ -401,6 +428,10 @@ module.exports = function (app, ctx) {
             predictions[band] = [];
           });
 
+          // 0 when the service ran the engine at this mode's SNR threshold
+          // (requiredSNR echoed back); the legacy mode advantage otherwise.
+          const hourlyPostAdjustDb = postAdjustFor(hourlyData);
+
           for (const hourEntry of hourlyData.hourly) {
             const h = hourEntry.hour;
 
@@ -409,18 +440,12 @@ module.exports = function (app, ctx) {
               iturhfpropMuf = hourEntry.muf;
             }
 
-            // P.533 BCR already reflects the user's TX power (Path.txpower)
-            // and antenna gain (TXGOS) — proppy passes both into ITURHFProp.
-            // Only the mode advantage (FT8 = +34 dB, etc.) needs to be
-            // applied here, since ITURHFProp runs with a fixed SSB-equivalent
-            // BW=3000 / SNRr=15 and doesn't know about digital-mode SNR
-            // thresholds.
             const hourBandReliability = {};
             for (const freqResult of hourEntry.frequencies || []) {
               const band = freqToBand(freqResult.freq);
               if (band) {
                 const raw = Math.max(0, Math.min(99, Math.round(freqResult.reliability)));
-                hourBandReliability[band] = adjustReliability(raw, p533PostAdjustDb);
+                hourBandReliability[band] = adjustReliability(raw, hourlyPostAdjustDb);
               }
             }
 
@@ -461,17 +486,19 @@ module.exports = function (app, ctx) {
           currentHour,
           txPower,
           txGain,
+          modeSNRr,
         );
         if (singleHour?.bands) {
           logDebug('[Propagation] ITURHFProp hourly unavailable, using single-hour + built-in for 24h chart');
           iturhfpropMuf = singleHour.muf;
+          const singlePostAdjustDb = postAdjustFor(singleHour);
 
           // Use single-hour data for current bands AND inject into predictions
           // so the chart's current-hour cell matches the bars
           currentBands = bands
             .map((band, idx) => {
               const ituBand = singleHour.bands?.[band];
-              const rel = ituBand ? adjustReliability(Math.round(ituBand.reliability), p533PostAdjustDb) : 0;
+              const rel = ituBand ? adjustReliability(Math.round(ituBand.reliability), singlePostAdjustDb) : 0;
               // Pre-seed the predictions array with the ITURHFProp value for current hour
               if (!predictions[band]) predictions[band] = [];
               predictions[band][currentHour] = { hour: currentHour, reliability: rel, snr: calculateSNR(rel) };

@@ -31,6 +31,7 @@ const {
   PORT,
   HOST,
   API_WRITE_KEY,
+  METRICS_AUTH_KEY,
   ITURHFPROP_URL,
   WSJTX_ENABLED,
   WSJTX_UDP_PORT,
@@ -77,6 +78,9 @@ process.on('unhandledRejection', (reason) => {
 // ── Logging (must be initialized before middleware) ──
 const { LOG_LEVEL, logDebug, logInfo, logWarn, logErrorOnce, installRateLimiter } = require('./server/utils/logging');
 installRateLimiter();
+
+// ── Prometheus metrics (bootstrapped, references injected after services) ──
+const prometheus = require('./server/services/prometheus-metrics');
 
 // ── Upstream request manager ──
 const UpstreamManager = require('./server/utils/upstream-manager');
@@ -158,6 +162,10 @@ Object.assign(ctx, {
 });
 app.use(visitorStatsService.visitorMiddleware);
 
+// ── Inject references into Prometheus collect() functions ──
+prometheus.setSessionTracker(visitorStatsService.sessionTracker);
+prometheus.setVisitorStats(visitorStatsService.visitorStats);
+
 // ── Auto-update service ──
 const createAutoUpdateService = require('./server/services/auto-update');
 const autoUpdateService = createAutoUpdateService(ctx);
@@ -220,6 +228,9 @@ if (distExists) {
 
 app.use(express.static(publicDir, staticOptions));
 
+// ── Prometheus API metrics middleware (before routes, patterns extracted lazily) ──
+app.use(prometheus.apiMetricsMiddleware());
+
 // ── Register route modules ──
 // Order matters: modules that export shared state must come first
 
@@ -267,6 +278,29 @@ require('./server/routes/rig-bridge')(app, ctx);
 require('./server/routes/config-routes')(app, ctx);
 require('./server/routes/geo-time')(app, ctx);
 require('./server/routes/admin')(app, ctx);
+
+// Subsystem health background refresher (read by /api/health).
+const health = require('./server/health');
+ctx.getSubsystemsHealth = health.getSubsystems;
+health.start(ctx);
+prometheus.setSubsystemsHealth(health.getSubsystems);
+
+// ── Prometheus metrics endpoint ──
+app.get('/metrics', async (req, res) => {
+  if (METRICS_AUTH_KEY) {
+    const token = req.query.key || req.headers.authorization?.replace('Bearer ', '');
+    if (token !== METRICS_AUTH_KEY) {
+      return res.status(401).json({ error: 'Metrics endpoint requires authentication' });
+    }
+  }
+  try {
+    res.set('Content-Type', prometheus.registry.contentType);
+    res.send(await prometheus.registry.metrics());
+  } catch (err) {
+    logErrorOnce('Prometheus', `Metrics collection failed: ${err.message}`);
+    res.status(500).send('Metrics collection failed');
+  }
+});
 
 // ── Catch-all for SPA ──
 app.get('*', (req, res) => {

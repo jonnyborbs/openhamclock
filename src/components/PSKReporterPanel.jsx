@@ -7,12 +7,13 @@
  *   Row 2: Sub-tabs (Being Heard / Hearing  or  Decodes / QSOs)
  *   Content: Scrolling spot/decode list
  */
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getBandColor } from '../utils/callsign.js';
 import { ariaTabKeyDown } from '../utils/ariaTabKeyDown.js';
 import { IconSearch, IconRefresh, IconMap, IconTrash } from './Icons.jsx';
 import CallsignLink from './CallsignLink.jsx';
+import { useCallsignPopup } from './CallsignPopupManager.jsx';
 
 const PSKReporterPanel = ({
   callsign,
@@ -44,6 +45,7 @@ const PSKReporterPanel = ({
   wsjtxRelayMulticast = { enabled: false, address: '224.0.0.1' },
 }) => {
   const { t } = useTranslation();
+  const { showPopup } = useCallsignPopup();
   const [panelMode, setPanelMode] = useState(() => {
     try {
       const s = localStorage.getItem('openhamclock_pskPanelMode');
@@ -53,7 +55,9 @@ const PSKReporterPanel = ({
     }
   });
   const PSK_TABS = ['tx', 'rx'];
+  const WSJT_X_TABS = ['decodes', 'wspr', 'qsos'];
   const pskTabRefs = useRef({});
+  const wsjtxTabRefs = useRef({});
   const [activeTab, setActiveTab] = useState(() => {
     try {
       const s = localStorage.getItem('openhamclock_pskActiveTab');
@@ -95,6 +99,25 @@ const PSKReporterPanel = ({
       localStorage.setItem('openhamclock_pskActiveTab', v);
     } catch {}
   };
+
+  // Computed tab routing (must be after all state/setter declarations)
+  // Filter out 'wspr' when the WSPR tab isn't rendered, so arrow-key cycling
+  // never lands on an invisible tab.
+  const wsprtClients = Object.entries(wsjtxClients);
+  const wsprtPrimary = wsprtClients[0]?.[1] || null;
+  const wsprtIsWSPR = wsprtPrimary?.mode?.toUpperCase() === 'WSPR';
+  const wsprTabVisible = wsprtIsWSPR || wsjtxWspr.length > 0;
+  const ALL_TABS = panelMode === 'psk' ? PSK_TABS : WSJT_X_TABS.filter((t) => t !== 'wspr' || wsprTabVisible);
+
+  // If WSPR tab disappears while it's selected, switch to 'decodes'
+  useEffect(() => {
+    if (panelMode === 'wsjtx' && wsjtxTab === 'wspr' && !wsprTabVisible) {
+      setWsjtxTab('decodes');
+    }
+  }, [panelMode, wsjtxTab, wsprTabVisible]);
+  const activeTabKey = panelMode === 'psk' ? activeTab : wsjtxTab;
+  const setActiveTabFn = panelMode === 'psk' ? setActiveTabPersist : setWsjtxTab;
+  const activeTabRefs = panelMode === 'psk' ? pskTabRefs : wsjtxTabRefs;
 
   // PSKReporter data from App-level hook (single SSE connection shared across app)
   const {
@@ -239,6 +262,7 @@ const PSKReporterPanel = ({
 
   // ── Shared styles ──
   const segBtn = (active, color) => ({
+    flex: 1,
     padding: '3px 10px',
     background: active ? `${color}18` : 'transparent',
     color: active ? color : 'var(--text-muted)',
@@ -248,6 +272,7 @@ const PSKReporterPanel = ({
     fontWeight: active ? '700' : '400',
     cursor: 'pointer',
     letterSpacing: '0.02em',
+    whiteSpace: 'nowrap',
   });
 
   const subTabBtn = (active, color) => ({
@@ -287,40 +312,43 @@ const PSKReporterPanel = ({
       {/* ── Row 1: Mode toggle + controls ── */}
       <div
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
           marginBottom: '5px',
-          flexShrink: 0,
         }}
       >
         {/* Mode toggle */}
-        <div style={{ display: 'flex' }}>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
           <button
             onClick={() => setPanelModePersist('psk')}
-            style={segBtn(panelMode === 'psk', 'var(--accent-primary)')}
+            style={segBtn(panelMode === 'psk', 'var(--accent-blue)')}
             title={t('pskReporterPanel.mode.pskTooltip')}
           >
-            PSKReporter
+            PSKReporter{' '}
+            {statusDot && (
+              <span style={{ color: statusDot.color, fontSize: '10px', lineHeight: 1 }}>{statusDot.char}</span>
+            )}
           </button>
           <button
             onClick={() => setPanelModePersist('wsjtx')}
-            style={segBtn(panelMode === 'wsjtx', '#a78bfa')}
+            style={segBtn(panelMode === 'wsjtx', 'var(--accent-purple)')}
             title={t('pskReporterPanel.mode.wsjtxTooltip')}
           >
             WSJT-X
           </button>
         </div>
+      </div>
 
+      {/* ── Row 2: Controls ── */}
+      <div style={{ gap: '4px', marginBottom: '5px', marginLeft: 'auto', flexShrink: 0 }}>
         {/* Right controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          {/* PSK: status dot + grid badge + filter + refresh */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {/* PSK: grid badge + filter + refresh */}
           {panelMode === 'psk' && (
             <>
               {filterMode === 'grid' && (
                 <span
                   title={`Grid mode: showing all spots for ${identifier}`}
                   style={{
+                    flex: 1,
                     fontSize: '9px',
                     fontWeight: '600',
                     color: '#000',
@@ -333,9 +361,6 @@ const PSKReporterPanel = ({
                 >
                   ⊞ {identifier?.substring(0, 4)}
                 </span>
-              )}
-              {statusDot && (
-                <span style={{ color: statusDot.color, fontSize: '10px', lineHeight: 1 }}>{statusDot.char}</span>
               )}
               <select
                 value={pskAge}
@@ -350,6 +375,7 @@ const PSKReporterPanel = ({
                   } catch {}
                 }}
                 style={{
+                  flex: 1,
                   background: 'var(--bg-tertiary)',
                   color: 'var(--text-primary)',
                   border: '1px solid var(--border-color)',
@@ -461,22 +487,8 @@ const PSKReporterPanel = ({
               </select>
             </>
           )}
-
-          {/* Map toggle (always visible) */}
-          {handleMapToggle && (
-            <button
-              onClick={handleMapToggle}
-              style={iconBtn(isMapOn, panelMode === 'psk' ? '#4488ff' : '#a78bfa')}
-              title={isMapOn ? t('pskReporterPanel.map.hide') : t('pskReporterPanel.map.show')}
-              aria-label={isMapOn ? t('pskReporterPanel.map.hide') : t('pskReporterPanel.map.show')}
-              aria-pressed={isMapOn}
-            >
-              <IconMap size={11} style={{ verticalAlign: 'middle' }} />
-            </button>
-          )}
-
-          {/* PSK path lines toggle (visible when PSK map is on) */}
-          {panelMode === 'psk' && isMapOn && onTogglePaths && (
+          {/* PSK path lines toggle */}
+          {panelMode === 'psk' && onTogglePaths && (
             <button
               onClick={onTogglePaths}
               style={iconBtn(showPaths, '#4488ff')}
@@ -497,100 +509,135 @@ const PSKReporterPanel = ({
               </svg>
             </button>
           )}
+          {/* Map toggle */}
+          {handleMapToggle && (
+            <button
+              onClick={handleMapToggle}
+              style={iconBtn(isMapOn, panelMode === 'psk' ? '#4488ff' : '#a78bfa')}
+              title={isMapOn ? t('pskReporterPanel.map.hide') : t('pskReporterPanel.map.show')}
+              aria-label={isMapOn ? t('pskReporterPanel.map.hide') : t('pskReporterPanel.map.show')}
+              aria-pressed={isMapOn}
+            >
+              <IconMap size={11} style={{ verticalAlign: 'middle' }} />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* ── Row 2: Sub-tabs ── */}
-      <div style={{ display: 'flex', gap: '4px', marginBottom: '5px', flexShrink: 0 }}>
-        {panelMode === 'psk' ? (
-          <div
-            role="tablist"
-            aria-label={t('pskReporterPanel.tabs.tablistLabel', 'PSK Reporter tabs')}
-            style={{ display: 'flex', gap: '4px' }}
-            onKeyDown={(e) => ariaTabKeyDown(e, PSK_TABS, activeTab, setActiveTabPersist, pskTabRefs)}
-          >
-            <button
-              role="tab"
-              id="tab-psk-tx"
-              aria-selected={activeTab === 'tx'}
-              aria-controls="panel-psk-content"
-              tabIndex={activeTab === 'tx' ? 0 : -1}
-              ref={(el) => (pskTabRefs.current['tx'] = el)}
-              onClick={() => setActiveTabPersist('tx')}
-              style={subTabBtn(activeTab === 'tx', '#4ade80')}
-              title={
-                filterMode === 'grid'
-                  ? `Stations hearing signals from ${identifier?.substring(0, 4)}`
-                  : t('pskReporterPanel.tabs.heardTooltip')
-              }
-            >
-              ▲{' '}
-              {filterMode === 'grid'
-                ? `Sent (${pskFilterCount > 0 ? filteredTx.length : txCount})`
-                : t('pskReporterPanel.tabs.heard', { count: pskFilterCount > 0 ? filteredTx.length : txCount })}
-            </button>
-            <button
-              role="tab"
-              id="tab-psk-rx"
-              aria-selected={activeTab === 'rx'}
-              aria-controls="panel-psk-content"
-              tabIndex={activeTab === 'rx' ? 0 : -1}
-              ref={(el) => (pskTabRefs.current['rx'] = el)}
-              onClick={() => setActiveTabPersist('rx')}
-              style={subTabBtn(activeTab === 'rx', '#60a5fa')}
-              title={
-                filterMode === 'grid'
-                  ? `Stations heard at ${identifier?.substring(0, 4)}`
-                  : t('pskReporterPanel.tabs.hearingTooltip')
-              }
-            >
-              ▼{' '}
-              {filterMode === 'grid'
-                ? `Rcvd (${pskFilterCount > 0 ? filteredRx.length : rxCount})`
-                : t('pskReporterPanel.tabs.hearing', { count: pskFilterCount > 0 ? filteredRx.length : rxCount })}
-            </button>
-          </div>
-        ) : (
-          <>
-            <button
-              onClick={() => setWsjtxTab('decodes')}
-              style={subTabBtn(wsjtxTab === 'decodes', '#a78bfa')}
-              title={t('pskReporterPanel.wsjtx.decodingTooltip')}
-            >
-              {t('pskReporterPanel.wsjtx.decodes', { count: filteredDecodes.length })}
-            </button>
-            {(isWSPRMode || wsjtxWspr.length > 0) && (
+      {/* ── Row 3: Sub-tabs ── */}
+      <div style={{ gap: '4px', marginBottom: '5px', flexShrink: 0 }}>
+        <div
+          role="tablist"
+          aria-label={
+            panelMode === 'psk'
+              ? t('pskReporterPanel.tabs.tablistLabel', 'PSK Reporter tabs')
+              : t('pskReporterPanel.tabs.wsjtxTablistLabel', 'WSJT-X tabs')
+          }
+          style={{ display: 'flex', gap: '4px' }}
+          onKeyDown={(e) => ariaTabKeyDown(e, ALL_TABS, activeTabKey, setActiveTabFn, activeTabRefs)}
+        >
+          {panelMode === 'psk' ? (
+            <>
               <button
-                onClick={() => setWsjtxTab('wspr')}
-                style={subTabBtn(wsjtxTab === 'wspr', '#22d3ee')}
-                title="WSPR decodes received by WSJT-X"
+                role="tab"
+                id="tab-psk-tx"
+                aria-selected={activeTab === 'tx'}
+                aria-controls="panel-psk-content"
+                tabIndex={activeTab === 'tx' ? 0 : -1}
+                ref={(el) => (pskTabRefs.current['tx'] = el)}
+                onClick={() => setActiveTabPersist('tx')}
+                style={subTabBtn(activeTab === 'tx', '#4ade80')}
+                title={
+                  filterMode === 'grid'
+                    ? `Stations hearing signals from ${identifier?.substring(0, 4)}`
+                    : t('pskReporterPanel.tabs.heardTooltip')
+                }
               >
-                WSPR ({filteredWspr.length})
+                ▲{' '}
+                {filterMode === 'grid'
+                  ? `Sent (${pskFilterCount > 0 ? filteredTx.length : txCount})`
+                  : t('pskReporterPanel.tabs.heard', { count: pskFilterCount > 0 ? filteredTx.length : txCount })}
               </button>
-            )}
-            <button
-              onClick={() => setWsjtxTab('qsos')}
-              style={subTabBtn(wsjtxTab === 'qsos', '#a78bfa')}
-              title={t('pskReporterPanel.wsjtx.qsosTooltip')}
-            >
-              {t('pskReporterPanel.wsjtx.qsos', { count: wsjtxQsos.length })}
-            </button>
-          </>
-        )}
+              <button
+                role="tab"
+                id="tab-psk-rx"
+                aria-selected={activeTab === 'rx'}
+                aria-controls="panel-psk-content"
+                tabIndex={activeTab === 'rx' ? 0 : -1}
+                ref={(el) => (pskTabRefs.current['rx'] = el)}
+                onClick={() => setActiveTabPersist('rx')}
+                style={subTabBtn(activeTab === 'rx', '#60a5fa')}
+                title={
+                  filterMode === 'grid'
+                    ? `Stations heard at ${identifier?.substring(0, 4)}`
+                    : t('pskReporterPanel.tabs.hearingTooltip')
+                }
+              >
+                ▼{' '}
+                {filterMode === 'grid'
+                  ? `Rcvd (${pskFilterCount > 0 ? filteredRx.length : rxCount})`
+                  : t('pskReporterPanel.tabs.hearing', { count: pskFilterCount > 0 ? filteredRx.length : rxCount })}
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                role="tab"
+                id="tab-wsjtx-decodes"
+                aria-selected={wsjtxTab === 'decodes'}
+                aria-controls="panel-wsjtx-content"
+                tabIndex={wsjtxTab === 'decodes' ? 0 : -1}
+                ref={(el) => (wsjtxTabRefs.current['decodes'] = el)}
+                onClick={() => setWsjtxTab('decodes')}
+                style={subTabBtn(wsjtxTab === 'decodes', '#a78bfa')}
+                title={t('pskReporterPanel.wsjtx.decodingTooltip')}
+              >
+                {t('pskReporterPanel.wsjtx.decodes', { count: filteredDecodes.length })}
+              </button>
+              {(isWSPRMode || wsjtxWspr.length > 0) && (
+                <button
+                  role="tab"
+                  id="tab-wsjtx-wspr"
+                  aria-selected={wsjtxTab === 'wspr'}
+                  aria-controls="panel-wsjtx-content"
+                  tabIndex={wsjtxTab === 'wspr' ? 0 : -1}
+                  ref={(el) => (wsjtxTabRefs.current['wspr'] = el)}
+                  onClick={() => setWsjtxTab('wspr')}
+                  style={subTabBtn(wsjtxTab === 'wspr', '#22d3ee')}
+                  title="WSPR decodes received by WSJT-X"
+                >
+                  WSPR ({filteredWspr.length})
+                </button>
+              )}
+              <button
+                role="tab"
+                id="tab-wsjtx-qsos"
+                aria-selected={wsjtxTab === 'qsos'}
+                aria-controls="panel-wsjtx-content"
+                tabIndex={wsjtxTab === 'qsos' ? 0 : -1}
+                ref={(el) => (wsjtxTabRefs.current['qsos'] = el)}
+                onClick={() => setWsjtxTab('qsos')}
+                style={subTabBtn(wsjtxTab === 'qsos', '#a78bfa')}
+                title={t('pskReporterPanel.wsjtx.qsosTooltip')}
+              >
+                {t('pskReporterPanel.wsjtx.qsos', { count: wsjtxQsos.length })}
+              </button>
+            </>
+          )}
+        </div>
       </div>
-
       {/* ── Content area ── */}
       <div
-        role={panelMode === 'psk' ? 'tabpanel' : undefined}
-        id={panelMode === 'psk' ? 'panel-psk-content' : undefined}
-        aria-labelledby={panelMode === 'psk' ? `tab-psk-${activeTab}` : undefined}
+        role="tabpanel"
+        id={panelMode === 'psk' ? 'panel-psk-content' : 'panel-wsjtx-content'}
+        aria-labelledby={panelMode === 'psk' ? `tab-psk-${activeTab}` : `tab-wsjtx-${wsjtxTab}`}
         style={{ flex: 1, overflow: 'auto', fontSize: '11px', fontFamily: 'var(--font-mono)' }}
       >
         {/* === PSKReporter content === */}
         {panelMode === 'psk' && (
           <>
             {filterMode !== 'grid' && (!callsign || callsign === 'N0CALL') ? (
-              <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '16px', fontSize: '11px' }}>
+              <div style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '11px' }}>
                 {t('pskReporterPanel.psk.setCallsign')}
               </div>
             ) : error && !connected ? (
@@ -598,12 +645,12 @@ const PSKReporterPanel = ({
                 {t('pskReporterPanel.psk.connectionFailed')}
               </div>
             ) : loading && filteredReports.length === 0 && pskFilterCount === 0 ? (
-              <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text-muted)', fontSize: '11px' }}>
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px' }}>
                 <div className="loading-spinner" style={{ margin: '0 auto 8px' }} />
                 {t('pskReporterPanel.psk.connecting')}
               </div>
             ) : filteredReports.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '12px', color: 'var(--text-muted)', fontSize: '11px' }}>
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px' }}>
                 {pskFilterCount > 0
                   ? t('pskReporterPanel.psk.noSpotsFiltered')
                   : filterMode === 'grid'
@@ -662,7 +709,14 @@ const PSKReporterPanel = ({
                           whiteSpace: 'nowrap',
                         }}
                       >
-                        <CallsignLink call={displayCall} color="var(--text-primary)" fontWeight="600" fontSize="11px" />
+                        <CallsignLink
+                          call={displayCall}
+                          color="var(--text-primary)"
+                          fontWeight="600"
+                          fontSize="11px"
+                          onPopup={showPopup}
+                          location={grid ? { grid } : undefined}
+                        />
                         {showMutualReception && isMutual(report) && (
                           <span
                             style={{ color: '#fbbf24', marginLeft: '3px', fontSize: '10px' }}
@@ -733,13 +787,12 @@ const PSKReporterPanel = ({
                   flexDirection: 'column',
                   gap: '8px',
                   color: 'var(--text-muted)',
-                  fontSize: '11px',
+                  fontSize: '10px',
                   textAlign: 'center',
-                  padding: '16px 8px',
-                  height: '100%',
+                  padding: '8px 8px',
                 }}
               >
-                <div style={{ fontSize: '12px' }}>{t('pskReporterPanel.wsjtx.waiting')}</div>
+                <div style={{ fontSize: '10px' }}>{t('pskReporterPanel.wsjtx.waiting')}</div>
                 {wsjtxRelayEnabled ? (
                   wsjtxRelayConnected ? (
                     <div style={{ fontSize: '10px', opacity: 0.8, lineHeight: 1.6 }}>
@@ -842,7 +895,7 @@ const PSKReporterPanel = ({
                   )
                 ) : (
                   <div style={{ fontSize: '10px', opacity: 0.6, lineHeight: 1.5 }}>
-                    {t('                                                pskReporterPanel.wsjtx.udpPath')}
+                    {t('pskReporterPanel.wsjtx.udpPath')}
                     <br />
                     {t('pskReporterPanel.wsjtx.udpAddress', { port: wsjtxPort || 2237 })}
                   </div>
@@ -851,7 +904,7 @@ const PSKReporterPanel = ({
             ) : wsjtxTab === 'decodes' ? (
               <>
                 {filteredDecodes.length === 0 ? (
-                  <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '16px', fontSize: '11px' }}>
+                  <div style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '11px' }}>
                     {wsjtxDecodes.length > 0
                       ? t('pskReporterPanel.wsjtx.noDecodesFiltered')
                       : isWSPRMode
@@ -911,7 +964,7 @@ const PSKReporterPanel = ({
               /* WSPR decodes tab */
               <>
                 {filteredWspr.length === 0 ? (
-                  <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '16px', fontSize: '11px' }}>
+                  <div style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '11px' }}>
                     {wsjtxWspr.length > 0 ? 'No WSPR decodes in selected time window' : 'Waiting for WSPR decodes...'}
                   </div>
                 ) : (
@@ -955,7 +1008,13 @@ const PSKReporterPanel = ({
                         {d.dt != null ? `${Number(d.dt) >= 0 ? '+' : ''}${Number(d.dt).toFixed(1)}` : ''}
                       </span>
                       <span style={{ color: '#22d3ee', fontWeight: '600', minWidth: '65px' }}>
-                        <CallsignLink call={d.callsign} color="#22d3ee" fontWeight="600" />
+                        <CallsignLink
+                          call={d.callsign}
+                          color="#22d3ee"
+                          fontWeight="600"
+                          onPopup={showPopup}
+                          location={d.grid ? { grid: d.grid } : undefined}
+                        />
                       </span>
                       {d.grid && <span style={{ color: '#a78bfa', fontSize: '10px', minWidth: '35px' }}>{d.grid}</span>}
                       <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
@@ -975,7 +1034,7 @@ const PSKReporterPanel = ({
               /* QSOs tab */
               <>
                 {wsjtxQsos.length === 0 ? (
-                  <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '16px', fontSize: '11px' }}>
+                  <div style={{ color: 'var(--text-muted)', textAlign: 'center', fontSize: '11px' }}>
                     {t('pskReporterPanel.wsjtx.noQsos')}
                   </div>
                 ) : (
@@ -1001,6 +1060,8 @@ const PSKReporterPanel = ({
                           call={q.dxCall}
                           color={q.band ? getBandColor(q.frequency / 1000000) : 'var(--accent-green)'}
                           fontWeight="600"
+                          onPopup={showPopup}
+                          location={q.dxGrid ? { grid: q.dxGrid } : undefined}
                         />
                       </span>
                       <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{q.band}</span>

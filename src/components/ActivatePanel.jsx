@@ -4,6 +4,7 @@
  */
 import React, { useState, useMemo } from 'react';
 import CallsignLink from './CallsignLink.jsx';
+import { useCallsignPopup } from './CallsignPopupManager.jsx';
 import { IconSearch, IconRefresh, IconMap, IconTag } from './Icons.jsx';
 
 export const ActivatePanel = ({
@@ -23,6 +24,7 @@ export const ActivatePanel = ({
   onOpenFilters,
   filteredData,
 }) => {
+  const { showPopup } = useCallsignPopup();
   const staleMinutes = lastUpdated ? Math.floor((Date.now() - lastUpdated) / 60000) : null;
   const isStale = staleMinutes !== null && staleMinutes >= 5;
   const checkedTime = lastChecked ? new Date(lastChecked).toISOString().substr(11, 5) + 'z' : '';
@@ -259,7 +261,13 @@ export const ActivatePanel = ({
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    <CallsignLink call={spot.call} color={mapDefs.color} fontWeight="600" />
+                    <CallsignLink
+                      call={spot.call}
+                      color={mapDefs.color}
+                      fontWeight="600"
+                      onPopup={showPopup}
+                      location={spot.grid ? { grid: spot.grid } : undefined}
+                    />
                   </span>
                   <span
                     role="cell"

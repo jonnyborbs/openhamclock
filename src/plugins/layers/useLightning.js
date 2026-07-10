@@ -60,6 +60,21 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   return { km: Rkm * c, miles: Rmiles * c };
 }
 
+// Compass bearing from station to strike (0–360°)
+function calculateBearing(lat1, lon1, lat2, lon2) {
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  return (Math.atan2(y, x) * (180 / Math.PI) + 360) % 360;
+}
+
+function bearingToCardinal(deg) {
+  const dirs = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+  return dirs[Math.round(deg / 45) % 8];
+}
+
 // Strike age colors (fading over time)
 function getStrikeColor(ageMinutes) {
   if (ageMinutes < 1) return '#FFD700'; // Gold (fresh, <1 min)
@@ -92,6 +107,23 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemory
   const PROXIMITY_RADIUS_MILES = PROXIMITY_RADIUS_KM * 0.621371;
   const isMetric = allUnits.dist === 'metric';
   const unitsStr = isMetric ? 'km' : 'miles';
+
+  // Broadcast strikes to the text view panel (#1002). The map re-renders
+  // every second; the text panel doesn't need more than one refresh per 5s,
+  // so intermediate updates are skipped (the next state change past the
+  // window carries the full buffer anyway).
+  const lastTextBroadcastRef = useRef(0);
+  useEffect(() => {
+    if (!enabled) {
+      window.dispatchEvent(new CustomEvent('mapdata:lightning', { detail: { enabled: false } }));
+      return;
+    }
+    const now = Date.now();
+    if (lightningData.length > 0 && now - lastTextBroadcastRef.current < 5000) return;
+    lastTextBroadcastRef.current = now;
+    window.dispatchEvent(new CustomEvent('mapdata:lightning', { detail: { enabled: true, strikes: lightningData } }));
+  }, [enabled, lightningData]);
+  useEffect(() => () => window.dispatchEvent(new CustomEvent('mapdata:lightning', { detail: { enabled: false } })), []);
 
   // Fetch WebSocket key from Blitzortung (fallback to 111)
   useEffect(() => {
@@ -623,6 +655,24 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemory
         if (lightningConf?.enabled) {
           playTone(lightningConf.tone, alertSettings.volume ?? 0.5);
         }
+
+        // Announce the closest nearby strike for screen-reader users
+        const closest = nearbyNewStrikes.reduce((a, b) => {
+          const da = calculateDistance(stationLat, stationLon, a.lat, a.lon);
+          const db = calculateDistance(stationLat, stationLon, b.lat, b.lon);
+          return da.km <= db.km ? a : b;
+        });
+        const dist = calculateDistance(stationLat, stationLon, closest.lat, closest.lon);
+        const bearing = calculateBearing(stationLat, stationLon, closest.lat, closest.lon);
+        document.dispatchEvent(
+          new CustomEvent('lightning:proximity', {
+            detail: {
+              distanceKm: Math.round(dist.km),
+              distanceMiles: Math.round(dist.miles * 10) / 10,
+              direction: bearingToCardinal(bearing),
+            },
+          }),
+        );
       } else {
         // No nearby strikes - restore normal appearance
         panel.style.border = '1px solid var(--border-color)';

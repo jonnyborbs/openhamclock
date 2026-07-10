@@ -94,15 +94,15 @@ node server.js
 npm run dev
 ```
 
-### Enabling Client-side Propagation Calculation (without having to build it)
+### Enabling Propagation Calculation on client-side (without having to build it)
 
-If you want your clients (using your local server) to use the p533 modules for client side propagation calculation rather than the very rough estimates (which are based on band and time of day), run the following as the user who can write to your repository.
+From the local server to enable clients to use p533 modules for the client side propagation calculation rather than very rough estimates (which are based on band and time-of-day), then
+_(must have write access to repository)_
+run the following from the top-level distribution directory, then restart the server.
 
-```bash
-scripts/fetch-wasm.sh
+```txt
+node scripts/fetch-wasm.js
 ```
-
-from the top-level distribution directory, and restart the server.
 
 ---
 
@@ -147,6 +147,7 @@ from the top-level distribution directory, and restart the server.
 - [Updating](#updating)
 - [Architecture](#architecture)
 - [API Endpoints](#api-endpoints)
+- [Monitoring](#monitoring)
 - [Frequently Asked Questions](#frequently-asked-questions)
 - [Contributing](#contributing)
 - [Credits](#credits)
@@ -993,12 +994,22 @@ sudo journalctl -u openhamclock -f     # View logs
 
 > **macOS note:** macOS does not use systemd, so the `--service` flag is not supported. Use `~/openhamclock/run.sh` to start manually, or run `npm run electron` for a native desktop window.
 
-**Manual install (all platforms including Windows):**
+**Windows:**
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+iex (iwr https://raw.githubusercontent.com/accius/openhamclock/main/scripts/setup-windows.ps1).Content
+```
+
+This clones the repo to `%USERPROFILE%\openhamclock`, installs dependencies, builds the frontend, creates a `start.bat` launcher, and adds a desktop shortcut. After install, edit `%USERPROFILE%\openhamclock\.env` to set your `CALLSIGN` and `LOCATOR`, then start with `start.bat` or `npm start`.
+
+**Manual install (all platforms):**
 
 ```bash
 git clone https://github.com/accius/openhamclock.git
 cd openhamclock
 npm install
+npm run build
 npm start
 ```
 
@@ -1154,7 +1165,7 @@ The relay agent has zero npm dependencies (uses only Node.js built-ins), batches
 
 ## Updating
 
-### Git installations (local/Pi)
+### Linux / macOS / Pi
 
 ```bash
 cd ~/openhamclock
@@ -1168,6 +1179,24 @@ sudo systemctl restart openhamclock
 # or
 ./restart.sh
 ```
+
+### Windows
+
+Run the bundled update script from your openhamclock directory:
+
+```powershell
+cd C:\Users\YourName\openhamclock
+Set-ExecutionPolicy Bypass -Scope Process -Force
+.\scripts\update.ps1
+```
+
+The script backs up your `.env` → pulls latest code → installs any new dependencies → rebuilds the frontend → restores your `.env`. Then restart:
+
+```powershell
+npm start
+```
+
+Or double-click `start.bat` if you created it during setup.
 
 ### Auto-update (Git installations)
 
@@ -1270,7 +1299,8 @@ openhamclock/
 │   ├── setup-pi.sh               # Raspberry Pi one-line installer
 │   ├── setup-linux.sh            # Linux / macOS installer (--service for systemd)
 │   ├── setup-windows.ps1         # Windows PowerShell installer
-│   └── update.sh                 # Update script (backup → pull → rebuild → restore)
+│   ├── update.ps1                # Windows update script (backup → pull → rebuild → restore)
+│   └── update.sh                 # Linux/Pi update script (backup → pull → rebuild → restore)
 ├── Dockerfile                # Multi-stage Docker build
 ├── docker-compose.yml        # Docker Compose configuration
 ├── railway.toml              # Railway deployment configuration
@@ -1346,6 +1376,11 @@ The backend exposes these REST endpoints. All data endpoints return JSON. Cache 
 | `GET /api/qrz/lookup/:callsign`   | QRZ.com callsign lookup                                                                        | —        |
 
 ---
+
+## Monitoring
+
+OpenHamClock exposes a prometheus compatible endpoint at `/metrics`.
+By default it is open without authentication, but you can always set the `METRICS_AUTH_KEY` env var which serves as bearer token authentication. See `.env.example` for details.
 
 ## Frequently Asked Questions
 

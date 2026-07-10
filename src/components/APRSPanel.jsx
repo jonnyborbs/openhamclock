@@ -6,6 +6,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import CallsignLink from './CallsignLink.jsx';
+import { useCallsignPopup } from './CallsignPopupManager.jsx';
 import { calculateDistance, formatDistance } from '../utils/geo.js';
 
 const APRSPanel = ({ aprsData, showOnMap, onToggleMap, onHoverSpot, deLocation, units = 'metric' }) => {
@@ -29,6 +30,7 @@ const APRSPanel = ({ aprsData, showOnMap, onToggleMap, onHoverSpot, deLocation, 
   } = aprsData || {};
 
   const { t } = useTranslation();
+  const { showPopup } = useCallsignPopup();
 
   const [search, setSearch] = useState('');
   const [showGroupManager, setShowGroupManager] = useState(false);
@@ -528,7 +530,15 @@ const APRSPanel = ({ aprsData, showOnMap, onToggleMap, onHoverSpot, deLocation, 
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                     {isWatched && <span style={{ fontSize: '10px' }}>★</span>}
-                    <CallsignLink call={station.ssid || station.call} color="var(--text-primary)" fontWeight="700" />
+                    <CallsignLink
+                      call={station.ssid || station.call}
+                      color="var(--text-primary)"
+                      fontWeight="700"
+                      onPopup={showPopup}
+                      location={
+                        station.lat != null && station.lon != null ? { lat: station.lat, lon: station.lon } : undefined
+                      }
+                    />
                     {station.source === 'local-tnc' && (
                       <span
                         title={t('aprsPanel.rfBadgeTitle')}

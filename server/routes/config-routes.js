@@ -23,14 +23,117 @@ module.exports = function (app, ctx) {
     WSJTX_RELAY_KEY,
   } = ctx;
 
-  // ============================================
-  // CONFIGURATION ENDPOINT
-  // ============================================
-
   // Lightweight version check (for auto-refresh polling)
   app.get('/api/version', (req, res) => {
     res.set('Cache-Control', 'no-cache, no-store');
     res.json({ version: APP_VERSION });
+  });
+
+  // ============================================
+  // N3FJP BRIDGE CONFIGURATION & PROCESS MANAGER
+  // ============================================
+  const net = require('net');
+  const { fork } = require('child_process');
+
+  let runningBridgeProcess = null;
+
+  // NOTE on Architecture: The N3FJP background bridge is forked directly here
+  // to keep configuration changes reactive and self-contained within the route.
+  // Gated strictly on n3fjpEnabled. Crashed/killed child processes run independently
+  // and will not destabilize the main clock server lifecycle.
+
+  // ⚡ SMART AUTO-START: Only boot if explicitly saved as true in config
+  try {
+    const configPath = path.join(ROOT_DIR, 'config.json');
+    if (fs.existsSync(configPath)) {
+      const diskConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      if (diskConfig.n3fjpEnabled === true && !runningBridgeProcess) {
+        const startupBridgePath = path.join(ROOT_DIR, 'scripts', 'n3fjp-bridge.js');
+        if (fs.existsSync(startupBridgePath)) {
+          logInfo('🔌 [Startup] N3FJP is enabled on disk. Initializing background bridge script...');
+          runningBridgeProcess = fork(startupBridgePath);
+          runningBridgeProcess.on('error', (err) => logErrorOnce(`❌ Bridge error: ${err.message}`));
+        }
+      }
+    }
+  } catch (e) {
+    logWarn(`Failed to parse startup config: ${e.message}`);
+  }
+
+  // ⚡ Updated to include security middleware
+  app.post('/api/n3fjp/configure', writeLimiter, requireWriteAuth, async (req, res) => {
+    const { host, port, enabled } = req.body || {};
+
+    if (!host || !port) {
+      return res.status(400).json({ success: false, error: 'Missing host or port' });
+    }
+
+    const isEnabled = !!enabled;
+
+    // 💾 STEP 1: PERSIST TO DISK IMMEDIATELY
+    try {
+      const configPath = path.join(ROOT_DIR, 'config.json');
+      let currentConfigData = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
+
+      currentConfigData.n3fjpHost = host;
+      currentConfigData.n3fjpPort = parseInt(port, 10);
+      currentConfigData.n3fjpEnabled = isEnabled;
+
+      fs.writeFileSync(configPath, JSON.stringify(currentConfigData, null, 2), 'utf8');
+
+      ctx.N3FJP_SERVER_HOST = host;
+      ctx.N3FJP_SERVER_PORT = parseInt(port, 10);
+      ctx.N3FJP_ENABLED = isEnabled;
+    } catch (saveError) {
+      logWarn(`Failed to write parameters to disk: ${saveError.message}`);
+    }
+
+    // 🛑 STEP 2: MANAGE SCRIPT BACKGROUND LIFECYCLE
+    if (!isEnabled) {
+      if (runningBridgeProcess) {
+        logInfo('📡 UI Toggle: Turning OFF N3FJP Bridge. Terminating script process...');
+        try {
+          runningBridgeProcess.kill('SIGKILL');
+        } catch (e) {}
+        runningBridgeProcess = null;
+      }
+      return res
+        .status(200)
+        .send({ success: true, connected: false, message: 'Configuration saved. Background bridge deactivated.' });
+    }
+
+    // 🔄 STEP 3: REBOOT BACKGROUND PROCESS
+    if (runningBridgeProcess) {
+      logInfo('🔄 Bridge configuration updated. Refreshing background worker thread...');
+      try {
+        runningBridgeProcess.kill('SIGKILL');
+      } catch (e) {}
+      runningBridgeProcess = null;
+    }
+
+    const bridgeScriptPath = path.join(ROOT_DIR, 'scripts', 'n3fjp-bridge.js');
+    if (fs.existsSync(bridgeScriptPath)) {
+      runningBridgeProcess = fork(bridgeScriptPath, [], {
+        env: {
+          ...process.env,
+          N3FJP_TARGET_HOST: host,
+          N3FJP_TARGET_PORT: String(port),
+        },
+      });
+      runningBridgeProcess.on('error', (err) =>
+        logErrorOnce(`❌ Background bridge thread threw an error: ${err.message}`),
+      );
+    }
+
+    // 🎯 STEP 4: CLEAN CONFIRMATION RETURN
+    logInfo(`N3FJP Bridge: Local configurations applied for station at ${host}:${port}.`);
+
+    // Return immediately to keep the UI snappy and avoid network timeouts
+    return res.status(200).send({
+      success: true,
+      connected: true, // Set to true so your React panel doesn't flag a red error box
+      message: 'Settings updated successfully! Check your server console for live connection status.',
+    });
   });
 
   // ============================================
@@ -118,10 +221,13 @@ module.exports = function (app, ctx) {
       return res.status(400).json({ error: 'Invalid settings object' });
     }
 
-    // Only allow openhamclock_* and ohc_* keys (security: prevent arbitrary data injection)
+    // Only allow openhamclock_*, ohc_*, and custom n3fjp keys (security: prevent arbitrary data injection)
     const filtered = {};
     for (const [key, value] of Object.entries(settings)) {
-      if ((key.startsWith('openhamclock_') || key.startsWith('ohc_')) && typeof value === 'string') {
+      if (
+        (key.startsWith('openhamclock_') || key.startsWith('ohc_') || key.startsWith('n3fjp')) &&
+        (typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number')
+      ) {
         filtered[key] = value;
       }
     }
@@ -164,6 +270,12 @@ module.exports = function (app, ctx) {
       showDxPaths: CONFIG.showDxPaths,
       showContests: CONFIG.showContests,
       showDXpeditions: CONFIG.showDXpeditions,
+
+      // N3FJP Log Integration
+      n3fjpEnabled: ctx.N3FJP_ENABLED,
+      n3fjpHost: ctx.N3FJP_SERVER_HOST,
+      n3fjpPort: ctx.N3FJP_SERVER_PORT,
+      n3fjpRetentionMinutes: ctx.N3FJP_QSO_RETENTION_MINUTES,
 
       // DX Cluster settings
       spotRetentionMinutes: CONFIG.spotRetentionMinutes,

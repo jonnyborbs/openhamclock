@@ -44,14 +44,25 @@ export function calculateSignalMargin(mode, powerWatts, antGain) {
   return modeAdv + powerOffset + (antGain || 0);
 }
 
-// Mode-only advantage (dB) for post-processing P.533 reliability. ITURHFProp
-// already consumed the user's TX power (via Path.txpower) and antenna gain
-// (via TXGOS) when it produced the BCR — applying calculateSignalMargin on
-// top would double-count both. The mode advantage is legitimate to add post
-// hoc because we hardcode Path.BW=3000 / Path.SNRr=15 (SSB-equivalent), so
-// digital-mode SNR thresholds aren't reflected in the WASM output.
+// Mode-only advantage (dB) over SSB. Still used by calculateSignalMargin for
+// the heuristic engine and the UI margin badge, and by the server as a
+// post-hoc fallback when a legacy iturhfprop-service ignores requiredSNR.
 export function modeAdvantageDb(mode) {
   return MODE_ADVANTAGE_DB[mode] || 0;
+}
+
+// Path.SNRr the P.533 engines use for SSB, in dB within the fixed
+// Path.BW=3000 reference bandwidth (see buildInputConfig / the REST
+// service's generateInputFile).
+export const P533_REF_SNR_DB = 15;
+
+// Required SNR for a mode, passed into the P.533 input so digital-mode
+// decode thresholds are part of the engine run itself. A post-hoc dB bump
+// on BCR can never reopen a band the engine scored 0% for SSB, which is
+// why FT8 coverage looked drastically restricted (#W3AAX report). SSB maps
+// to the reference value, so SSB output is identical to the old behavior.
+export function modeRequiredSNR(mode) {
+  return P533_REF_SNR_DB - modeAdvantageDb(mode);
 }
 
 export function adjustReliability(baseRel, signalMarginDb) {

@@ -28,8 +28,8 @@ export const ContestPanel = ({ data, loading }) => {
   // Build WA7BNM URL: use RSS link if available, otherwise link to calendar
   const getContestUrl = (contest) => {
     if (contest.url) return contest.url;
-    // Fallback: link to WA7BNM current contest listing
-    return 'https://www.contestcalendar.com/fwcont.php';
+    // Fallback: link to WA7BNM 8-day contest listing
+    return 'https://www.contestcalendar.com/weeklycont.php';
   };
 
   const handleContestClick = (contest, e) => {
@@ -327,8 +327,6 @@ export const ContestPanel = ({ data, loading }) => {
       {/* Contest Calendar Credit */}
       <div
         style={{
-          marginTop: '4px',
-          paddingTop: '4px',
           borderTop: '1px solid var(--border-color)',
           textAlign: 'right',
         }}

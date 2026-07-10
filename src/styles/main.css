@@ -320,6 +320,14 @@ body::before {
     transform: rotate(360deg);
   }
 }
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
 @keyframes blink {
   0%,
   100% {
@@ -1276,4 +1284,85 @@ pre,
   font-family:
     var(--font-mono), 'Courier New', 'Noto Color Emoji', 'Segoe UI Emoji', 'Apple Color Emoji', 'Twemoji Mozilla',
     'Noto Emoji';
+}
+
+/* Clickable callsigns in map popups */
+[data-map-call] {
+  cursor: pointer;
+}
+[data-map-call]:hover:not([style*='color']) {
+  color: var(--accent-white);
+  font-weight: bold;
+}
+
+/* Callsign popup animation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Skip navigation link ────────────────────────────────────────────────── */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  z-index: 100001;
+  background: var(--accent-amber, #ffb432);
+  color: #000;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 8px 16px;
+  border-radius: 0 0 4px 0;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: auto;
+  height: auto;
+  overflow: visible;
+  outline: 3px solid #000;
+  outline-offset: 0;
+}
+
+/* Remove the outline suppression from WSPR filter — use :focus-visible instead */
+.wspr-filter-control select:focus {
+  outline: revert;
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Halt the infinite DX news ticker scroll */
+  .dxnews-scroll-content {
+    animation: none !important;
+  }
+
+  /* Halt specific continuous animations */
+  .wspr-animated-path,
+  .wspr-marker,
+  .loading-spinner,
+  .earthquake-marker,
+  .lightning-strike {
+    animation: none !important;
+  }
 }

@@ -76,13 +76,403 @@ module.exports = function (app, ctx) {
     logInfo(`[Satellites] Merged radio metadata — ${Object.keys(HAM_SATELLITES).length} satellites in registry`);
   }
 
+  // Upstream URL routing. When FLETCHER_URL is set, CelesTrak / AMSAT /
+  // SatNOGS fetches go through an internal Railway proxy so they egress from
+  // that service's IP. CelesTrak silently drops requests from this app's main
+  // egress (#1057); the proxy gives the fetches a fresh IP.
+  const FLETCHER_URL = CONFIG.satellites.fletcherUrl || '';
+  if (FLETCHER_URL) {
+    logInfo(`[Satellites] Routing CelesTrak/AMSAT/SatNOGS fetches via ${FLETCHER_URL}`);
+  }
+
+  // SatNOGS Transmitter DB radio metadata.
+  const SATNOGS_TRANSMITTER_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
+  const SATNOGS_TRANSMITTER_MAX_RECORDS = 500;
+  const SATNOGS_TRANSMITTER_REQUEST_TIMEOUT = 8000;
+  const SATNOGS_TRANSMITTER_CONCURRENCY = 4;
+  const SATNOGS_TRANSMITTER_ATTRIBUTION = 'Radio metadata from SatNOGS Transmitter DB (CC BY-SA 4.0)';
+
+  let satnogsTransmitterCache = {
+    timestamp: 0,
+    totalRecords: 0,
+    recordsByNorad: {},
+    lastError: null,
+  };
+
+  let satnogsTransmitterFetchInFlight = false;
+  const SATNOGS_OVERLAY_FIELDS = ['mode', 'downlink', 'uplink', 'tone', 'beacon', 'notes'];
+  const satnogsRegistryBaseMetadata = new Map();
+
+  const snapshotSatnogsBaseMetadata = (satellite) => {
+    const snapshot = {};
+    SATNOGS_OVERLAY_FIELDS.forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(satellite, field)) {
+        snapshot[field] = satellite[field];
+      }
+    });
+    return snapshot;
+  };
+
+  const getSatnogsBaseMetadataForSatellite = (satellite) => {
+    const key = String(satellite?.norad || '');
+    if (!key) return {};
+    if (!satnogsRegistryBaseMetadata.has(key)) {
+      satnogsRegistryBaseMetadata.set(key, snapshotSatnogsBaseMetadata(satellite));
+    }
+    return satnogsRegistryBaseMetadata.get(key);
+  };
+
+  const restoreSatnogsBaseMetadata = (satellite, baseMetadata) => {
+    if (!satellite) return;
+    SATNOGS_OVERLAY_FIELDS.forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(baseMetadata, field)) {
+        satellite[field] = baseMetadata[field];
+      } else {
+        delete satellite[field];
+      }
+    });
+    delete satellite.satnogs;
+    delete satellite.radioMetadataAttribution;
+  };
+
+  const isSatnogsTransmitterMetadataStale = () =>
+    !satnogsTransmitterCache.timestamp ||
+    Date.now() - satnogsTransmitterCache.timestamp >= SATNOGS_TRANSMITTER_CACHE_DURATION;
+
+  const formatHzAsMHz = (value) => {
+    const hz = Number(value);
+    if (!Number.isFinite(hz) || hz <= 0) return '';
+    return (hz / 1000000).toFixed(3) + ' MHz';
+  };
+
+  const formatHzRangeAsMHz = (low, high) => {
+    const lowNum = Number(low);
+    const highNum = Number(high);
+    const lowStr = formatHzAsMHz(low);
+    const highStr = formatHzAsMHz(high);
+
+    if (!lowStr && !highStr) return '';
+    if (lowStr && (!highStr || lowNum === highNum)) return lowStr;
+    if (!lowStr) return highStr;
+
+    return lowStr.replace(' MHz', '') + ' - ' + highStr;
+  };
+
+  const uniqueCompactList = (values, maxItems = 4) => {
+    const unique = [];
+
+    values
+      .map((v) => String(v || '').trim())
+      .filter(Boolean)
+      .forEach((v) => {
+        if (!unique.includes(v)) unique.push(v);
+      });
+
+    if (unique.length <= maxItems) return unique.join(', ');
+    return unique.slice(0, maxItems).join(', ') + ' +' + (unique.length - maxItems) + ' more';
+  };
+
+  const describeSatnogsMode = (tx) => {
+    const mode = String(tx.mode || '').trim();
+    const type = String(tx.type || '').trim();
+    const description = String(tx.description || '').trim();
+
+    const downlinkLow = Number(tx.downlink_low);
+    const downlinkHigh = Number(tx.downlink_high);
+    const uplinkLow = Number(tx.uplink_low);
+    const uplinkHigh = Number(tx.uplink_high);
+
+    const hasDownlinkRange =
+      Number.isFinite(downlinkLow) &&
+      Number.isFinite(downlinkHigh) &&
+      downlinkLow > 0 &&
+      downlinkHigh > 0 &&
+      downlinkLow !== downlinkHigh;
+
+    const hasUplinkRange =
+      Number.isFinite(uplinkLow) &&
+      Number.isFinite(uplinkHigh) &&
+      uplinkLow > 0 &&
+      uplinkHigh > 0 &&
+      uplinkLow !== uplinkHigh;
+
+    const combined = [mode, type, description].join(' ').toLowerCase();
+
+    // SatNOGS may report the sideband used within a linear transponder as
+    // USB/LSB. For OHC's compact popup, a paired uplink/downlink frequency
+    // range is more usefully displayed as "Linear", matching the existing
+    // curated satellite metadata.
+    if (combined.includes('linear') || (hasDownlinkRange && hasUplinkRange)) {
+      return 'Linear';
+    }
+
+    const baud = Number(tx.baud);
+
+    if (mode && Number.isFinite(baud) && baud > 0 && !mode.includes(String(baud))) {
+      return mode + ' ' + baud + ' baud';
+    }
+
+    return mode || type;
+  };
+  const scoreSatnogsTransmitter = (tx) => {
+    const mode = String(tx.mode || '').toLowerCase();
+    const type = String(tx.type || '').toLowerCase();
+    const description = String(tx.description || '').toLowerCase();
+
+    const hasDownlink = Boolean(tx.downlink_low || tx.downlink_high);
+    const hasUplink = Boolean(tx.uplink_low || tx.uplink_high);
+
+    let score = 0;
+
+    // For the popup, prefer an actual radio path the operator can use.
+    // Telemetry-only/data beacons are useful metadata, but they should not
+    // crowd out an FM or linear transponder entry when one exists.
+    if (hasDownlink && hasUplink) score += 600;
+    else if (hasDownlink) score += 100;
+
+    if (type.includes('transceiver')) score += 350;
+    if (type.includes('transponder')) score += 300;
+    if (description.includes('transponder')) score += 250;
+    if (description.includes('linear')) score += 250;
+
+    if (mode.includes('linear')) score += 250;
+    if (mode.includes('ssb') || mode.includes('usb') || mode.includes('lsb')) score += 220;
+    if (mode.includes('fm')) score += 180;
+
+    if (mode.includes('cw')) score += hasUplink ? 80 : -10;
+
+    if (
+      mode.includes('fsk') ||
+      mode.includes('bpsk') ||
+      mode.includes('gmsk') ||
+      mode.includes('afsk') ||
+      mode.includes('doka') ||
+      mode.includes('telemetry') ||
+      description.includes('telemetry') ||
+      description.includes('beacon')
+    ) {
+      score -= hasUplink ? 25 : 125;
+    }
+
+    const updated = Date.parse(tx.updated || '');
+    if (Number.isFinite(updated)) score += Math.min(20, Math.floor(updated / 100000000000));
+
+    return score;
+  };
+
+  const activeSatnogsTransmitters = (transmitters) =>
+    (Array.isArray(transmitters) ? transmitters : [])
+      .filter((tx) => {
+        const status = String(tx.status || '').toLowerCase();
+        const alive = tx.alive === true || tx.alive === 'true';
+        return status === 'active' && alive;
+      })
+      .sort((a, b) => scoreSatnogsTransmitter(b) - scoreSatnogsTransmitter(a));
+  const buildSatnogsRadioMetadata = (transmitters) => {
+    const selected = activeSatnogsTransmitters(transmitters);
+    if (selected.length === 0) return null;
+
+    // Show one best/primary transmitter in the UI. SatNOGS often lists
+    // multiple active entries for the same satellite: telemetry beacons,
+    // data downlinks, CW beacons, and transponders. Listing all of them in
+    // the compact popup makes the radio metadata hard to use.
+    const best = selected[0];
+
+    const updatedTimes = selected.map((tx) => Date.parse(tx.updated || '')).filter((ts) => Number.isFinite(ts));
+
+    const metadata = {
+      satnogs: {
+        source: 'SatNOGS Transmitter DB',
+        transmitterCount: selected.length,
+        selectedTransmitter: best.uuid || best.description || best.mode || best.type || null,
+        updated: updatedTimes.length > 0 ? new Date(Math.max(...updatedTimes)).toISOString() : null,
+        attribution: SATNOGS_TRANSMITTER_ATTRIBUTION,
+      },
+      radioMetadataAttribution: SATNOGS_TRANSMITTER_ATTRIBUTION,
+    };
+
+    if (selected.length > 1) {
+      metadata.satnogs.alternateTransmitterCount = selected.length - 1;
+    }
+
+    const mode = describeSatnogsMode(best);
+    const downlink = formatHzRangeAsMHz(best.downlink_low, best.downlink_high);
+    const uplink = formatHzRangeAsMHz(best.uplink_low, best.uplink_high);
+    const tone = String(best.tone || best.uplink_tone || best.downlink_tone || '').trim();
+
+    if (mode) metadata.mode = mode;
+    if (downlink) metadata.downlink = downlink;
+    if (uplink) metadata.uplink = uplink;
+    if (tone) metadata.tone = tone;
+
+    return metadata;
+  };
+
+  const fetchSatnogsTransmittersForNorad = async (noradId) => {
+    const directBase = 'https://db.satnogs.org/api/transmitters/';
+    const proxyBase = FLETCHER_URL ? FLETCHER_URL.replace(/\/$/, '') + '/satnogs/api/transmitters/' : null;
+
+    const bases = proxyBase ? [proxyBase, directBase] : [directBase];
+
+    for (const base of bases) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), SATNOGS_TRANSMITTER_REQUEST_TIMEOUT);
+
+      try {
+        const url = base + '?format=json&satellite__norad_cat_id=' + encodeURIComponent(String(noradId));
+
+        const res = await fetch(url, {
+          headers: { 'User-Agent': 'OpenHamClock/' + APP_VERSION },
+          signal: controller.signal,
+        });
+
+        if (!res.ok) {
+          continue;
+        }
+
+        const json = await res.json();
+        const transmitters = Array.isArray(json) ? json : Array.isArray(json.results) ? json.results : [];
+
+        return transmitters;
+      } catch {
+        // Try the next base URL, if any.
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
+    return [];
+  };
+
+  const applySatnogsMetadataToRegistry = (recordsByNorad) => {
+    let applied = 0;
+    let cleared = 0;
+
+    Object.entries(recordsByNorad || {}).forEach(([norad, transmitters]) => {
+      const target = Object.values(HAM_SATELLITES).find((sat) => String(sat.norad) === String(norad));
+      if (!target) return;
+
+      const baseMetadata = getSatnogsBaseMetadataForSatellite(target);
+      const metadata = buildSatnogsRadioMetadata(transmitters);
+
+      if (!metadata) {
+        let clearedThisNorad = false;
+
+        if (target.satnogs || target.radioMetadataAttribution) {
+          restoreSatnogsBaseMetadata(target, baseMetadata);
+          clearedThisNorad = true;
+        }
+
+        Object.values(ommCache || {}).forEach((entry) => {
+          if (String(entry.norad) === String(norad) && (entry.satnogs || entry.radioMetadataAttribution)) {
+            restoreSatnogsBaseMetadata(entry, baseMetadata);
+            clearedThisNorad = true;
+          }
+        });
+
+        if (clearedThisNorad) cleared++;
+        return;
+      }
+
+      const existingNotes = String(baseMetadata.notes || '').trim();
+      if (existingNotes && !existingNotes.includes('SatNOGS Transmitter DB')) {
+        metadata.notes = existingNotes + ' ' + SATNOGS_TRANSMITTER_ATTRIBUTION;
+      } else if (!existingNotes) {
+        metadata.notes = SATNOGS_TRANSMITTER_ATTRIBUTION;
+      }
+
+      Object.assign(target, metadata);
+      Object.values(ommCache || {}).forEach((entry) => {
+        if (String(entry.norad) === String(norad)) {
+          Object.assign(entry, metadata);
+        }
+      });
+      applied++;
+    });
+
+    return { applied, cleared };
+  };
+
+  const refreshSatnogsTransmitterMetadata = async (force = false) => {
+    if (satnogsTransmitterFetchInFlight) return;
+    if (!force && !isSatnogsTransmitterMetadataStale()) return;
+
+    satnogsTransmitterFetchInFlight = true;
+    try {
+      const norads = [
+        ...new Set(
+          Object.values(HAM_SATELLITES)
+            .map((sat) => Number(sat.norad))
+            .filter((norad) => Number.isFinite(norad) && norad > 0),
+        ),
+      ].sort((a, b) => a - b);
+
+      const recordsByNorad = {};
+      let totalRecords = 0;
+
+      for (
+        let i = 0;
+        i < norads.length && totalRecords < SATNOGS_TRANSMITTER_MAX_RECORDS;
+        i += SATNOGS_TRANSMITTER_CONCURRENCY
+      ) {
+        const batch = norads.slice(i, i + SATNOGS_TRANSMITTER_CONCURRENCY);
+        const results = await Promise.all(
+          batch.map(async (norad) => ({
+            norad,
+            transmitters: await fetchSatnogsTransmittersForNorad(norad),
+          })),
+        );
+
+        for (const { norad, transmitters } of results) {
+          const transmitterList = Array.isArray(transmitters) ? transmitters : [];
+          const room = SATNOGS_TRANSMITTER_MAX_RECORDS - totalRecords;
+          if (room <= 0) break;
+
+          const limitedTransmitters = transmitterList.slice(0, room);
+          recordsByNorad[norad] = limitedTransmitters;
+          totalRecords += limitedTransmitters.length;
+        }
+      }
+
+      satnogsTransmitterCache = {
+        timestamp: Date.now(),
+        totalRecords,
+        recordsByNorad,
+        lastError: null,
+      };
+
+      const { applied, cleared } = applySatnogsMetadataToRegistry(recordsByNorad);
+      if (applied > 0 || cleared > 0) {
+        logInfo(
+          '[Satellites] SatNOGS transmitter metadata updated: ' +
+            applied +
+            ' satellites, ' +
+            totalRecords +
+            ' transmitter records' +
+            (cleared > 0 ? ', ' + cleared + ' stale overlays cleared' : ''),
+        );
+      } else {
+        logWarn('[Satellites] SatNOGS transmitter metadata refresh completed with no matching active transmitters');
+      }
+    } catch (ex) {
+      const msg = ex?.message || String(ex ?? '(unknown error)');
+      satnogsTransmitterCache.lastError = msg;
+      logWarn('[Satellites] SatNOGS transmitter metadata refresh failed: ' + msg);
+    } finally {
+      satnogsTransmitterFetchInFlight = false;
+    }
+  };
+
   const fetchOmmFromCelesTrakGroups = async (group) => {
     let httpStatusCode = 0;
     let ommJson = {};
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000); // 20s hard timeout
     try {
-      const res = await fetch(`https://celestrak.org/NORAD/elements/gp.php?GROUP=${group}&FORMAT=csv`, {
+      const urlBase = FLETCHER_URL
+        ? `${FLETCHER_URL}/celestrak/NORAD/elements/gp.php`
+        : 'https://celestrak.org/NORAD/elements/gp.php';
+      const res = await fetch(`${urlBase}?GROUP=${group}&FORMAT=csv`, {
         headers: { 'User-Agent': `OpenHamClock/${APP_VERSION}` },
         signal: controller.signal,
       });
@@ -114,7 +504,10 @@ module.exports = function (app, ctx) {
     const timeout = setTimeout(() => controller.abort(), 20000); // 20s hard timeout
 
     try {
-      const res = await fetch(`https://celestrak.org/NORAD/elements/gp.php?CATNR=${noradId}&FORMAT=json`, {
+      const urlBase = FLETCHER_URL
+        ? `${FLETCHER_URL}/celestrak/NORAD/elements/gp.php`
+        : 'https://celestrak.org/NORAD/elements/gp.php';
+      const res = await fetch(`${urlBase}?CATNR=${noradId}&FORMAT=json`, {
         headers: { 'User-Agent': `OpenHamClock/${APP_VERSION}` },
         signal: controller.signal,
       });
@@ -140,18 +533,20 @@ module.exports = function (app, ctx) {
     return { httpStatusCode, ommJson };
   };
 
-  // ── AMSAT fallback ────────────────────────────────────────────────────────
-  // Single concatenated-TLE feed at amsat.org. Covers amateur sats (no weather
-  // / no non-amateur birds). Used as a fallback for CelesTrak so that we keep
-  // resolving satellites when celestrak.org is unreachable from our egress IP
-  // — historically a recurring failure mode on cloud hosts (#1057).
-  const fetchOmmFromAmsat = async () => {
+  // AMSAT fallback - TLE based
+  // Single concatenated-TLE feed at amsat.org. Covers only amateur satellites.
+  // Used as a fallback for CelesTrak so that we keep resolving satellites when
+  // celestrak.org is unreachable, historically a recurring failure mode on cloud hosts (#1057).
+  const fetchOmmFromAmsat_TleBased = async () => {
     let httpStatusCode = 0;
     let ommArray = [];
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000); // 20s hard timeout
     try {
-      const res = await fetch('https://www.amsat.org/tle/current/nasabare.txt', {
+      const url = FLETCHER_URL
+        ? `${FLETCHER_URL}/amsat/tle/current/nasabare.txt`
+        : 'https://www.amsat.org/tle/current/nasabare.txt';
+      const res = await fetch(url, {
         headers: { 'User-Agent': `OpenHamClock/${APP_VERSION}` },
         signal: controller.signal,
       });
@@ -175,17 +570,18 @@ module.exports = function (app, ctx) {
     return { httpStatusCode, ommArray };
   };
 
-  // ── SatNOGS individual fallback ───────────────────────────────────────────
-  // SatNOGS DB exposes per-NORAD TLE JSON. Used as a per-satellite fallback
-  // after AMSAT for non-amateur birds (weather sats, ISS, etc.) that CelesTrak
-  // wouldn't fetch from our egress.
-  const fetchOmmFromSatnogsIndividual = async (noradId) => {
+  // SatNOGS individual fallback - TLE based
+  // SatNOGS DB exposes TLE based data wrapped in a JSON format.
+  // The dataset has previously been shown to be questionable, and may contain stale or inaccurate data,
+  // or data for satellites that have decayed and are no longer in orbit.
+  const fetchOmmFromSatnogsIndividual_TleBased = async (noradId) => {
     let httpStatusCode = 0;
     let omm = null;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000); // 20s hard timeout
     try {
-      const res = await fetch(`https://db.satnogs.org/api/tle/?norad_cat_id=${noradId}&format=json`, {
+      const urlBase = FLETCHER_URL ? `${FLETCHER_URL}/satnogs/api/tle/` : 'https://db.satnogs.org/api/tle/';
+      const res = await fetch(`${urlBase}?norad_cat_id=${noradId}&format=json`, {
         headers: { 'User-Agent': `OpenHamClock/${APP_VERSION}` },
         signal: controller.signal,
       });
@@ -372,13 +768,36 @@ module.exports = function (app, ctx) {
   // note, the size of ommCache is not expected to grow beyond the size of the target list
   let ommCache = {};
   let ommCacheTimestamp = 0;
+  // Exposed for server/health.js — read by the subsystem health snapshot.
+  ctx.getSatellitesLastFetchAt = () => (ommCacheTimestamp > 0 ? ommCacheTimestamp : null);
 
   // record of satellites whose data is known but are not being tracked,
   // note that the size of ommUnusedCache is not expected to grow beyond the intersection size of downloaded groups minus
   // any satellites downloaded that are part of the target list HAM_SATELLITES
   let ommUnusedCache = {};
 
-  const OMM_CACHE_DURATION = 12 * 60 * 60 * 1000; // 12 hours, period after which OMM data considered stale
+  // Analysis of data age and refresh periods:
+  // NORAD releases updates approximately daily, P' = 24 hours.
+  //
+  // There exists a chained distribution between nodes: NORAD (Space-Track) → CelesTrak (when enabled) → user.
+  // Assuming each hop is phase‑uncorrelated, that the number of hops = n, and the sample period at each node = P,
+  // the accumulated end‑user data age is D = [0, P' + n * P],
+  // with mean = (P' + n * P) / 2 and SD = sqrt((P'^2 + n * P^2) / 12).
+  //
+  // If each node chooses P = P' = 24 hours and n = 2, then D = [0, 72] hours,
+  // with mean = 36 hours and SD = 12 hours.
+  // As can be seen, choosing P = P' accumulates data age with a significant worst case.
+  //
+  // Accordingly, it is usual for each node to set its sampling period P to be a fraction of P'.
+  // For instance, if P = P' / 2 = 12 hours and n = 2, then D = [0, 48] hours,
+  // with mean = 24 hours and SD ≈ 8.5 hours.
+  //
+  // We cannot control the refresh period of upstream sources (e.g., CelesTrak), but it is assumed
+  // they already sample at P < P'.
+  //
+  // Even with this in mind, however, we SHALL set our P = P' = 24 hours, since there is significant
+  // cost to us in unnecessary frequent data refresh.
+  const OMM_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours, period after which OMM data considered stale
   const SPACE_TRACK_BACKOFF = 120 * 60 * 1000; // 2 hour, any satellite not allowed to repeat query to Space-Track within this period
   const CELESTRAK_BACKOFF = 120 * 60 * 1000; // 2 hour, any satellite not allowed to repeat query to CelesTrak within this period
   const CELESTRAK_GROUP_MIN_DOWNLOAD_SIZE = 3; // minimum number of satellites to trigger group download as, if fewer, then more efficient to perform individual download
@@ -401,15 +820,17 @@ module.exports = function (app, ctx) {
 
   const isSpaceTrackEnabled = CONFIG.satellites.spaceTrack?.enabled || false; // default false if undefined
   const isCelestrakEnabled = CONFIG.satellites.celestrak?.enabled ?? true; // default true if undefined
+  const isAmsatTleEnabled = CONFIG.satellites.amsat_tle?.enabled ?? true; // default true if undefined
+  const isSatnogsTleEnabled = CONFIG.satellites.satnogs_tle?.enabled ?? true; // default true if undefined
   logDebug('[Satellites] Space-Track enabled: ' + isSpaceTrackEnabled);
   logDebug('[Satellites] CelesTrak enabled: ' + isCelestrakEnabled);
+  logDebug('[Satellites] AMSAT TLE enabled: ' + isAmsatTleEnabled);
+  logDebug('[Satellites] SatNOGS TLE enabled: ' + isSatnogsTleEnabled);
 
   let blockCelesTrakUntil = Date.now() - 1; // Timestamp until which CelesTrak fetches are blocked due to rate limiting or ban
   let blockSpaceTrackUntil = Date.now() - 1; // Timestamp until which Space-Track fetches are blocked due to rate limiting or ban
   let blockAmsatUntil = Date.now() - 1; // Timestamp until which AMSAT fallback fetches are blocked
   let blockSatnogsUntil = Date.now() - 1; // Timestamp until which SatNOGS fallback fetches are blocked
-  const AMSAT_BACKOFF = 60 * 60 * 1000; // 1 hour
-  const SATNOGS_BACKOFF = 60 * 60 * 1000; // 1 hour
   let celestrakNumSatNeedDownload = 0;
   let noradsToDownload = [];
 
@@ -486,7 +907,7 @@ module.exports = function (app, ctx) {
         } else if (httpStatusCode === 404) {
           logDebug("[Satellites] detected 404 'not found' on a group query, may need investigation");
         } else if (httpStatusCode === 0) {
-          logErrorOnce(`[Satellites] CelesTrak OMM fetch failed with no response (possible timeout)`);
+          logErrorOnce('Satellites', 'CelesTrak OMM fetch failed with no response (possible timeout)');
         }
       } catch (ex) {
         const msg = ex?.message || String(ex ?? '(unknown error)');
@@ -536,7 +957,7 @@ module.exports = function (app, ctx) {
         } else if (httpStatusCode === 404) {
           logDebug("[Satellites] detected 404 'not found' on a group query, may need investigation");
         } else if (httpStatusCode === 0) {
-          logErrorOnce(`[Satellites] CelesTrak OMM fetch failed with no response (possible timeout)`);
+          logErrorOnce('Satellites', 'CelesTrak OMM fetch failed with no response (possible timeout)');
         }
       } catch (ex) {
         const msg = ex?.message || String(ex ?? '(unknown error)');
@@ -551,7 +972,7 @@ module.exports = function (app, ctx) {
     CELESTRAK_INDIVIDUAL_INIT: async () => {
       if (blockCelesTrakUntil && Date.now() < blockCelesTrakUntil) {
         logDebug('[Satellites] Skipping CelesTrak fetch due to active backoff');
-        return 'AMSAT_INIT'; // fall through to fallback chain
+        return isAmsatTleEnabled ? 'AMSAT_INIT' : isSatnogsTleEnabled ? 'SATNOGS_INDIVIDUAL_INIT' : 'START'; // return next state
       }
 
       // loop until every eligible satellite has been attempted for download using CELESTRAK_INDIVIDUAL_FETCH state,
@@ -573,7 +994,7 @@ module.exports = function (app, ctx) {
         return 'CELESTRAK_INDIVIDUAL_FETCH'; // return next state
       }
 
-      return 'AMSAT_INIT'; // CelesTrak chain done — fall through to AMSAT/SatNOGS fallback
+      return isAmsatTleEnabled ? 'AMSAT_INIT' : isSatnogsTleEnabled ? 'SATNOGS_INDIVIDUAL_INIT' : 'START'; // CelesTrak chain done — fall through to AMSAT/SatNOGS fallback
     },
 
     CELESTRAK_INDIVIDUAL_FETCH: async () => {
@@ -592,7 +1013,7 @@ module.exports = function (app, ctx) {
             `[Satellites] NORAD ID ${noradsToDownload}, detected 404 \'not found\', may need to manually check status of this satellite via CelesTrak website`,
           );
         } else if (httpStatusCode === 0) {
-          logErrorOnce(`[Satellites] CelesTrak OMM fetch failed with no response (possible timeout)`);
+          logErrorOnce('Satellites', 'CelesTrak OMM fetch failed with no response (possible timeout)');
         }
       } catch (ex) {
         const msg = ex?.message || String(ex ?? '(unknown error)');
@@ -604,11 +1025,12 @@ module.exports = function (app, ctx) {
       }
     },
 
-    // ── AMSAT fallback (covers amateur sats when CelesTrak is unreachable) ──
+    // AMSAT fallback (covers amateur sats when CelesTrak is unreachable)
     AMSAT_INIT: async () => {
       if (blockAmsatUntil && Date.now() < blockAmsatUntil) {
-        return 'SATNOGS_INDIVIDUAL_INIT';
+        return isSatnogsTleEnabled ? 'SATNOGS_INDIVIDUAL_INIT' : 'START'; // return next state
       }
+
       // Only run if there are still stale satellites needing data
       const stillStale = Object.values(HAM_SATELLITES).filter((s) => isStale(s.ommTimestamp));
       if (stillStale.length === 0) return 'START';
@@ -617,22 +1039,30 @@ module.exports = function (app, ctx) {
 
     AMSAT_FETCH: async () => {
       try {
-        const { httpStatusCode, ommArray } = await fetchOmmFromAmsat();
+        const { httpStatusCode, ommArray } = await fetchOmmFromAmsat_TleBased();
         if (httpStatusCode === 200 && ommArray.length > 0) {
-          appendDataToOmmCache(ommArray);
+          // AMSAT is a fallback: only take entries for satellites that are
+          // still stale so its TLE-derived data cannot clobber fresher
+          // CelesTrak/Space-Track OMM data fetched moments earlier.
+          const staleNorads = new Set(
+            Object.values(HAM_SATELLITES)
+              .filter((s) => isStale(s.ommTimestamp))
+              .map((s) => s.norad),
+          );
+          appendDataToOmmCache(ommArray.filter((omm) => staleNorads.has(omm.NORAD_CAT_ID)));
         } else if (httpStatusCode === 0 || httpStatusCode >= 500) {
-          // Network failure or server error — backoff so we don't hammer
-          blockAmsatUntil = Date.now() + AMSAT_BACKOFF;
+          logWarn(`[Satellites] Detected AMSAT HTTP state code = ${httpStatusCode}, blocking fetches for 60mins`);
+          blockAmsatUntil = Date.now() + 60 * 60 * 1000; // 1 hour
         }
       } catch (ex) {
         const msg = ex?.message || String(ex ?? '(unknown error)');
         logWarn(`[Satellites] caught unknown exception in AMSAT_FETCH handler: ${msg}`);
       } finally {
-        return 'SATNOGS_INDIVIDUAL_INIT';
+        return isSatnogsTleEnabled ? 'SATNOGS_INDIVIDUAL_INIT' : 'START'; // return next state
       }
     },
 
-    // ── SatNOGS individual fallback (covers non-amateur stragglers) ─────────
+    // SatNOGS individual fallback (covers non-amateur stragglers), accuracy of data questionable
     SATNOGS_INDIVIDUAL_INIT: async () => {
       if (blockSatnogsUntil && Date.now() < blockSatnogsUntil) {
         return 'START';
@@ -643,7 +1073,7 @@ module.exports = function (app, ctx) {
       );
       if (stillStale.length === 0) return 'START';
       const sat = stillStale[0];
-      sat.backoffSatnogsUntil = now + SATNOGS_BACKOFF;
+      sat.backoffSatnogsUntil = now + 60 * 60 * 1000; // 1 hour
       noradsToDownload = sat.norad;
       return 'SATNOGS_INDIVIDUAL_FETCH';
     },
@@ -653,11 +1083,12 @@ module.exports = function (app, ctx) {
         if (Array.isArray(noradsToDownload)) {
           throw new Error('[Satellites] SATNOGS_INDIVIDUAL_FETCH: noradsToDownload should not be array');
         }
-        const { httpStatusCode, omm } = await fetchOmmFromSatnogsIndividual(noradsToDownload);
+        const { httpStatusCode, omm } = await fetchOmmFromSatnogsIndividual_TleBased(noradsToDownload);
         if (httpStatusCode === 200 && omm) {
           appendDataToOmmCache([omm]);
         } else if (httpStatusCode === 0 || httpStatusCode >= 500) {
-          blockSatnogsUntil = Date.now() + SATNOGS_BACKOFF;
+          logWarn(`[Satellites] Detected SatNOGS HTTP state code = ${httpStatusCode}, blocking fetches for 60mins`);
+          blockSatnogsUntil = Date.now() + 60 * 60 * 1000; // 1 hour
         }
       } catch (ex) {
         const msg = ex?.message || String(ex ?? '(unknown error)');
@@ -724,6 +1155,14 @@ module.exports = function (app, ctx) {
     sm.run();
   }, 15 * 1000);
 
+  // Refresh SatNOGS radio metadata in the background. This is deliberately
+  // independent of the TLE/OMM state machine because transmitter metadata
+  // changes much less frequently than orbital data.
+  refreshSatnogsTransmitterMetadata(false);
+  setInterval(() => {
+    refreshSatnogsTransmitterMetadata(false);
+  }, SATNOGS_TRANSMITTER_CACHE_DURATION);
+
   // satellites with a CelesTrak datasource that need data
   const celestrakSatsToDownload = (now) => {
     return Object.values(HAM_SATELLITES).filter(
@@ -748,18 +1187,25 @@ module.exports = function (app, ctx) {
       const noradId = omm.NORAD_CAT_ID;
       const objectName = omm.OBJECT_NAME;
       const match = knownNoradIds.has(noradId);
-      const key = objectName.replace(/[^A-Z0-9\-]/g, '_').toUpperCase();
       if (match) {
         countUsed++;
         const hamSat = Object.values(HAM_SATELLITES).find((s) => s.norad === noradId);
         hamSat.ommTimestamp = now; // record timestamp
 
-        if (hamSat) {
-          ommCache[key] = { ...hamSat, omm: omm, timestamp: now };
-        }
+        // Key by the canonical registry name, never the upstream OBJECT_NAME —
+        // sources name the same bird differently (CelesTrak "ISS (ZARYA)" vs
+        // AMSAT "ISS"), and keying by upstream name cached the same satellite
+        // under two keys, duplicating it in the client list (#1101).
+        const key = String(hamSat.name || objectName)
+          .toUpperCase()
+          .replace(/[^A-Z0-9\-]/g, '_');
+        ommCache[key] = { ...hamSat, omm: omm, timestamp: now };
       } else {
         // keep a separate record of satellites with unused data
         countUnused++;
+        const key = String(objectName)
+          .toUpperCase()
+          .replace(/[^A-Z0-9\-]/g, '_');
         ommUnusedCache[key] = { norad: noradId, name: objectName };
       }
     });
@@ -775,11 +1221,16 @@ module.exports = function (app, ctx) {
 
   // satellite data endpoint
   app.get('/api/satellites/data', async (req, res) => {
-    // Don't let Fastly/CDN pin an empty payload — when all sources fail we want
+    // Don't let the CDN pin an empty payload — when all sources fail we want
     // the next request after backoff to hit the origin, not the edge cache.
+    // Good payloads get an explicit short edge TTL: the Cloudflare cache rule
+    // honors origin Cache-Control and bypasses when it's absent, so without
+    // this header the endpoint wouldn't be edge-cached at all.
     const sendSatelliteData = (payload) => {
       if (!payload || Object.keys(payload).length === 0) {
         res.set('Cache-Control', 'no-store');
+      } else {
+        res.set('Cache-Control', 'public, max-age=60, s-maxage=300');
       }
 
       const newestTimestamp = Object.values(ommCache)
@@ -850,6 +1301,14 @@ module.exports = function (app, ctx) {
       .sort((a, b) => a.norad - b.norad);
 
     res.json({
+      satnogsTransmitters: {
+        ...(satnogsTransmitterCache.timestamp > 0 && {
+          lastFetch: formatSimpleAge(Date.now() - satnogsTransmitterCache.timestamp),
+        }),
+        totalRecords: satnogsTransmitterCache.totalRecords || 0,
+        lastError: satnogsTransmitterCache.lastError || null,
+        attribution: SATNOGS_TRANSMITTER_ATTRIBUTION,
+      },
       totalInRegistry: Object.keys(HAM_SATELLITES).length,
       totalResolved: Object.keys(cached).length,
       totalMissing: all.filter((s) => !s.resolved).length,

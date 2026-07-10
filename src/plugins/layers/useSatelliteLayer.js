@@ -212,7 +212,7 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
         <span data-drag-handle="true" style="font-family:var(--font-mono); font-size:13px; font-weight:700; color:var(--accent-blue); letter-spacing:0.05em;">
           🛰 ${!winMinimized ? `${activeSats.length} ${activeSats.length !== 1 ? t('station.settings.satellites.name_plural') : t('station.settings.satellites.name')}` : ''}
         </span>
-        <button class="sat-data-window-minimize" onclick="window.__satWinToggleMinimize()" title="${winMinimized ? 'Expand' : 'Minimize'}" aria-label="${winMinimized ? 'Expand' : 'Minimize'}" aria-pressed="${winMinimized}" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; font-size:10px; line-height:1; padding:2px 4px; margin:0;">
+        <button class="sat-data-window-minimize" title="${winMinimized ? 'Expand' : 'Minimize'}" aria-label="${winMinimized ? 'Expand' : 'Minimize'}" aria-pressed="${winMinimized}" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; font-size:10px; line-height:1; padding:2px 4px; margin:0;">
           ${winMinimized ? '▶' : '▼'}
         </button>
       </div>`;

@@ -45,8 +45,19 @@ function getCacheKey(params) {
   // Round coordinates to 1 decimal place for better cache hits
   const pw = Math.round(params.txPower || 100);
   const gn = Math.round((params.txGain || 0) * 10);
-  const key = `${params.txLat.toFixed(1)},${params.txLon.toFixed(1)}-${params.rxLat.toFixed(1)},${params.rxLon.toFixed(1)}-${params.month}-${params.hour}-${params.ssn}-${pw}-${gn}`;
+  const snr = params.requiredSNR ?? 15;
+  const key = `${params.txLat.toFixed(1)},${params.txLon.toFixed(1)}-${params.rxLat.toFixed(1)},${params.rxLon.toFixed(1)}-${params.month}-${params.hour}-${params.ssn}-${pw}-${gn}-${snr}`;
   return key;
+}
+
+// Required SNR (dB in the 3 kHz reference bandwidth) from the query string.
+// The main server derives this from the operating mode (SSB 15, FT8 -19,
+// WSPR -26, ...). Clamped to a sane window; undefined when absent so
+// generateInputFile's SSB default applies.
+function parseRequiredSNR(raw) {
+  const snr = parseFloat(raw);
+  if (!Number.isFinite(snr)) return undefined;
+  return Math.max(-30, Math.min(50, snr));
 }
 
 function getFromCache(key) {
@@ -581,6 +592,7 @@ app.get('/api/predict', async (req, res) => {
       year = new Date().getFullYear(),
       txPower,
       frequencies,
+      requiredSNR,
     } = req.query;
 
     // Validate required params
@@ -598,6 +610,7 @@ app.get('/api/predict', async (req, res) => {
       hour: parseInt(hour) || new Date().getUTCHours() || 12,
       ssn: parseInt(ssn) || 100,
       txPower: parseInt(txPower) || 100,
+      requiredSNR: parseRequiredSNR(requiredSNR),
     };
 
     if (frequencies) {
@@ -609,6 +622,9 @@ app.get('/api/predict', async (req, res) => {
     res.json({
       model: 'ITU-R P.533-14',
       engine: 'ITURHFProp',
+      // Echoed so the caller knows the engine consumed the mode's SNR
+      // threshold and must not re-apply a mode advantage post hoc.
+      requiredSNR: params.requiredSNR ?? 15,
       ...results,
     });
   } catch (err) {
@@ -624,7 +640,18 @@ app.get('/api/predict', async (req, res) => {
  */
 app.get('/api/predict/hourly', async (req, res) => {
   try {
-    const { txLat, txLon, rxLat, rxLon, month, ssn, year = new Date().getFullYear(), txPower, txGain } = req.query;
+    const {
+      txLat,
+      txLon,
+      rxLat,
+      rxLon,
+      month,
+      ssn,
+      year = new Date().getFullYear(),
+      txPower,
+      txGain,
+      requiredSNR,
+    } = req.query;
 
     // Validate required params
     if (!txLat || !txLon || !rxLat || !rxLon) {
@@ -641,6 +668,7 @@ app.get('/api/predict/hourly', async (req, res) => {
       ssn: parseInt(ssn) || 100,
       txPower: parseInt(txPower) || 100,
       txGain: parseFloat(txGain) || 0,
+      requiredSNR: parseRequiredSNR(requiredSNR),
     };
 
     // Run predictions for each hour (0-23 UTC)
@@ -673,6 +701,9 @@ app.get('/api/predict/hourly', async (req, res) => {
       month: baseParams.month,
       year: baseParams.year,
       ssn: baseParams.ssn,
+      // Echoed so the caller knows the engine consumed the mode's SNR
+      // threshold and must not re-apply a mode advantage post hoc.
+      requiredSNR: baseParams.requiredSNR ?? 15,
       hourly: hourlyResults,
     });
   } catch (err) {
@@ -688,7 +719,7 @@ app.get('/api/predict/hourly', async (req, res) => {
  */
 app.get('/api/bands', async (req, res) => {
   try {
-    const { txLat, txLon, rxLat, rxLon, month, hour, ssn, txPower, txGain } = req.query;
+    const { txLat, txLon, rxLat, rxLon, month, hour, ssn, txPower, txGain, requiredSNR } = req.query;
 
     if (!txLat || !txLon || !rxLat || !rxLon) {
       return res.status(400).json({ error: 'Missing required coordinates' });
@@ -705,6 +736,7 @@ app.get('/api/bands', async (req, res) => {
       ssn: parseInt(ssn) || 100,
       txPower: parseInt(txPower) || 100,
       txGain: parseFloat(txGain) || 0,
+      requiredSNR: parseRequiredSNR(requiredSNR),
       frequencies: Object.values(HF_BANDS),
     };
 
@@ -732,6 +764,9 @@ app.get('/api/bands', async (req, res) => {
     res.json({
       model: 'ITU-R P.533-14',
       muf: results.muf,
+      // Echoed so the caller knows the engine consumed the mode's SNR
+      // threshold and must not re-apply a mode advantage post hoc.
+      requiredSNR: params.requiredSNR ?? 15,
       bands,
       debug: {
         rawOutput: results.raw,

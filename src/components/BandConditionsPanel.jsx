@@ -30,6 +30,7 @@ export const BandConditionsPanel = ({ data, loading, extras }) => {
         {t('band.conditions')}
         {staleMinutes != null && (
           <span
+            role="alert"
             title={t('band.conditions.stale.tooltip', { mins: staleMinutes })}
             style={{
               fontSize: '10px',
@@ -47,11 +48,17 @@ export const BandConditionsPanel = ({ data, loading, extras }) => {
         )}
       </div>
       {loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}>
-          <div className="loading-spinner" />
+        <div
+          role="status"
+          aria-label="Loading band conditions"
+          style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}
+        >
+          <div className="loading-spinner" aria-hidden="true" />
         </div>
       ) : (
         <div
+          aria-live="polite"
+          aria-label={t('band.conditions')}
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fill, minmax(50px, 1fr))',
@@ -60,9 +67,11 @@ export const BandConditionsPanel = ({ data, loading, extras }) => {
         >
           {data.map(({ band, condition }) => {
             const style = getConditionStyle(condition);
+            const conditionLabel = t(`band.conditions.${condition.toLowerCase()}`);
             return (
               <div
                 key={band}
+                aria-label={`${band}: ${conditionLabel}`}
                 style={{
                   textAlign: 'center',
                   padding: '6px 4px',
@@ -72,6 +81,7 @@ export const BandConditionsPanel = ({ data, loading, extras }) => {
                 }}
               >
                 <div
+                  aria-hidden="true"
                   style={{
                     fontSize: '12px',
                     fontWeight: '700',
@@ -82,6 +92,7 @@ export const BandConditionsPanel = ({ data, loading, extras }) => {
                   {band}
                 </div>
                 <div
+                  aria-hidden="true"
                   style={{
                     fontSize: '9px',
                     fontWeight: '600',
@@ -89,7 +100,7 @@ export const BandConditionsPanel = ({ data, loading, extras }) => {
                     marginTop: '2px',
                   }}
                 >
-                  {t(`band.conditions.${condition.toLowerCase()}`)}
+                  {conditionLabel}
                 </div>
               </div>
             );

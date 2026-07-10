@@ -395,6 +395,7 @@ module.exports = function (app, ctx) {
         end: endTime.toISOString(),
         mode: contest.mode,
         status: now >= next && now <= endTime ? 'active' : 'upcoming',
+        url: `https://www.contestcalendar.com/weeklycont.php`,
       });
     });
 
@@ -424,6 +425,7 @@ module.exports = function (app, ctx) {
             end: endDate.toISOString(),
             mode: contest.mode,
             status: status,
+            url: `https://www.contestcalendar.com/alphabetical.php`,
           });
           break; // Only add next occurrence
         }
