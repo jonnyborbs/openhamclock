@@ -14,6 +14,7 @@
  */
 
 const { bandForKhz, toHHMMz } = require('./format.js');
+const { isPlausibleDxCall } = require('./callsign.js');
 
 const DEFAULTS = {
   // A full hour of history so mode-filtered queries (?mode=SSB) have real
@@ -34,7 +35,7 @@ class SpotStore {
     this.spots = []; // newest first
     this.skimmerIndex = new Map(); // call|band|mode -> spot ref
     this.listeners = new Set();
-    this.counters = { received: 0, stored: 0, collapsed: 0, dropped: 0 };
+    this.counters = { received: 0, stored: 0, collapsed: 0, dropped: 0, busted: 0 };
   }
 
   onSpot(fn) {
@@ -61,6 +62,13 @@ class SpotStore {
     const freqKhz = parseFloat(raw.freqKhz);
     if (!raw.spotter || !raw.call || !Number.isFinite(freqKhz) || freqKhz <= 0) {
       this.counters.dropped++;
+      return null;
+    }
+
+    // Busted-call filter: skimmer decode errors and human typos produce calls
+    // no licensing authority would issue. One choke point covers every feed.
+    if (!isPlausibleDxCall(raw.call)) {
+      this.counters.busted++;
       return null;
     }
 

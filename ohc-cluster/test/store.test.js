@@ -103,7 +103,7 @@ test('default query reserves a slice for human spots under FT8 flood', () => {
     store.add(humanSpot({ call: `HU${i}MAN`, spotter: `K${i}HS`, freqKhz: 14200 + i, timestamp: ts - 60000 }));
   }
   for (let i = 0; i < 60; i++) {
-    store.add(skimmerSpot({ call: `F${i}T8`, freqKhz: 14074, mode: 'FT8', timestamp: ts }));
+    store.add(skimmerSpot({ call: `K${i}FT`, freqKhz: 14074, mode: 'FT8', timestamp: ts }));
   }
 
   const spots = store.query({ limit: 20 });
@@ -116,7 +116,7 @@ test('default query caps FT8/FT4 share when other modes are active', () => {
   const store = new SpotStore();
   const ts = Date.now();
   for (let i = 0; i < 40; i++) {
-    store.add(skimmerSpot({ call: `F${i}T8`, freqKhz: 14074, mode: 'FT8', timestamp: ts }));
+    store.add(skimmerSpot({ call: `K${i}FT`, freqKhz: 14074, mode: 'FT8', timestamp: ts }));
     store.add(skimmerSpot({ call: `C${i}W`, freqKhz: 14025, mode: 'CW', timestamp: ts - 1 }));
   }
 
@@ -130,7 +130,7 @@ test('default query caps FT8/FT4 share when other modes are active', () => {
 test('default query backfills with FT8 when nothing else is on the air', () => {
   const store = new SpotStore();
   for (let i = 0; i < 30; i++) {
-    store.add(skimmerSpot({ call: `F${i}T8`, freqKhz: 14074, mode: 'FT8' }));
+    store.add(skimmerSpot({ call: `K${i}FT`, freqKhz: 14074, mode: 'FT8' }));
   }
   assert.equal(store.query({ limit: 20 }).length, 20);
 });
@@ -138,7 +138,7 @@ test('default query backfills with FT8 when nothing else is on the air', () => {
 test('explicit mode query is an exact slice, not balanced', () => {
   const store = new SpotStore();
   for (let i = 0; i < 15; i++) {
-    store.add(skimmerSpot({ call: `F${i}T8`, freqKhz: 14074, mode: 'FT8' }));
+    store.add(skimmerSpot({ call: `K${i}FT`, freqKhz: 14074, mode: 'FT8' }));
   }
   store.add(skimmerSpot({ call: 'C1W', freqKhz: 14025, mode: 'CW' }));
   const spots = store.query({ limit: 10, mode: 'FT8' });
@@ -151,7 +151,7 @@ test('a refreshed skimmer aggregate ranks by activity, not insertion order', () 
   const ts = Date.now();
   store.add(skimmerSpot({ call: 'OL1DCW', freqKhz: 14025, mode: 'CW', timestamp: ts - 60000 }));
   for (let i = 0; i < 50; i++) {
-    store.add(skimmerSpot({ call: `F${i}T8`, freqKhz: 14074, mode: 'FT8', timestamp: ts - 30000 }));
+    store.add(skimmerSpot({ call: `K${i}FT`, freqKhz: 14074, mode: 'FT8', timestamp: ts - 30000 }));
   }
   // The CW station is still being heard — refresh updates it in place
   store.add(skimmerSpot({ call: 'OL1DCW', spotter: 'W3OA-#', freqKhz: 14025, mode: 'CW', timestamp: ts }));
@@ -165,4 +165,15 @@ test('rejects spots with missing or invalid fields', () => {
   assert.equal(store.add({ spotter: '', call: 'W1AW', freqKhz: 14000 }), null);
   assert.equal(store.add({ spotter: 'K0CJH', call: 'W1AW', freqKhz: -5 }), null);
   assert.equal(store.add({ spotter: 'K0CJH', call: '', freqKhz: 14000 }), null);
+});
+
+test('busted-call filter drops implausible spotted calls and counts them', () => {
+  const store = new SpotStore();
+  assert.equal(store.add(humanSpot({ call: 'NATZR' })), null); // dropped digit
+  assert.equal(store.add(skimmerSpot({ call: 'TM113TDFBK' })), null); // CW BK bust
+  assert.equal(store.add(humanSpot({ call: 'CQ', spotter: 'W1AW' })), null);
+  assert.ok(store.add(humanSpot({ call: 'YR50NADIA', spotter: 'K2ABC' }))); // special event survives
+  const stats = store.stats();
+  assert.equal(stats.busted, 3);
+  assert.equal(stats.activeSpots, 1);
 });
