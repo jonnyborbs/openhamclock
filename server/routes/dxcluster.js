@@ -119,6 +119,12 @@ module.exports = function (app, ctx) {
   ];
   const DXSPIDER_SSID = '-56'; // OpenHamClock SSID
 
+  // Shared 30s cache + in-flight coalescing for the HTTP spot sources (ohc /
+  // proxy / hamqth / auto). See the source-chain comment in /spots.
+  const clusterUpstream = ctx.upstream;
+  const spotsHttpCache = new Map(); // source → { spots, timestamp }
+  const SPOTS_HTTP_TTL = 30_000;
+
   // Validate an amateur callsign (optionally with an SSID like -56).
   // Permissive about real callsign shapes, but rejects junk like
   // 'OPENHAMCLOCK-56' or 'GUEST' — cluster nodes treat invalid logins as
@@ -944,29 +950,43 @@ module.exports = function (app, ctx) {
       return null;
     }
 
-    // Fetch based on selected source
+    // Fetch based on selected source.
+    // HTTP-source results are cached 30s and coalesced per source key: on the
+    // hosted instance EVERY client's 60s poll used to trigger its own upstream
+    // chain (N clients = N×fetches/min against our own ohc-cluster node and
+    // the proxy) — the stampede class behind the 2026-08-04 incident. Now the
+    // whole fleet of pollers costs at most ~2 upstream sweeps/min per source.
+    // dxspider stays un-cached here (it keeps its own 90s telnet-poll cache).
     let spots = null;
 
-    if (source === 'ohc') {
-      spots = await fetchOHCCluster();
-      // Fallback chain if our node is down
-      if (!spots) {
-        logDebug('[DX Cluster] OHC Cluster failed, falling back to Proxy');
-        spots = await fetchDXSpiderProxy();
+    const fetchHttpSourceChain = async () => {
+      if (source === 'hamqth') return fetchHamQTH();
+      if (source === 'proxy') {
+        let s = await fetchDXSpiderProxy();
+        if (!s) {
+          logDebug('[DX Cluster] Proxy failed, falling back to HamQTH');
+          s = await fetchHamQTH();
+        }
+        return s;
       }
-      if (!spots) {
-        spots = await fetchHamQTH();
+      // 'ohc' and auto share the chain shape: our node first (when deployed),
+      // then Proxy, then HamQTH. Auto's last resort on this release line is
+      // the DX Spider telnet poll — kept inside the coalesced chain so a
+      // stampede can't multiply telnet dials either.
+      let s = await fetchOHCCluster();
+      if (!s) {
+        s = await fetchDXSpiderProxy();
       }
-    } else if (source === 'hamqth') {
-      spots = await fetchHamQTH();
-    } else if (source === 'proxy') {
-      spots = await fetchDXSpiderProxy();
-      // Fallback to HamQTH if proxy fails
-      if (!spots) {
-        logDebug('[DX Cluster] Proxy failed, falling back to HamQTH');
-        spots = await fetchHamQTH();
+      if (!s) {
+        s = await fetchHamQTH();
       }
-    } else if (source === 'dxspider') {
+      if (!s && source !== 'ohc') {
+        s = await fetchDXSpider();
+      }
+      return s;
+    };
+
+    if (source === 'dxspider') {
       spots = await fetchDXSpider();
       // Fallback to HamQTH if DX Spider fails
       if (!spots) {
@@ -974,16 +994,13 @@ module.exports = function (app, ctx) {
         spots = await fetchHamQTH();
       }
     } else {
-      // Auto mode - our own cluster first (when deployed), then Proxy, then HamQTH, then DX Spider
-      spots = await fetchOHCCluster();
-      if (!spots) {
-        spots = await fetchDXSpiderProxy();
+      const cacheEntry = spotsHttpCache.get(source);
+      if (cacheEntry && Date.now() - cacheEntry.timestamp < SPOTS_HTTP_TTL) {
+        return res.json(cacheEntry.spots);
       }
-      if (!spots) {
-        spots = await fetchHamQTH();
-      }
-      if (!spots) {
-        spots = await fetchDXSpider();
+      spots = await clusterUpstream.fetch(`spots:${source}`, fetchHttpSourceChain);
+      if (spots) {
+        spotsHttpCache.set(source, { spots, timestamp: Date.now() });
       }
     }
 

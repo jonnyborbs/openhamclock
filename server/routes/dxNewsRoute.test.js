@@ -59,10 +59,12 @@ async function callRoute(app, method, path) {
 // Build a ctx with injected fetchers for the dxnews route.
 // Each test calls route(app, ctx) which creates a fresh sourceCaches Map.
 function makeCtx({ fetchDxnewsImpl, fetchDxWorldImpl, fetchNg3kImpl } = {}) {
+  const UpstreamManager = require('../utils/upstream-manager.js');
   return {
     fetch: vi.fn(),
     logDebug: vi.fn(),
     logErrorOnce: vi.fn(),
+    upstream: new UpstreamManager(),
     _dxNewsFetchers: {
       fetchDxnews: vi.fn(fetchDxnewsImpl || (() => Promise.resolve({ items: [] }))),
       fetchDxWorld: vi.fn(fetchDxWorldImpl || (() => Promise.resolve({ items: [] }))),

@@ -296,7 +296,7 @@ module.exports = function (app, ctx) {
   const SDO_VALID_TYPES = new Set(['0193', '0304', '0171', '0094', 'HMIIC']);
   const SDO_NEGATIVE_CACHE = new Map();
 
-  const fetchFromSDO = async (type, timeoutMs = 15000) => {
+  const fetchFromSDO = async (type, timeoutMs = 8000) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -322,7 +322,7 @@ module.exports = function (app, ctx) {
     HMIIC: '[SDO,HMI,HMI,continuum,1,100]',
   };
 
-  const fetchFromHelioviewer = async (type, timeoutMs = 20000) => {
+  const fetchFromHelioviewer = async (type, timeoutMs = 12000) => {
     const layers = HELIO_LAYERS[type];
     if (!layers) throw new Error(`No Helioviewer layer config for ${type}`);
     const now = new Date().toISOString().replace(/\.\d+Z/, 'Z');
@@ -351,7 +351,7 @@ module.exports = function (app, ctx) {
   };
 
   const LMSAL_TYPES = new Set(['0193', '0304', '0171', '0094']);
-  const fetchFromLMSAL = async (type, timeoutMs = 15000) => {
+  const fetchFromLMSAL = async (type, timeoutMs = 8000) => {
     if (!LMSAL_TYPES.has(type)) throw new Error(`LMSAL does not serve ${type}`);
     const url = `https://sdowww.lmsal.com/sdomedia/SunInTime/mostrecent/t${type}.jpg`;
     const controller = new AbortController();
@@ -373,7 +373,7 @@ module.exports = function (app, ctx) {
   };
 
   // SOHO/NASCOM serves HMI intensitygram (visible) when SDO primary is down
-  const fetchFromSOHO = async (type, timeoutMs = 15000) => {
+  const fetchFromSOHO = async (type, timeoutMs = 8000) => {
     if (type !== 'HMIIC') throw new Error(`SOHO fallback only serves HMIIC, not ${type}`);
     const url = 'https://soho.nascom.nasa.gov/data/realtime/hmi_igr/512/latest.jpg';
     const controller = new AbortController();
@@ -394,6 +394,46 @@ module.exports = function (app, ctx) {
     }
   };
 
+  // In-flight coalescing: one upstream fallback chain per image type, no
+  // matter how many clients are waiting. Without this, every concurrent
+  // cache-miss launched its OWN serial 4-source chain (formerly up to 65s of
+  // held sockets each); on the hosted instance a slow upstream turned into a
+  // thundering herd that exhausted sockets and the DNS threadpool (the
+  // 2026-08-04 incident: every upstream "timeout" + EAI_AGAIN, self-sustaining
+  // even after the upstream recovered).
+  const sdoInflight = new Map(); // type → Promise<{buffer, contentType, source}>
+
+  const runSolarImageChain = (type) => {
+    let inflight = sdoInflight.get(type);
+    if (inflight) return inflight;
+
+    inflight = (async () => {
+      const sources = [
+        { name: 'SDO', fn: () => fetchFromSDO(type) },
+        { name: 'LMSAL', fn: () => fetchFromLMSAL(type) },
+        { name: 'SOHO', fn: () => fetchFromSOHO(type) },
+        { name: 'Helioviewer', fn: () => fetchFromHelioviewer(type) },
+      ];
+      for (const src of sources) {
+        try {
+          const { buffer, contentType, source } = await src.fn();
+          sdoImageCache.set(type, { buffer, contentType, timestamp: Date.now(), source });
+          SDO_NEGATIVE_CACHE.delete(type);
+          console.log(`[Solar] Image fetched: ${type} (${buffer.length} bytes from ${source})`);
+          return { buffer, contentType, source };
+        } catch (e) {
+          const reason = e.name === 'AbortError' ? 'timeout' : e.message;
+          console.error(`[Solar] ${src.name} failed (${type}): ${reason}`);
+        }
+      }
+      SDO_NEGATIVE_CACHE.set(type, Date.now());
+      throw new Error('All solar image sources failed');
+    })().finally(() => sdoInflight.delete(type));
+
+    sdoInflight.set(type, inflight);
+    return inflight;
+  };
+
   app.get('/api/solar/image/:type', async (req, res) => {
     const type = req.params.type;
     if (!SDO_VALID_TYPES.has(type)) {
@@ -411,8 +451,12 @@ module.exports = function (app, ctx) {
       return res.send(cached.buffer);
     }
 
+    // Negative-cache backoff. The cold-cache window matters: the frontend
+    // retries failed images every 30s with a cache-buster, so anything
+    // shorter than that lets each retry beat re-open the floodgates right
+    // after a deploy (empty in-memory cache + slow upstream = 502 storm).
     const negTs = SDO_NEGATIVE_CACHE.get(type) || 0;
-    const backoff = cached?.buffer ? 60_000 : 15_000;
+    const backoff = cached?.buffer ? 60_000 : 45_000;
     if (now - negTs < backoff) {
       if (cached?.buffer && now - cached.timestamp < SDO_STALE_SERVE) {
         res.set('Content-Type', cached.contentType || 'image/jpeg');
@@ -420,43 +464,27 @@ module.exports = function (app, ctx) {
         res.set('X-SDO-Cache', 'stale-backoff');
         return res.send(cached.buffer);
       }
+      res.set('Retry-After', '60');
       return res.status(503).json({ error: 'SDO temporarily unavailable' });
     }
 
-    const sources = [
-      { name: 'SDO', fn: () => fetchFromSDO(type) },
-      { name: 'LMSAL', fn: () => fetchFromLMSAL(type) },
-      { name: 'SOHO', fn: () => fetchFromSOHO(type) },
-      { name: 'Helioviewer', fn: () => fetchFromHelioviewer(type) },
-    ];
-
-    for (const src of sources) {
-      try {
-        const { buffer, contentType, source } = await src.fn();
-        sdoImageCache.set(type, { buffer, contentType, timestamp: now, source });
-        SDO_NEGATIVE_CACHE.delete(type);
-
-        console.log(`[Solar] Image fetched: ${type} (${buffer.length} bytes from ${source})`);
-        res.set('Content-Type', contentType);
-        res.set('Cache-Control', 'public, max-age=900');
-        res.set('X-SDO-Cache', 'miss');
-        res.set('X-SDO-Source', source);
-        return res.send(buffer);
-      } catch (e) {
-        const reason = e.name === 'AbortError' ? 'timeout' : e.message;
-        console.error(`[Solar] ${src.name} failed (${type}): ${reason}`);
+    try {
+      const { buffer, contentType, source } = await runSolarImageChain(type);
+      res.set('Content-Type', contentType);
+      res.set('Cache-Control', 'public, max-age=900');
+      res.set('X-SDO-Cache', 'miss');
+      res.set('X-SDO-Source', source);
+      return res.send(buffer);
+    } catch (e) {
+      if (cached?.buffer && now - cached.timestamp < SDO_STALE_SERVE) {
+        res.set('Content-Type', cached.contentType || 'image/jpeg');
+        res.set('Cache-Control', 'public, max-age=60');
+        res.set('X-SDO-Cache', 'stale-error');
+        return res.send(cached.buffer);
       }
+      res.set('Retry-After', '60');
+      return res.status(502).json({ error: 'All solar image sources failed' });
     }
-
-    SDO_NEGATIVE_CACHE.set(type, now);
-
-    if (cached?.buffer && now - cached.timestamp < SDO_STALE_SERVE) {
-      res.set('Content-Type', cached.contentType || 'image/jpeg');
-      res.set('Cache-Control', 'public, max-age=60');
-      res.set('X-SDO-Cache', 'stale-error');
-      return res.send(cached.buffer);
-    }
-    return res.status(502).json({ error: 'All solar image sources failed' });
   });
 
   // NASA Dial-A-Moon
@@ -467,12 +495,26 @@ module.exports = function (app, ctx) {
   const MOON_NEGATIVE_CACHE_TTL = 5 * 60 * 1000;
 
   // Shared fetch: retrieves both image and metadata from Dial-A-Moon API
+  // Coalesce concurrent refreshes: both moon routes funnel through here, and
+  // without a shared in-flight promise every expired-cache hit launched its
+  // own NASA fetch pair (same stampede class as the 2026-08-04 incident).
+  // The bare fetches also had no timeout — a hung socket blocked forever.
+  let moonRefreshInflight = null;
+  function refreshDialAMoon() {
+    if (!moonRefreshInflight) {
+      moonRefreshInflight = fetchDialAMoon().finally(() => {
+        moonRefreshInflight = null;
+      });
+    }
+    return moonRefreshInflight;
+  }
+
   async function fetchDialAMoon() {
     const now = new Date();
     const ts = now.toISOString().slice(0, 16);
 
     const apiUrl = `https://svs.gsfc.nasa.gov/api/dialamoon/${ts}`;
-    const metaResponse = await fetch(apiUrl);
+    const metaResponse = await fetch(apiUrl, { signal: AbortSignal.timeout(15000) });
     if (!metaResponse.ok) throw new Error(`Dial-A-Moon API returned ${metaResponse.status}`);
     const meta = await metaResponse.json();
 
@@ -508,7 +550,7 @@ module.exports = function (app, ctx) {
       throw new Error(`Rejected non-NASA URL: \'${imageUrl}\'`);
     }
 
-    const imgResponse = await fetch(imageUrl);
+    const imgResponse = await fetch(imageUrl, { signal: AbortSignal.timeout(20000) });
     if (!imgResponse.ok) throw new Error(`Moon image fetch returned ${imgResponse.status}`);
     const buffer = Buffer.from(await imgResponse.arrayBuffer());
     const contentType = imgResponse.headers.get('content-type') || 'image/jpeg';
@@ -533,7 +575,7 @@ module.exports = function (app, ctx) {
         return res.status(503).json({ error: 'Moon image temporarily unavailable' });
       }
 
-      await fetchDialAMoon();
+      await refreshDialAMoon();
 
       res.set('Content-Type', moonImageCache.contentType);
       res.set('Cache-Control', 'public, max-age=3600');
@@ -557,7 +599,7 @@ module.exports = function (app, ctx) {
       if (!moonMetaCache.data || Date.now() - moonMetaCache.timestamp >= MOON_CACHE_TTL) {
         if (!moonImageCache.buffer || Date.now() - moonImageCache.timestamp >= MOON_CACHE_TTL) {
           if (Date.now() - moonImageNegativeCache >= MOON_NEGATIVE_CACHE_TTL) {
-            await fetchDialAMoon();
+            await refreshDialAMoon();
           }
         }
       }

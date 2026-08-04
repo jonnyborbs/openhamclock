@@ -100,6 +100,7 @@ function parseDxnewsHtml(html) {
 async function fetchDxnews(ctx) {
   const response = await ctx.fetch(DXNEWS_BASE + '/', {
     headers: { 'User-Agent': 'OpenHamClock/3.13.1 (amateur radio dashboard)' },
+    signal: AbortSignal.timeout(10000),
   });
   const html = await response.text();
   return { items: parseDxnewsHtml(html) };

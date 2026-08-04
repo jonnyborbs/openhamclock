@@ -22,7 +22,9 @@ module.exports = function (app, ctx) {
     const entry = sourceCaches.get(name) || { data: null, timestamp: 0 };
     if (entry.data && Date.now() - entry.timestamp < SOURCE_TTL) return entry.data;
     try {
-      const fresh = await fetcher();
+      // In-flight dedup: concurrent expired-cache hits share one fetch
+      // (fetchers return plain objects, safe to share across waiters).
+      const fresh = await ctx.upstream.fetch(`dxnews:${name}`, fetcher);
       sourceCaches.set(name, { data: fresh, timestamp: Date.now() });
       return fresh;
     } catch (e) {
@@ -49,15 +51,24 @@ module.exports = function (app, ctx) {
         return res.json(dxpeditionCache.data);
       }
 
-      // Fetch NG3K ADXO plain text version
+      // Fetch NG3K ADXO plain text version. Coalesced via ctx.upstream (one
+      // refresh no matter how many clients hit the expired cache — the
+      // stampede pattern from the 2026-08-04 incident), and time-limited:
+      // the old bare fetch had NO timeout, so a hung NG3K socket held every
+      // waiting request forever.
       logDebug('[DXpeditions] Fetching from NG3K...');
-      const response = await fetch('https://www.ng3k.com/Misc/adxoplain.html');
-      if (!response.ok) {
-        logDebug('[DXpeditions] NG3K fetch failed:', response.status);
-        throw new Error('Failed to fetch NG3K: ' + response.status);
-      }
-
-      let text = await response.text();
+      // Coalesced at the TEXT level (a shared Response body can only be
+      // consumed once), so N waiters share one fetch + one body read.
+      let text = await ctx.upstream.fetch('dxpeditions:ng3k', async () => {
+        const response = await fetch('https://www.ng3k.com/Misc/adxoplain.html', {
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!response.ok) {
+          logDebug('[DXpeditions] NG3K fetch failed:', response.status);
+          throw new Error('Failed to fetch NG3K: ' + response.status);
+        }
+        return response.text();
+      });
       logDebug('[DXpeditions] Received', text.length, 'bytes raw');
 
       // Strip HTML tags and decode entities - the "plain" page is actually HTML!
