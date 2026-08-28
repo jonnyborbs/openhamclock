@@ -62,6 +62,25 @@ export const usePSKReporter = (callsign, options = {}) => {
     [maxSpots],
   );
 
+  // Compute band counts filtered by the user's time window and broadcast to the
+  // Leaflet Band Activity overlay. Called from processSpots on every SSE batch
+  // AND from the 30s pruning interval, so counts decay on quiet bands instead of
+  // freezing at the last batch's values (#1138). Reads the always-current refs,
+  // so there is no stale-closure risk.
+  const broadcastBandActivity = useCallback(() => {
+    const cutoff = Date.now() - minutes * 60 * 1000;
+    const counts = {};
+    const allReports = [...txReportsRef.current, ...rxReportsRef.current].filter((r) => r.timestamp > cutoff);
+    for (const report of allReports) {
+      const band = report.band;
+      if (!band || band === 'Unknown') continue;
+      counts[band] = (counts[band] || 0) + 1;
+    }
+    const bands = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    const total = bands.reduce((sum, [, c]) => sum + c, 0);
+    window.dispatchEvent(new CustomEvent('psk-band-activity-changed', { detail: { bands, total } }));
+  }, [minutes]);
+
   // Process an array of spots (from SSE batch or initial payload)
   const processSpots = useCallback(
     (spots) => {
@@ -96,8 +115,10 @@ export const usePSKReporter = (callsign, options = {}) => {
       if (txChanged || rxChanged) {
         setLastUpdate(new Date());
       }
+
+      broadcastBandActivity();
     },
-    [identifier, minutes, maxSpots, cleanOldSpots],
+    [identifier, minutes, maxSpots, cleanOldSpots, broadcastBandActivity],
   );
 
   // Connect to SSE stream
@@ -214,10 +235,14 @@ export const usePSKReporter = (callsign, options = {}) => {
           }))
           .filter((r) => r.age <= minutes),
       );
+
+      // Refresh the Band Activity overlay on the same cadence that expires
+      // spots, so quiet-band counts decay instead of holding stale (#1138).
+      broadcastBandActivity();
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [enabled, minutes]);
+  }, [enabled, minutes, broadcastBandActivity]);
 
   // Clear all spots from local state without reconnecting (#933 — band-change spot reset)
   const clear = useCallback(() => {

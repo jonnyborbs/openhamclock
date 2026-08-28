@@ -9,6 +9,7 @@ import { ctyLookup } from './ctyLookup.js';
  * HF Amateur Bands
  */
 export const HF_BANDS = [
+  '630m',
   '160m',
   '80m',
   '60m',
@@ -43,15 +44,32 @@ export const CONTINENTS = [
 /**
  * Digital/Voice Modes
  */
-export const MODES = ['CW', 'SSB', 'FT8', 'FT4', 'RTTY', 'PSK', 'AM', 'FM'];
+export const MODES = ['CW', 'SSB', 'FT8', 'FT4', 'FT2', 'RTTY', 'PSK', 'AM', 'FM'];
 
 /**
- * Get band from frequency (in kHz)
+ * Normalize MHz, kHz, or Hz input to MHz.
+ *
+ * The 472-479 and 472000-479000 ranges are unambiguous 630m
+ * representations in kHz and Hz.
+ */
+export const normalizeFrequencyToMHz = (freq) => {
+  const f = parseFloat(freq);
+  if (!Number.isFinite(f) || f <= 0) return null;
+  if (f >= 472000 && f <= 479000) return f / 1000000;
+  if (f >= 472 && f <= 479) return f / 1000;
+  if (f >= 1000000) return f / 1000000;
+  if (f >= 1000) return f / 1000;
+  return f;
+};
+
+/**
+ * Get band from frequency in MHz, kHz, or Hz.
  */
 export const getBandFromFreq = (freq) => {
-  const f = parseFloat(freq);
-  // Handle MHz input (convert to kHz)
-  const freqKhz = f < 1000 ? f * 1000 : f;
+  const mhz = normalizeFrequencyToMHz(freq);
+  if (mhz == null) return 'other';
+  const freqKhz = mhz * 1000;
+  if (freqKhz >= 472 && freqKhz <= 479) return '630m';
   if (freqKhz >= 1800 && freqKhz <= 2000) return '160m';
   if (freqKhz >= 3500 && freqKhz <= 4000) return '80m';
   if (freqKhz >= 5330 && freqKhz <= 5405) return '60m';
@@ -93,6 +111,7 @@ export const detectMode = (comment, freq) => {
     const upper = comment.toUpperCase();
     if (upper.includes('FT8')) return 'FT8';
     if (upper.includes('FT4')) return 'FT4';
+    if (upper.includes('FT2')) return 'FT2';
     if (upper.includes('CW')) return 'CW';
     if (upper.includes('SSB') || upper.includes('LSB') || upper.includes('USB')) return 'SSB';
     if (upper.includes('RTTY')) return 'RTTY';
@@ -104,16 +123,17 @@ export const detectMode = (comment, freq) => {
 
   // 2) Frequency-based fallback
   if (freq == null) return null;
-  const f = parseFloat(freq);
-  if (!Number.isFinite(f) || f <= 0) return null;
-  // Normalize to MHz (spots may arrive in kHz or MHz)
-  const mhz = f > 1000 ? f / 1000 : f;
+  const mhz = normalizeFrequencyToMHz(freq);
+  if (mhz == null) return null;
 
-  // Digital islands — narrow ±5 kHz windows around known calling frequencies
-  // DX cluster spots may report slightly off-frequency depending on the spotter's
-  // rig readout or the audio offset of the specific signal they clicked on.
-  // 3 kHz was too tight — 24.911 for 12m FT8 (dial 24.915) was being missed.
-  const TOLERANCE = 0.005;
+  // Digital islands — asymmetric windows around known calling (dial) frequencies.
+  // FTx signals occupy dial + 0–3 kHz (audio passband sits ABOVE the dial), so
+  // legitimate spots land in [dial, dial + ~3.1 kHz]; the small negative
+  // allowance covers rounded-down spot frequencies. A symmetric window cannot
+  // work here: FT2 dials sit only 4 kHz above FT4's, so ±5 kHz would swallow
+  // the neighbouring island. (An old note here defended ±5 kHz because a
+  // "24.911 FT8" spot was being missed — that was a busted spot; real FTx
+  // signals are never below the dial.)
   const DIGITAL_ISLANDS = [
     // FT8 calling frequencies
     { mhz: 1.84, mode: 'FT8' },
@@ -126,6 +146,23 @@ export const detectMode = (comment, freq) => {
     { mhz: 24.915, mode: 'FT8' },
     { mhz: 28.074, mode: 'FT8' },
     { mhz: 50.313, mode: 'FT8' },
+    // FT2 calling frequencies (tentative community QRGs — experimental mode,
+    // Decodium / WSJT-X Improved, not official WSJT-X)
+    // 160m: 1.843 sits exactly at the top of FT8 1.840's passband. FT8 is
+    // checked first, so a bare spot at exactly 1.8430 classifies as FT8 —
+    // inherent to the frequency plan. Real FT2 auto-spots carry "FT2" in the
+    // comment (matched before the islands) and audio offsets that push them
+    // past 1.8431, so only comment-less dial quotes hit the ambiguity.
+    { mhz: 1.843, mode: 'FT2' },
+    { mhz: 3.578, mode: 'FT2' },
+    { mhz: 5.36, mode: 'FT2' },
+    { mhz: 7.052, mode: 'FT2' },
+    { mhz: 10.144, mode: 'FT2' },
+    { mhz: 14.084, mode: 'FT2' },
+    { mhz: 18.108, mode: 'FT2' },
+    { mhz: 21.144, mode: 'FT2' },
+    { mhz: 24.923, mode: 'FT2' },
+    { mhz: 28.184, mode: 'FT2' },
     // FT4 calling frequencies
     { mhz: 3.575, mode: 'FT4' },
     { mhz: 7.0475, mode: 'FT4' },
@@ -145,9 +182,8 @@ export const detectMode = (comment, freq) => {
   ];
 
   for (const island of DIGITAL_ISLANDS) {
-    if (Math.abs(mhz - island.mhz) <= TOLERANCE) {
-      return island.mode;
-    }
+    const offset = mhz - island.mhz;
+    if (offset >= -0.0005 && offset <= 0.0031) return island.mode;
   }
 
   // Band plan segments — CW vs SSB by frequency range
@@ -430,6 +466,7 @@ export default {
   HF_BANDS,
   CONTINENTS,
   MODES,
+  normalizeFrequencyToMHz,
   getBandFromFreq,
   getBandColor,
   detectMode,

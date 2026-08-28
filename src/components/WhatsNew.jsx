@@ -8,8 +8,8 @@ import { useState, useEffect } from 'react';
 // ─── Announcement Banner ────────────────────────────────────
 // Set to null to hide. Shown at the top of the What's New modal.
 const ANNOUNCEMENT = {
-  emoji: '📬',
-  text: "This release was steered by your bug reports. Two of the headline fixes below — the FT8/digital-mode VOACAP accuracy fix and the real-time Kp index — came straight from user emails received this same week (thanks Jason W3AAX and Manuel EA7JRS). If something in OpenHamClock looks wrong to you, write in or open an issue: detailed reports like those are exactly how the stubborn bugs get found. And a wave to this cycle's contributors: Laura Batalha (@lbatalha), Michael R Wheeley (@MichaelWheeley), Jörg (DO1HOZ / @ceotjoe), Ben (KC1UEK / @stearnsy33), @chrisdebian, @w9fyi, Anthony (@AntDiClementi), and @Oukagen. 73 from K0CJH.",
+  emoji: '🌍',
+  text: "This is the biggest visual release since the azimuthal projection landed, and it arrived as a gift: Koen (ON9PK / @KoenVdH) showed up three weeks ago with a working 3D globe and asked if we wanted it. Three review rounds later it's the flagship feature below, polished to run on everything from gaming rigs to a Pi 3. That's open source working the way it's supposed to. A wave to the rest of this cycle's contributors: Laura Batalha (@lbatalha), Michael R Wheeley (@MichaelWheeley), @9M2PJU, Anthony (@AntDiClementi), Alan Hargreaves (@alanhargreaves), and AF1E for the same-day report when CARTO pulled the rug out from under our basemaps. 73 from K0CJH.",
   color: '#ffd700',
   bg: 'rgba(255, 215, 0, 0.10)',
   border: 'rgba(255, 215, 0, 0.30)',
@@ -28,6 +28,74 @@ const ANNOUNCEMENT = {
 // The jump to v26 resets the scheme to something meaningful going forward.
 
 const CHANGELOG = [
+  {
+    version: '26.6.0',
+    date: '2026-09-01',
+    heading:
+      "September monthly drop, and it's a big one: OpenHamClock has a 3D globe. A third projection joins Flat and Azimuthal — a true three-dimensional Earth with great-circle arcs, a live day/night terminator, and satellites orbiting at real altitude, engineered carefully enough to run on a Raspberry Pi. Elsewhere: CARTO abruptly started watermarking the Dark and Streets basemaps mid-cycle, so both moved to Esri sources that need no key (with an opt-in path back). The 630m crowd gets WSPR and RBN support, PSK Reporter gains a Band Activity view, EME operators get moon pointing data, Yaesu rigs now band-switch properly when you click a spot, and the DX cluster pipeline got a deep rework so SSB and CW spots survive the FT8 flood. Plus FreeBSD support, per-user callbook credentials on shared instances, and a server hardening pass for the hosted site.",
+    features: [
+      {
+        icon: '🌍',
+        title: 'NEW: 3D Globe Projection',
+        desc: "The projection toggle is now Flat · Azimuthal · 3D. The globe renders with WebGL: true great-circle arcs (no antimeridian tricks needed — they're actual arcs in space), a day/night terminator computed in a shader from the real subsolar point, and your DX cluster spots, POTA/WWFF/SOTA/WWBOTA activations, PSKReporter, and WSJT-X traffic all carried over. Satellites render natively at orbital altitude with their ground tracks and footprint rings, complete with the telemetry window and pass-prediction modal. It auto-rotates until you grab it, follows your QTH, respects the night-darkness slider (shared with the flat map), and — after a dedicated performance pass — renders only when something actually changes, so a motionless globe costs a Pi almost nothing. The three.js engine loads only when you first click 3D, so nobody else pays the download. Built by Koen (ON9PK) across three review rounds, from first pitch to polished feature in under two weeks.",
+      },
+      {
+        icon: '🗺️',
+        title: 'Dark & Streets Basemaps Moved to Esri (CARTO Now Requires a Key)',
+        desc: "On August 26 CARTO began stamping 'API KEY REQUIRED' watermarks across their free raster tiles — the source behind our default Dark style and Streets — and their raster service is headed for retirement entirely. Both styles now default to Esri equivalents (World Dark Gray for Dark, World Street Map for Streets) that need no key and load reliably. The now-redundant Dark (Esri) and Political entries were folded in, and saved configurations migrate automatically. Prefer the original CARTO look? They hand out free keys good for 5M tiles/month at carto.com/basemaps/apikey — paste yours into Settings → Integrations → CARTO Basemap Key and Dark and Streets switch back, localized labels included. The key stays in your browser only: it is never synced to the server or shared with other users of the instance. Thanks AF1E for the same-day bug report.",
+      },
+      {
+        icon: '📻',
+        title: 'NEW: 630m WSPR + RBN Support (Opt-In)',
+        desc: "The 472 kHz crowd is no longer invisible. Enable 630m in the WSPR filter panel and the band appears across WSPR heatmaps, RBN spots, band filters, and the activity heatmap, with its own band color and per-band path rendering. It's opt-in and off by default so the HF-only majority sees no change, the 630m data source gets its own failure isolation so an outage there can't stall regular WSPR, and the stats panel notes when the 630m feed is running behind real time. Thanks Anthony (AntDiClementi) for a patient, well-tested build.",
+      },
+      {
+        icon: '📊',
+        title: 'NEW: PSK Reporter Band Activity',
+        desc: 'A new Band Activity overlay and dockable panel summarize what PSK Reporter is hearing per band at a glance — which bands are alive right now, without counting dots on the map yourself. Thanks Laura (lbatalha). FT2 also joined the mode filtering options across the app.',
+      },
+      {
+        icon: '🌙',
+        title: 'NEW: EME Moon Pointing',
+        desc: 'Moonbounce operators get real pointing data computed from your DE grid: lunar azimuth and elevation, rise and set times, and current Earth-Moon distance — the numbers you need to know whether the moon window is open before you swing the array.',
+      },
+      {
+        icon: '🎛️',
+        title: 'Yaesu Rigs: Real Band Changes on Spot Clicks',
+        desc: "Clicking a spot on a new band used to move a Yaesu's VFO without telling the radio the band changed — so band-specific settings like ATU memories, antenna selection, and gain stayed configured for the old band. Rig Bridge now issues the proper band-select command first, preserves your operating mode across the change (the radio's stored band mode no longer clobbers a CW-to-CW or FT8-to-FT8 hop), resolves generic SSB to the correct sideband for the target frequency, and leaves out-of-band frequencies like WWV alone. Built and verified on-air by Koen (ON9PK).",
+      },
+      {
+        icon: '🌐',
+        title: 'DX Cluster Pipeline — SSB and CW Survive the FT8 Flood',
+        desc: 'The OHC Cluster node introduced last release got a deep rework of what flows through it. Spot volume is now balanced across modes at every stage of the pipeline, so a wall of FT8 can no longer push every SSB and CW spot out of the panel. The node also ingests POTA, SOTA, WWFF, Parks n Peaks, and DX Summit human spots alongside RBN, collapses re-spots of the same station into one row, filters busted calls at the store, holds a full hour of history, and enriches locations for entire batches instead of the first hundred. Direct DX Spider connections switched to persistent sessions instead of poll-and-disconnect churn, and stale self-hosted installs that hammer retired nodes now get parked with a polite nudge to update.',
+      },
+      {
+        icon: '🔑',
+        title: 'Per-User Callbook Credentials on Shared Instances',
+        desc: 'On multi-user installs (including the hosted site), QRZ and HamQTH logins are now per-user instead of shared instance-wide — your XML subscription is yours. Credential storage keys are derived with scrypt so one user’s callbook login is never visible to another.',
+      },
+      {
+        icon: '🖥️',
+        title: 'FreeBSD Support + One Setup Script',
+        desc: "The setup script now natively supports FreeBSD — proper pkg install guidance, BSD-compatible sed, and a graceful rc.d note instead of assuming systemd — and was renamed to setup.sh to reflect that it long ago outgrew 'Linux'. The old setup-linux.sh URL keeps working through a compatibility shim, so every install one-liner in old forum posts and videos still functions. Malay translations also got a refresh. Thanks 9M2PJU for all of it, and Michael Wheeley for the Thai and German updates.",
+      },
+      {
+        icon: '🩺',
+        title: 'Hosted-Site Hardening — Stampedes, Death Spirals, and 429s',
+        desc: 'A production incident cycle turned into a resilience pass: hot upstream data paths are now stampede-proof (one fetch per expiring cache entry, not one per waiting user), the solar imagery fetch can no longer enter a thundering-herd death spiral, and a rate-limited presence heartbeat no longer freezes every other API call the app makes. The news ticker stopped letting future-dated NG3K entries monopolize rotation, the DXpedition calendar now shows real operating callsigns with correct years and modes, and cty.dat fetches retry with exponential backoff (thanks 9M2PJU). RBN callsign lookups got proper URL encoding — thanks Alan Hargreaves.',
+      },
+      {
+        icon: '🛰️',
+        title: 'Satellite Pipeline Cleanups',
+        desc: 'The AMSAT fallback no longer duplicates satellites in the cache, backup TLE sources (AMSAT, SatNOGS) can be individually disabled via .env flags for self-hosters who want a single source of truth (thanks Michael Wheeley), TLE responses carry explicit edge-cache TTLs so CDN staleness is bounded, and both satellite telemetry windows — 2D and 3D — now render from one shared derivation so they can never disagree about a pass again (thanks Koen).',
+      },
+      {
+        icon: '🔧',
+        title: 'Assorted Fixes',
+        desc: "The Propagation panel's P.533 WASM engine no longer refuses to start on plain-HTTP self-hosted installs. The band legend stays visible when DX spots are hidden. The satellite info panel minimizes to a compact icon. Activity layer colors (POTA/WWFF/SOTA/WWBOTA) are now identical across all three projections, sourced from one shared palette. And Docker deployments no longer collide on a hardcoded container name.",
+      },
+    ],
+  },
   {
     version: '26.5.0',
     date: '2026-07-08',

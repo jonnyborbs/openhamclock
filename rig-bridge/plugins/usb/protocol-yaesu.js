@@ -31,6 +31,8 @@ Object.entries(MODES).forEach(([k, v]) => {
   MODE_REVERSE[v] = k;
 });
 
+// Generic SSB is deliberately absent: it has no fixed sideband, so setMode()
+// resolves it from the frequency instead.
 const MODE_ALIASES = {
   USB: '2',
   LSB: '1',
@@ -45,7 +47,6 @@ const MODE_ALIASES = {
   FT8: 'C',
   FT4: 'C',
   DIGI: 'C',
-  SSB: '2',
   PSK: 'C',
   JT65: 'C',
 };
@@ -147,14 +148,133 @@ function parse(data, updateState, getState, debug) {
   }
 }
 
-function setFreq(hz, serialWrite) {
-  const padded = String(Math.round(hz)).padStart(9, '0');
-  serialWrite(`FA${padded};`);
+// Ham band edges (Hz) and the Yaesu BS band-select code for each.
+//
+// Ranges, not upper edges: with upper edges alone every out-of-band frequency
+// fell into the next band up, so 15 MHz WWV selected 17m and 12 MHz selected
+// 20m before FA; landed. A frequency outside every band now selects no band at
+// all and is sent as a plain FA;, which is what general-coverage receive wants —
+// the radio keeps whatever band it is on rather than being dragged to a ham band
+// whose stored settings have nothing to do with the frequency being tuned.
+//
+// Edges span the widest regional allocation for each band (for example 7.0–7.3
+// covers both IARU R1 and the US) so no legitimate in-band frequency is refused
+// a band change; a frequency legal in one region and not another still tunes,
+// it simply keeps the current band's settings.
+const BAND_MAP = [
+  { min: 1_800_000, max: 2_000_000, code: '00' }, // 160m
+  { min: 3_500_000, max: 4_000_000, code: '01' }, // 80m
+  { min: 5_250_000, max: 5_450_000, code: '02' }, // 60m
+  { min: 7_000_000, max: 7_300_000, code: '03' }, // 40m
+  { min: 10_100_000, max: 10_150_000, code: '04' }, // 30m
+  { min: 14_000_000, max: 14_350_000, code: '05' }, // 20m
+  { min: 18_068_000, max: 18_168_000, code: '06' }, // 17m
+  { min: 21_000_000, max: 21_450_000, code: '07' }, // 15m
+  { min: 24_890_000, max: 24_990_000, code: '08' }, // 12m
+  { min: 28_000_000, max: 29_700_000, code: '09' }, // 10m
+  { min: 50_000_000, max: 54_000_000, code: '10' }, // 6m
+  { min: 144_000_000, max: 148_000_000, code: '14' }, // 2m
+  { min: 420_000_000, max: 450_000_000, code: '15' }, // 70cm
+];
+
+/** BS code for a frequency, or null when it falls outside every ham band. */
+function freqToBandCode(hz) {
+  if (!Number.isFinite(hz)) return null;
+  for (const { min, max, code } of BAND_MAP) {
+    if (hz >= min && hz <= max) return code;
+  }
+  return null;
 }
 
-function setMode(mode, serialWrite) {
+/**
+ * setFreq()
+ *
+ * BS; switches band, which makes the radio recall that band's stored VFO and
+ * settings — so it is only sent when the target is on a different band than the
+ * radio is on now. Sending it for an in-band retune would bounce the VFO to the
+ * stored frequency and back, with the ATU and band relays following along.
+ *
+ * currentHz is the radio's live frequency from the IF; poll rather than a
+ * remembered "band we last selected". A remembered value goes stale as soon as
+ * the operator turns the band knob, and we would then skip the BS; that the
+ * band change actually needed.
+ *
+ * A mode requested alongside the tune is sent after the band change, because
+ * BS; restores the band's stored settings, mode included — a MD; issued before
+ * the band finished switching is simply overwritten. getMode is called when the
+ * deferred write fires, not now: the caller sets frequency and mode as two
+ * near-simultaneous commands, so at fire time it can report the mode that was
+ * just requested — or, when none was, the mode the radio was in before the band
+ * change, which BS; would otherwise silently replace with that band's stored
+ * mode.
+ *
+ * @param {number} hz          - target frequency
+ * @param {Function} serialWrite
+ * @param {number} [currentHz] - radio's present frequency; omit if unknown
+ * @param {Function} [getMode] - called after a band change; returns the mode
+ *                               requested with this tune, or falsy to leave the
+ *                               band's recalled mode alone
+ */
+function setFreq(hz, serialWrite, currentHz, getMode) {
+  const padded = String(Math.round(hz)).padStart(9, '0');
+  const bandCode = freqToBandCode(hz);
+  // Unknown current frequency (not yet polled) counts as a band change: better a
+  // redundant BS; than leaving band settings on the wrong band.
+  const currentBand = Number.isFinite(currentHz) && currentHz > 0 ? freqToBandCode(currentHz) : null;
+
+  if (bandCode !== null && bandCode !== currentBand) {
+    serialWrite(`BS${bandCode};`);
+    setTimeout(() => {
+      // Mode before frequency: switching to CW can shift the displayed
+      // frequency by the CW pitch offset, so FA; goes last and wins.
+      const mode = typeof getMode === 'function' ? getMode() : null;
+      // Resolve the sideband against the target frequency, not the band we came
+      // from — the radio has not reported the new frequency yet.
+      if (mode) setMode(mode, serialWrite, hz);
+      serialWrite(`FA${padded};`);
+    }, 100);
+  } else {
+    serialWrite(`FA${padded};`);
+  }
+}
+
+// 60m is worked USB by convention, unlike every other band below 10 MHz. These
+// bounds span both the IARU R1 band and the US channels, and match the app's
+// getSideband() so the two agree on what a generic 'SSB' means.
+const SIXTY_M_MIN_HZ = 5_300_000;
+const SIXTY_M_MAX_HZ = 5_405_000;
+
+/**
+ * Sideband for a generic 'SSB': LSB below 10 MHz, USB at and above it, with 60m
+ * as the exception. An unknown frequency falls back to USB, which is what this
+ * module did before the rule became frequency-aware.
+ */
+function ssbSidebandDigit(hz) {
+  if (!Number.isFinite(hz) || hz <= 0) return '2';
+  if (hz >= SIXTY_M_MIN_HZ && hz <= SIXTY_M_MAX_HZ) return '2';
+  return hz < 10_000_000 ? '1' : '2';
+}
+
+/**
+ * setMode()
+ *
+ * @param {string} mode
+ * @param {Function} serialWrite
+ * @param {number} [currentHz] - frequency the mode applies to; only needed to
+ *                               resolve the sideband for a generic 'SSB'
+ */
+function setMode(mode, serialWrite, currentHz) {
+  const m = String(mode || '').toUpperCase();
+
+  // Generic SSB carries no sideband of its own — resolve it from the frequency
+  // so a caller sending 'SSB' lands on the same sideband the app would pick.
+  if (m === 'SSB') {
+    serialWrite(`MD0${ssbSidebandDigit(currentHz)};`);
+    return;
+  }
+
   let digit = MODE_REVERSE[mode];
-  if (!digit) digit = MODE_ALIASES[mode.toUpperCase()];
+  if (!digit) digit = MODE_ALIASES[m];
   if (digit) serialWrite(`MD0${digit};`);
 }
 

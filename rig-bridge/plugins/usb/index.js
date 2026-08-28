@@ -327,21 +327,68 @@ function createUsbPlugin(radioType) {
         console.log(`[USB/${radioType}] Disconnected`);
       }
 
+      // A band change makes the radio recall that band's stored mode and VFO, so
+      // both the mode to apply afterwards and the band to compare against have
+      // to survive the gap between a tune being requested and the radio
+      // reporting it back on the next IF; poll.
+      let lastRequestedMode = null;
+      let lastRequestedModeAt = 0;
+      let lastRequestedFreq = 0;
+      let lastRequestedFreqAt = 0;
+
+      // A tune and its mode arrive as two separate commands milliseconds apart,
+      // and nothing guarantees which lands first. Anything inside this window
+      // belongs to the same tune, whichever order it arrived in.
+      const TUNE_WINDOW_MS = 1000;
+
+      /**
+       * Frequency to reason about the radio's current band and sideband.
+       *
+       * state.freq only refreshes on the IF; poll (500 ms by default), so a tune
+       * still in flight has not been echoed back yet. Within the window the
+       * frequency just requested wins; after it, state.freq is authoritative and
+       * also reflects the operator turning the VFO by hand.
+       */
+      const modeReferenceFreq = () =>
+        Date.now() - lastRequestedFreqAt < TUNE_WINDOW_MS ? lastRequestedFreq : state.freq;
+
       function setFreq(hz) {
         console.log(`[USB/${radioType}] SET FREQ: ${(hz / 1e6).toFixed(6)} MHz`);
+        // Both read before this tune is recorded: comparing the target against
+        // itself would make every band change look like an in-band retune, and
+        // the mode has to be the one in effect before BS; recalls another.
+        const referenceFreq = modeReferenceFreq();
+        const modeBefore = state.mode;
+        lastRequestedFreq = hz;
+        lastRequestedFreqAt = Date.now();
+
         if (radioType === 'icom') {
           proto.setFreq(hz, write, getIcomAddress());
         } else {
-          proto.setFreq(hz, write);
+          // Third arg is the frequency Yaesu compares to decide whether this is a
+          // band change. Kenwood ignores both extra args.
+          proto.setFreq(hz, write, referenceFreq, () => {
+            // A mode requested around this tune wins. Otherwise re-assert the
+            // mode from before the band change: the caller skips the mode command
+            // when the mode is already correct, so letting the band's stored mode
+            // win would drop the operator out of it — clicking a 20m CW spot from
+            // 40m CW would land in USB.
+            if (lastRequestedMode && Date.now() - lastRequestedModeAt < TUNE_WINDOW_MS) {
+              return lastRequestedMode;
+            }
+            return modeBefore;
+          });
         }
       }
 
       function setMode(mode) {
         console.log(`[USB/${radioType}] SET MODE: ${mode}`);
+        lastRequestedMode = mode;
+        lastRequestedModeAt = Date.now();
         if (radioType === 'icom') {
           proto.setMode(mode, write, getIcomAddress());
         } else {
-          proto.setMode(mode, write);
+          proto.setMode(mode, write, modeReferenceFreq());
         }
       }
 

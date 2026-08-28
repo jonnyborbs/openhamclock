@@ -341,19 +341,54 @@ export const applyTheme = (theme) => {
 
 /**
  * Map Tile Providers
+ *
+ * CARTO started watermarking keyless raster tiles in August 2026 ("API KEY
+ * REQUIRED", issue #1162) and is retiring its raster basemap service, so the
+ * Dark and Streets styles default to Esri sources that need no key. Anyone
+ * who wants the original CARTO look back can get a free key (5M tiles/month,
+ * carto.com/basemaps/apikey) and paste it in Settings → Integrations — Dark
+ * and Streets then switch back to CARTO, localized labels and all. The former
+ * "Dark (Esri)" and "Political" entries were folded into Dark and Streets
+ * (same tiles); WorldMap migrates saved references.
+ *
+ * The key is stored under 'ohc-carto-key' (dash prefix, like ohc-callbook-auth)
+ * so the settings-sync interceptor and catch-all — which sweep every ohc_* and
+ * openhamclock_* key to the server — can never ship one browser's personal key
+ * to every user of a shared instance. Do not "fix" the prefix.
  */
+export const CARTO_KEY_STORAGE = 'ohc-carto-key';
+
+export const getCartoApiKey = () => {
+  try {
+    // Migrate the briefly-used synced key name, then forget it existed.
+    const legacy = localStorage.getItem('ohc_carto_apikey');
+    if (legacy && !localStorage.getItem(CARTO_KEY_STORAGE)) {
+      localStorage.setItem(CARTO_KEY_STORAGE, legacy);
+    }
+    if (legacy) localStorage.removeItem('ohc_carto_apikey');
+    return localStorage.getItem(CARTO_KEY_STORAGE) || '';
+  } catch {
+    return '';
+  }
+};
+
+const cartoApiKey = getCartoApiKey();
+
+const CARTO_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>';
+
 export const MAP_STYLES = {
-  dark: {
-    name: 'Dark',
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?language={lang}',
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
-  },
-  darkEsri: {
-    name: 'Dark (Esri)',
-    url: 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
-    attribution: '&copy; Esri',
-  },
+  dark: cartoApiKey
+    ? {
+        name: 'Dark',
+        url: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?language={lang}&key=${encodeURIComponent(cartoApiKey)}`,
+        attribution: CARTO_ATTRIBUTION,
+      }
+    : {
+        name: 'Dark',
+        url: 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+        attribution: '&copy; Esri',
+      },
   satellite: {
     name: 'Satellite',
     url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -369,12 +404,17 @@ export const MAP_STYLES = {
     url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Physical_Map/MapServer/tile/{z}/{y}/{x}',
     attribution: '&copy; Esri, US National Park Service',
   },
-  streets: {
-    name: 'Streets',
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?language={lang}',
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
-  },
+  streets: cartoApiKey
+    ? {
+        name: 'Streets',
+        url: `https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?language={lang}&key=${encodeURIComponent(cartoApiKey)}`,
+        attribution: CARTO_ATTRIBUTION,
+      }
+    : {
+        name: 'Streets',
+        url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+        attribution: '&copy; Esri',
+      },
   topo: {
     name: 'Topo',
     url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
@@ -393,11 +433,6 @@ export const MAP_STYLES = {
   gray: {
     name: 'Gray',
     url: 'https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
-    attribution: '&copy; Esri',
-  },
-  political: {
-    name: 'Political',
-    url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
     attribution: '&copy; Esri',
   },
   natgeo: {

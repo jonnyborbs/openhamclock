@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import dxNewsMerge from './dxNewsMerge.js';
 
-const { extractCallsign, isFreshByPublishDate, isFreshByActivityWindow, dedupByCallsign, mergeNews } = dxNewsMerge;
+const {
+  extractCallsign,
+  isFreshByPublishDate,
+  isFreshByActivityWindow,
+  dedupByCallsign,
+  mergeNews,
+  effectiveRankTime,
+} = dxNewsMerge;
 
 // Fixed clock so time-based tests don't drift
 const NOW = new Date('2026-04-24T12:00:00Z');
@@ -337,5 +344,67 @@ describe('fault tolerance', () => {
   it('handles mergeNews called with undefined buckets gracefully', () => {
     // Should not throw when called with undefined fields
     expect(() => mergeNews({ dxnews: [], dxWorld: [], ng3k: [] }, NOW)).not.toThrow();
+  });
+});
+
+// ─── future-date mirroring (news-ticker crowd-out fix) ────────────────────────
+// NG3K entries carry publishDate = startDate; for upcoming DXpeditions that is
+// in the future, and a raw DESC sort let "starts in 7 months" outrank today's
+// news and monopolize the 20-item cap. Future dates mirror around `now`.
+
+describe('future-date mirroring', () => {
+  const DAY = 24 * 3600 * 1000;
+  const ng3kUpcoming = (call, daysUntilStart, daysUntilEnd = daysUntilStart + 10) => ({
+    id: `ng3k:${call}`,
+    title: `${call} — Somewhere`,
+    publishDate: new Date(NOW.getTime() + daysUntilStart * DAY).toISOString(),
+    activityEndDate: new Date(NOW.getTime() + daysUntilEnd * DAY).toISOString(),
+    callsign: call,
+    source: 'NG3K',
+    sourceUrl: 'https://www.ng3k.com/Misc/adxo.html',
+  });
+  const freshNews = (id, hoursAgo, call = null) => ({
+    id: `dxworld:${id}`,
+    title: `${id} update`,
+    publishDate: new Date(NOW.getTime() - hoursAgo * 3600 * 1000).toISOString(),
+    callsign: call,
+    source: 'DX-WORLD',
+    sourceUrl: 'https://www.dx-world.net/',
+  });
+
+  it('effectiveRankTime mirrors a future date to its same-distance past date', () => {
+    const nowTs = NOW.getTime();
+    const inThreeDays = { publishDate: new Date(nowTs + 3 * DAY).toISOString() };
+    const threeDaysAgo = { publishDate: new Date(nowTs - 3 * DAY).toISOString() };
+    expect(effectiveRankTime(inThreeDays, nowTs)).toBe(effectiveRankTime(threeDaysAgo, nowTs));
+    expect(effectiveRankTime({ publishDate: 'garbage' }, nowTs)).toBe(0);
+  });
+
+  it('fresh news outranks a far-future NG3K calendar entry', () => {
+    const result = mergeNews({ dxnews: [], dxWorld: [freshNews('w1', 2)], ng3k: [ng3kUpcoming('3Y0L', 200)] }, NOW);
+    expect(result.map((i) => i.source)).toEqual(['DX-WORLD', 'NG3K']);
+  });
+
+  it('an imminent DXpedition still ranks above older news', () => {
+    // Starts in 12h → ranks like 12h-old → above 20h-old news
+    const result = mergeNews({ dxnews: [], dxWorld: [freshNews('w1', 20)], ng3k: [ng3kUpcoming('K9AA', 0.5)] }, NOW);
+    expect(result.map((i) => i.source)).toEqual(['NG3K', 'DX-WORLD']);
+  });
+
+  it('a flood of upcoming NG3K entries cannot crowd fresh news out of the 20 cap', () => {
+    const flood = Array.from({ length: 30 }, (_, i) => ng3kUpcoming(`N${i}AA`, i + 2));
+    const news = [freshNews('w1', 1), freshNews('w2', 5)];
+    const result = mergeNews({ dxnews: [], dxWorld: news, ng3k: flood }, NOW);
+    expect(result).toHaveLength(20);
+    expect(result.filter((i) => i.source === 'DX-WORLD')).toHaveLength(2);
+    expect(result[0].id).toBe('dxworld:w1');
+  });
+
+  it('dedup: a fresh article beats a future-start calendar entry for the same callsign', () => {
+    const article = freshNews('w1', 2, 'T31TTT');
+    const calendar = ng3kUpcoming('T31TTT', 10);
+    const result = dedupByCallsign([article, calendar], NOW);
+    expect(result).toHaveLength(1);
+    expect(result[0].source).toBe('DX-WORLD');
   });
 });

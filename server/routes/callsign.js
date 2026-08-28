@@ -734,6 +734,10 @@ module.exports = function (app, ctx) {
         cqZone: data.waz ? String(parseInt(data.waz, 10)) : '',
         ituZone: data.itu ? String(parseInt(data.itu, 10)) : '',
         source: 'hamqth-dxcc',
+        // The DXCC endpoint resolves US calls to the call-district centroid, not
+        // the station QTH — a grid derived from this lat/lon is approximate and
+        // should not be presented as the operator's actual square (#1137).
+        estimated: true,
       };
     } catch (err) {
       if (err.name !== 'AbortError') {
@@ -984,10 +988,17 @@ module.exports = function (app, ctx) {
       cacheSuffix = '';
     }
 
-    // Check cache first (check both raw and base forms)
+    // Check cache first (check both raw and base forms). Entries are tiered by
+    // source quality: background enrichment caches country/district-centroid
+    // results (hamqth-dxcc, prefix) under the same keys, and serving one of
+    // those to a request that could reach a rich callbook record would pin the
+    // low-quality answer for the full TTL (#1130). Serve a cached entry only
+    // when it is at least as good as what this request's chain could produce.
+    const SOURCE_TIER = { qrz: 3, 'hamqth-xml': 3, 'hamqth-dxcc': 2, prefix: 1, 'prefix-grid': 1 };
+    const bestTier = userQrzSession || userHamqthSession || isQRZConfigured() || isHamQTHConfigured() ? 3 : 2;
     const cached =
       callsignLookupCache.get(callsign + cacheSuffix) || callsignLookupCache.get(rawCallsign + cacheSuffix);
-    if (cached && now - cached.timestamp < CALLSIGN_CACHE_TTL) {
+    if (cached && now - cached.timestamp < CALLSIGN_CACHE_TTL && (SOURCE_TIER[cached.data?.source] || 1) >= bestTier) {
       logDebug('[Callsign Lookup] Cache hit for:', callsign);
       return res.json(cached.data);
     }
@@ -1051,10 +1062,12 @@ module.exports = function (app, ctx) {
       if (error.name !== 'AbortError') {
         logErrorOnce('Callsign Lookup', error.message);
       }
-      // Still try prefix estimate on error
+      // Still try prefix estimate on error. Key includes the credential suffix
+      // like every other write on this route, so a prefix-tier fallback never
+      // pollutes the shared anonymous pool (#1130).
       const estimated = estimateLocationFromPrefix(callsign);
       if (estimated) {
-        cacheCallsignLookup(callsign, {
+        cacheCallsignLookup(callsign + cacheSuffix, {
           data: { ...estimated, source: 'prefix' },
           timestamp: now,
         });

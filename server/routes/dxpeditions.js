@@ -25,7 +25,13 @@ module.exports = function (app, ctx) {
       // In-flight dedup: concurrent expired-cache hits share one fetch
       // (fetchers return plain objects, safe to share across waiters).
       const fresh = await ctx.upstream.fetch(`dxnews:${name}`, fetcher);
-      sourceCaches.set(name, { data: fresh, timestamp: Date.now() });
+      // Never cache an empty result. ng3k reads ctx.dxpeditionCache, which is
+      // cold until /api/dxpeditions is first hit — caching the empty answer
+      // from that race would blank the source for a whole TTL. Empty results
+      // are returned as-is but retried on the next call.
+      if (fresh?.items?.length) {
+        sourceCaches.set(name, { data: fresh, timestamp: Date.now() });
+      }
       return fresh;
     } catch (e) {
       logErrorOnce(`dxnews:${name}`, e?.message || 'fetch failed');

@@ -3,7 +3,9 @@ import { esc } from '../../utils/escapeHtml.js';
 import { addMinimizeToggle } from './addMinimizeToggle.js';
 import { makeDraggable } from './makeDraggable.js';
 import { getBandFromFreq } from '../../utils/callsign.js';
+import { getBandColorForBand } from '../../utils/bandColors.js';
 import { maidenheadToLatLon } from '../../utils/geo.js';
+import { use630mBandEnabled } from '../../hooks/use630mBandEnabled.js';
 
 /**
  * WSPR Propagation Heatmap Plugin v1.6.0
@@ -191,6 +193,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
 
   // v1.2.0 - Advanced Filters
   const [bandFilter, setBandFilter] = useState('all');
+  const [band630mEnabled, setBand630mEnabled] = use630mBandEnabled();
   const [timeWindow, setTimeWindow] = useState(lowMemoryMode ? 15 : 30); // minutes - shorter in low memory
   const [snrThreshold, setSNRThreshold] = useState(-30); // dB
   const [showAnimation, setShowAnimation] = useState(!lowMemoryMode); // Disable animations in low memory mode
@@ -229,13 +232,32 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
   }, [locator]);
 
   useEffect(() => {
+    if (band630mEnabled) return;
+    if (bandFilter === '630m') setBandFilter('all');
+    setWsprData((current) => {
+      const filtered = current.filter((spot) => {
+        const spotBand =
+          normalizeBandKey(spot.band) || bandFromAnyFrequency(spot.freqMHz || spot.freq || spot.frequency);
+        return spotBand !== '630m';
+      });
+      if (current.bandActivity) filtered.bandActivity = current.bandActivity;
+      filtered.sourceLatestTimestamp = current.sourceLatestTimestamp ?? null;
+      filtered.sourceLagMinutes = current.sourceLagMinutes ?? null;
+      filtered.sourceWindowShifted = current.sourceWindowShifted ?? false;
+      return filtered;
+    });
+  }, [band630mEnabled, bandFilter]);
+
+  useEffect(() => {
     if (!enabled) return;
 
     const fetchWSPR = async () => {
       try {
         const timestamp = new Date().toLocaleTimeString();
         console.debug(`[WSPR] Fetching data at ${timestamp}...`);
-        const response = await fetch(`/api/wspr/heatmap?minutes=${timeWindow}&band=${bandFilter}`);
+        const response = await fetch(
+          `/api/wspr/heatmap?minutes=${timeWindow}&band=${bandFilter}&include630m=${band630mEnabled ? 'true' : 'false'}`,
+        );
         if (response.ok) {
           const data = await response.json();
 
@@ -284,7 +306,8 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
                   receiverLat: path.toLat,
                   receiverLon: path.toLon,
                   snr: path.avgSnr,
-                  band: Object.keys(path.bands).sort((a, b) => path.bands[b] - path.bands[a])[0] || 'Unknown',
+                  band:
+                    path.band || Object.keys(path.bands).sort((a, b) => path.bands[b] - path.bands[a])[0] || 'Unknown',
                   pathCount: path.count,
                   isPath: true,
                   isAggregated: true,
@@ -296,6 +319,9 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
             if (data.bandActivity) {
               virtualSpots.bandActivity = data.bandActivity;
             }
+            virtualSpots.sourceLatestTimestamp = data.sourceLatestTimestamp ?? null;
+            virtualSpots.sourceLagMinutes = data.sourceLagMinutes ?? null;
+            virtualSpots.sourceWindowShifted = data.sourceWindowShifted ?? false;
 
             setWsprData(virtualSpots);
             return;
@@ -355,6 +381,9 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
             return updated;
           });
 
+          spots.sourceLatestTimestamp = data.sourceLatestTimestamp ?? null;
+          spots.sourceLagMinutes = data.sourceLagMinutes ?? null;
+          spots.sourceWindowShifted = data.sourceWindowShifted ?? false;
           setWsprData(spots);
           console.info(`[WSPR Plugin] Loaded ${spots.length} raw spots (${timeWindow}min, band: ${bandFilter})`);
         }
@@ -367,7 +396,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
     const interval = setInterval(fetchWSPR, 300000); // Poll every 5 minutes (server caches for 10)
 
     return () => clearInterval(interval);
-  }, [enabled, bandFilter, timeWindow, callsign, filterByGrid]);
+  }, [enabled, bandFilter, band630mEnabled, timeWindow, callsign, filterByGrid]);
 
   // Create UI controls once (v1.2.0+)
   useEffect(() => {
@@ -385,9 +414,17 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
           <div class="floating-panel-header">🎛️ Filters</div>
 
           <div style="margin-bottom: 8px;">
+            <label style="display: flex; align-items: center; cursor: pointer;">
+              <input type="checkbox" id="wspr-enable-630m" ${band630mEnabled ? 'checked' : ''} style="margin-right: 5px;" />
+              <span>Enable 630m WSPR/RBN</span>
+            </label>
+          </div>
+
+          <div style="margin-bottom: 8px;">
             <label style="display: block; margin-bottom: 3px;">Band:</label>
             <select id="wspr-band-filter" style="width: 100%; padding: 4px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 3px;">
               <option value="all">All Bands</option>
+              <option value="630m" ${band630mEnabled ? '' : 'hidden disabled'}>630m</option>
               <option value="160m">160m</option>
               <option value="80m">80m</option>
               <option value="60m">60m</option>
@@ -503,6 +540,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
 
     // Add event listeners after control is added
     setTimeout(() => {
+      const enable630mCheck = document.getElementById('wspr-enable-630m');
       const bandSelect = document.getElementById('wspr-band-filter');
       const timeSelect = document.getElementById('wspr-time-filter');
       const snrSlider = document.getElementById('wspr-snr-filter');
@@ -516,6 +554,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       const gridFilterCheck = document.getElementById('wspr-grid-filter');
       const gridInput = document.getElementById('wspr-grid-input');
 
+      if (enable630mCheck) enable630mCheck.addEventListener('change', (e) => setBand630mEnabled(e.target.checked));
       if (bandSelect) bandSelect.addEventListener('change', (e) => setBandFilter(e.target.value));
       if (timeSelect) timeSelect.addEventListener('change', (e) => setTimeWindow(parseInt(e.target.value)));
       if (snrSlider) {
@@ -719,6 +758,19 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
     console.debug('[WSPR] All controls created once');
   }, [enabled, map]);
 
+  useEffect(() => {
+    const checkbox = document.getElementById('wspr-enable-630m');
+    if (checkbox) checkbox.checked = band630mEnabled;
+
+    const bandSelect = document.getElementById('wspr-band-filter');
+    const band630mOption = bandSelect?.querySelector('option[value="630m"]');
+    if (band630mOption) {
+      band630mOption.hidden = !band630mEnabled;
+      band630mOption.disabled = !band630mEnabled;
+    }
+    if (!band630mEnabled && bandSelect?.value === '630m') bandSelect.value = 'all';
+  }, [band630mEnabled]);
+
   // Render WSPR paths and markers
   useEffect(() => {
     if (!map || typeof L === 'undefined') return;
@@ -754,6 +806,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       if ((spot.snr || -30) < snrThreshold) return false;
 
       const spotBand = normalizeBandKey(spot.band) || bandFromAnyFrequency(spot.freqMHz || spot.freq || spot.frequency);
+      if (!band630mEnabled && spotBand === '630m') return false;
       if (hasMapBandFilter && (!spotBand || !selectedMapBands.has(spotBand))) return false;
 
       // Grid square filter (if enabled AND grid is set) - show spots in/around that grid
@@ -859,12 +912,17 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
         return;
       }
 
-      // Check if this is a best DX path
+      // Check if this is a best DX path. Keep the existing SNR colors for
+      // normal bands and use the customizable band color for 630m.
       const isBestPath = bestPathSet.has(`${spot.sender}-${spot.receiver}`);
+      const renderedBand =
+        normalizeBandKey(spot.band) || bandFromAnyFrequency(spot.freqMHz || spot.freq || spot.frequency);
+      const is630mPath = renderedBand === '630m';
+      const pathColor = isBestPath ? '#00ffff' : is630mPath ? getBandColorForBand('630m') : getSNRColor(spot.snr);
 
       const path = L.polyline(pathCoords, {
-        color: isBestPath ? '#00ffff' : getSNRColor(spot.snr),
-        weight: isBestPath ? 4 : getLineWeight(spot.snr),
+        color: pathColor,
+        weight: isBestPath ? 4 : is630mPath ? Math.max(5, getLineWeight(spot.snr)) : getLineWeight(spot.snr),
         opacity: pathOpacity * (isBestPath ? 0.9 : 0.6),
         smoothFactor: 1,
         className: showAnimation ? 'wspr-animated-path' : '',
@@ -1069,6 +1127,12 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
     setTimeout(() => {
       const statsContainer = document.querySelector('.wspr-stats');
       if (statsContainer && enabled) {
+        const lagMinutes = Number(wsprData.sourceLagMinutes);
+        const hasLag = Number.isFinite(lagMinutes) && lagMinutes > 0;
+        const lagLabel = lagMinutes >= 60 ? `${Math.floor(lagMinutes / 60)}h ${lagMinutes % 60}m` : `${lagMinutes}m`;
+        const timeLabel = wsprData.sourceWindowShifted
+          ? `Latest ${timeWindow} min available · 630m source ${hasLag ? `${lagLabel} behind` : 'delayed'}`
+          : `Last ${timeWindow} min`;
         const contentHTML = `
           <div style="margin-bottom: 8px; padding: 6px; background: var(--bg-tertiary); border-radius: 3px;">
             <div style="font-size: 10px; opacity: 0.8; margin-bottom: 2px;">Propagation Score</div>
@@ -1078,7 +1142,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
           <div>TX Stations: <span style="color: var(--accent-amber);">${txStations.size}</span></div>
           <div>RX Stations: <span style="color: var(--accent-blue);">${rxStations.size}</span></div>
           <div>Total: <span style="color: var(--accent-green);">${totalStations}</span></div>
-          <div style="margin-top: 6px; font-size: 10px; opacity: 0.7;">Last ${timeWindow} min</div>
+          <div style="margin-top: 6px; font-size: 10px; color: ${wsprData.sourceWindowShifted ? 'var(--accent-amber)' : 'inherit'}; opacity: 0.7;">${timeLabel}</div>
         `;
 
         // Check if minimize toggle has been added (content is wrapped)
@@ -1101,11 +1165,14 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
     setTimeout(() => {
       const chartContainer = document.querySelector('.wspr-chart');
       if (chartContainer && limitedData.length > 0 && enabled) {
-        const bandCounts = {};
-        limitedData.forEach((spot) => {
-          const band = spot.band || 'Unknown';
-          bandCounts[band] = (bandCounts[band] || 0) + 1;
-        });
+        const useServerBandActivity = band630mEnabled && wsprData.bandActivity;
+        const bandCounts = useServerBandActivity ? { ...wsprData.bandActivity } : {};
+        if (!useServerBandActivity) {
+          limitedData.forEach((spot) => {
+            const band = spot.band || 'Unknown';
+            bandCounts[band] = (bandCounts[band] || 0) + 1;
+          });
+        }
 
         let chartContentHTML = '';
 
@@ -1171,6 +1238,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
     filterByGrid,
     gridFilter,
     mapBandFilter,
+    band630mEnabled,
   ]);
 
   // Render heatmap overlay (v1.4.0)
@@ -1203,6 +1271,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
       if ((spot.snr || -30) < snrThreshold) return false;
 
       const spotBand = normalizeBandKey(spot.band) || bandFromAnyFrequency(spot.freqMHz || spot.freq || spot.frequency);
+      if (!band630mEnabled && spotBand === '630m') return false;
       if (hasMapBandFilter && (!spotBand || !selectedMapBands.has(spotBand))) return false;
 
       // Grid square filter (if enabled AND grid is set) - show spots in/around that grid
@@ -1399,6 +1468,7 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
     filterByGrid,
     gridFilter,
     mapBandFilter,
+    band630mEnabled,
   ]);
 
   // Cleanup controls on disable - FIX: properly remove all controls and layers
@@ -1494,6 +1564,15 @@ export function useLayer({ enabled = false, map = null, callsign, locator, lowMe
     markers: markerLayers,
     spotCount: wsprData.length,
     filteredCount: wsprData.filter((s) => (s.snr || -30) >= snrThreshold).length,
-    filters: { bandFilter, timeWindow, snrThreshold, showAnimation, showHeatmap, pathOpacity, heatmapOpacity },
+    filters: {
+      bandFilter,
+      band630mEnabled,
+      timeWindow,
+      snrThreshold,
+      showAnimation,
+      showHeatmap,
+      pathOpacity,
+      heatmapOpacity,
+    },
   };
 }

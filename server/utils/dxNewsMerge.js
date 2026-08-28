@@ -106,20 +106,45 @@ function isFreshByActivityWindow(item, now) {
   return end >= now;
 }
 
+// ─── Recency ranking ──────────────────────────────────────────────────────────
+
+/**
+ * Rank time for recency ordering, in epoch ms. Real news items rank by their
+ * publish date. NG3K calendar entries carry publishDate = startDate (D-09),
+ * which for upcoming DXpeditions lies in the FUTURE — ranked raw, "starts in
+ * 7 months" outsorted this morning's news and the calendar monopolized the
+ * 20-item cap. Future dates are mirrored around `now` (starts-in-N-days
+ * ranks like N-days-old), so imminent activity stays prominent while
+ * far-future entries sink. Invalid/missing dates rank oldest.
+ *
+ * @param {{ publishDate?: string }} item
+ * @param {number} nowTs — epoch ms to mirror around
+ * @returns {number}
+ */
+function effectiveRankTime(item, nowTs) {
+  const t = new Date(item?.publishDate).getTime();
+  if (isNaN(t)) return 0;
+  return t > nowTs ? nowTs - (t - nowTs) : t;
+}
+
 // ─── Deduplication ────────────────────────────────────────────────────────────
 
 /**
- * Deduplicates items by callsign, keeping the item with the freshest publishDate.
+ * Deduplicates items by callsign, keeping the item with the freshest effective
+ * rank time (mirrored, so a <24h-old article beats a calendar entry whose
+ * start date is weeks out — the article is the richer representation).
  * Items with callsign === null always pass through (no dedup applied).
  * Ties broken by first occurrence in the array (deterministic source-order tiebreak:
  * callers should pass dxnews → dxworld → ng3k so earlier = higher-priority source).
  * Implements D-08.
  *
  * @param {Array<object>} items
+ * @param {Date} [now=new Date()] — injectable for testing
  * @returns {Array<object>}
  */
-function dedupByCallsign(items) {
-  const best = new Map(); // callsign → item with freshest publishDate
+function dedupByCallsign(items, now = new Date()) {
+  const nowTs = now.getTime();
+  const best = new Map(); // callsign → item with freshest effective rank time
   const nullItems = [];
 
   for (const item of items) {
@@ -130,12 +155,8 @@ function dedupByCallsign(items) {
     const existing = best.get(item.callsign);
     if (!existing) {
       best.set(item.callsign, item);
-    } else {
-      const existingDate = new Date(existing.publishDate).getTime();
-      const itemDate = new Date(item.publishDate).getTime();
-      if (itemDate > existingDate) {
-        best.set(item.callsign, item);
-      }
+    } else if (effectiveRankTime(item, nowTs) > effectiveRankTime(existing, nowTs)) {
+      best.set(item.callsign, item);
     }
   }
 
@@ -152,8 +173,8 @@ function dedupByCallsign(items) {
  *   1. Filter dxnews + dxWorld by isFreshByPublishDate (24h cutoff)
  *   2. Filter ng3k by isFreshByActivityWindow (activity-window rule)
  *   3. Concatenate all filtered items
- *   4. dedupByCallsign (freshest wins per callsign)
- *   5. Sort by publishDate DESC (newest first)
+ *   4. dedupByCallsign (freshest effective rank time wins per callsign)
+ *   5. Sort by effectiveRankTime DESC (future start dates mirrored around now)
  *   6. slice(0, 20)
  *
  * @param {{ dxnews: object[], dxWorld: object[], ng3k: object[] }} buckets
@@ -171,8 +192,9 @@ function mergeNews(buckets, now = new Date()) {
   const activityWindowFiltered = ng3k.filter((item) => isFreshByActivityWindow(item, now));
 
   const all = [...publishDateFiltered, ...activityWindowFiltered];
-  const deduped = dedupByCallsign(all);
-  deduped.sort((a, b) => new Date(b.publishDate).getTime() - new Date(a.publishDate).getTime());
+  const deduped = dedupByCallsign(all, now);
+  const nowTs = now.getTime();
+  deduped.sort((a, b) => effectiveRankTime(b, nowTs) - effectiveRankTime(a, nowTs));
   return deduped.slice(0, 20);
 }
 
@@ -194,6 +216,7 @@ module.exports = {
   extractCallsign,
   isFreshByPublishDate,
   isFreshByActivityWindow,
+  effectiveRankTime,
   dedupByCallsign,
   mergeNews,
   SOURCE_URLS,

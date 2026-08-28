@@ -189,4 +189,39 @@ describe('/api/dxnews integration', () => {
     expect(result.body).toHaveProperty('fetched');
     expect(Array.isArray(result.body.items)).toBe(true);
   });
+
+  it('does not cache an empty source result (ng3k cold-start race)', async () => {
+    // ng3k reads dxpeditionCache, which is empty until /api/dxpeditions runs.
+    // The empty first answer must not be cached for the TTL — the next
+    // /api/dxnews call after the cache warms must show NG3K items.
+    let ng3kItems = [];
+    const ctx = makeCtx({
+      fetchNg3kImpl: () => Promise.resolve({ items: ng3kItems }),
+    });
+    const app = makeApp();
+    route(app, ctx);
+
+    const first = await callRoute(app, 'GET', '/api/dxnews');
+    expect(first.body.items).toHaveLength(0);
+
+    ng3kItems = [makeItem({ id: 'n1', source: 'NG3K', activityEndDate: '2026-05-01T00:00:00Z' })];
+    const second = await callRoute(app, 'GET', '/api/dxnews');
+    expect(second.body.items).toHaveLength(1);
+    expect(second.body.items[0].source).toBe('NG3K');
+  });
+
+  it('a non-empty source result IS cached (fetcher not re-invoked within TTL)', async () => {
+    const ctx = makeCtx({
+      fetchNg3kImpl: () =>
+        Promise.resolve({
+          items: [makeItem({ id: 'n1', source: 'NG3K', activityEndDate: '2026-05-01T00:00:00Z' })],
+        }),
+    });
+    const app = makeApp();
+    route(app, ctx);
+
+    await callRoute(app, 'GET', '/api/dxnews');
+    await callRoute(app, 'GET', '/api/dxnews');
+    expect(ctx._dxNewsFetchers.fetchNg3k).toHaveBeenCalledTimes(1);
+  });
 });

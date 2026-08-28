@@ -53,7 +53,8 @@ export const useDXClusterData = (filters = {}, config = {}) => {
       }
     }
 
-    // Always send callsign for login (with SSID)
+    // Send the station callsign for login. Note: this is the bare call — the
+    // server prefers DX_CLUSTER_CALLSIGN from .env when set (#1128).
     if (config.callsign && config.callsign !== 'N0CALL') {
       params.append('callsign', config.callsign);
     }

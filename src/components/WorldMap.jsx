@@ -27,19 +27,33 @@ import { getAprsSymbolIcon } from '../utils/aprs-symbols.js';
 import { getAllLayers } from '../plugins/layerRegistry.js';
 import PluginLayer from './PluginLayer.jsx';
 import AzimuthalMap from './AzimuthalMap.jsx';
+// three.js is ~600 kB — load it only when the operator actually opens 3D mode.
+// React 18 permanently caches a rejected lazy() import, so a single failed
+// chunk load (stale HTML right after a redeploy is the classic case) would
+// otherwise make every later visit to 3D re-throw instantly until a hard
+// reload. On failure, discard the lazy instance so the next mount re-imports.
+const makeGlobe3DLazy = () =>
+  React.lazy(() =>
+    import('./Globe3D.jsx').catch((err) => {
+      Globe3D = makeGlobe3DLazy();
+      throw err;
+    }),
+  );
+let Globe3D = makeGlobe3DLazy();
 import { DXNewsTicker } from './DXNewsTicker.jsx';
 import { CallsignWeatherOverlay } from './CallsignWeatherOverlay.jsx';
 import { getCallsignWeather } from '../utils/callsignWeather.js';
 import { filterDXPaths } from '../utils';
 import { useCallsignPopup } from '../components/CallsignPopupManager.jsx';
+import { use630mBandEnabled } from '../hooks/use630mBandEnabled.js';
 
 // SECURITY: Escape HTML to prevent XSS in Leaflet popups/tooltips
 // DX cluster data, POTA/SOTA spots, and WSJT-X decodes come from external sources
 // and could contain malicious HTML/script tags in callsigns, comments, or park names.
 import { esc } from '../utils/escapeHtml.js';
 
-// Lightweight error boundary for the azimuthal map — falls back to Mercator
-// instead of crashing the entire dashboard.
+// Lightweight error boundary for the non-Leaflet projections (azimuthal canvas,
+// 3D globe) — falls back to Mercator instead of crashing the entire dashboard.
 class AzimuthalErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -49,7 +63,7 @@ class AzimuthalErrorBoundary extends React.Component {
     return { hasError: true };
   }
   componentDidCatch(error, info) {
-    console.error('[AzimuthalMap] Render crash, falling back to Mercator:', error, info);
+    console.error(`[${this.props.label || 'AzimuthalMap'}] Render crash, falling back to Mercator:`, error, info);
     if (this.props.onFallback) this.props.onFallback();
   }
   render() {
@@ -149,6 +163,7 @@ export const WorldMap = ({
   const { t, i18n } = useTranslation();
   const mapLang = i18n.language?.split('-')[0] || 'en'; // e.g. 'de', 'ja', 'en'
   const { showPopup } = useCallsignPopup();
+  const [band630mEnabled] = use630mBandEnabled();
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const tileLayerRef = useRef(null);
@@ -404,6 +419,11 @@ export const WorldMap = ({
     writeMapBandFilter([]);
   }, [writeMapBandFilter]);
 
+  useEffect(() => {
+    if (band630mEnabled || !selectedMapBands.has('630m')) return;
+    writeMapBandFilter(Array.from(selectedMapBands).filter((band) => band !== '630m'));
+  }, [band630mEnabled, selectedMapBands, writeMapBandFilter]);
+
   // Expose DE location to window for plugins (e.g., RBN)
   useEffect(() => {
     if (deLocation?.lat != null && deLocation?.lon != null) {
@@ -575,7 +595,11 @@ export const WorldMap = ({
 
   // Migration: saved isAzimuthal → split into projection + style
   // Also validate that saved mapStyle still exists in MAP_STYLES to prevent stale references
-  const migratedStyle = storedSettings.isAzimuthal ? 'dark' : storedSettings.mapStyle || 'dark';
+  // darkEsri/political were folded into dark/streets when CARTO tiles went
+  // key-only (#1162) — the aliases keep those saved configs on the same tiles.
+  const STYLE_ALIASES = { darkEsri: 'dark', political: 'streets' };
+  const savedStyle = STYLE_ALIASES[storedSettings.mapStyle] || storedSettings.mapStyle;
+  const migratedStyle = storedSettings.isAzimuthal ? 'dark' : savedStyle || 'dark';
   // Validate style exists and isn't the legacy 'azimuthal' canvas entry
   const initialStyle = MAP_STYLES[migratedStyle] && !MAP_STYLES[migratedStyle].legacy ? migratedStyle : 'dark';
   const initialProjection = storedSettings.isAzimuthal ? 'azimuthal' : storedSettings.mapProjection || 'mercator';
@@ -597,7 +621,33 @@ export const WorldMap = ({
   const [showMapRotationMenu, setShowMapRotationMenu] = useState(false);
   const [mapRotationMenuActivity, setMapRotationMenuActivity] = useState(0);
   const [mapProjection, setMapProjection] = useState(initialProjection);
+  // The Leaflet path applies mode/continent/watchlist filters at render time;
+  // the globe consumes paths as data, so hand it the already-filtered list or
+  // those filters silently stop working in 3D.
+  const globeDxPaths = useMemo(
+    () =>
+      // filterDXPaths covers mode/continent/watchlist; the Leaflet path also
+      // drops entries with no dxCall at render time, so match that here.
+      filterDXPaths(dxPaths, dxFilters).filter((p) => String(p?.dxCall || '').trim()),
+    [dxPaths, dxFilters],
+  );
+  // Enabled plugin layers the globe cannot draw (everything Leaflet-bound
+  // except satellites, which 3D renders natively). Used for a visible note so
+  // toggling e.g. Lightning in Settings does not look like a silent no-op.
+  const suppressed2DLayers = useMemo(() => {
+    if (mapProjection !== 'globe3d') return [];
+    return getAllLayers().filter(
+      (l) => l.id !== 'satellites' && (pluginLayerStates[l.id]?.enabled ?? l.defaultEnabled),
+    );
+  }, [mapProjection, pluginLayerStates]);
+  // Set when a crash or chunk-load failure forces the session back to
+  // Mercator: the switch must not overwrite the user's saved projection.
+  // Cleared the next time they pick a projection themselves.
+  const projectionPersistBlockedRef = useRef(false);
   const isAzimuthal = mapProjection === 'azimuthal';
+  const isGlobe3D = mapProjection === 'globe3d';
+  // Both non-Leaflet projections hide the Mercator map and its dock.
+  const isLeafletHidden = isAzimuthal || isGlobe3D;
 
   const availableBaseMapIds = useMemo(
     () => Object.keys(MAP_STYLES).filter((id) => MAP_STYLES[id] && !MAP_STYLES[id].legacy),
@@ -612,6 +662,11 @@ export const WorldMap = ({
 
   useEffect(() => {
     if (!mapRotationConfig.enabled) return;
+    // Every style change makes the globe refetch its full tile set (up to 256
+    // tiles at retina zoom), and overlapping bursts get us throttled by the
+    // tile providers — throttled tiles are permanent holes in the texture.
+    // Rotation resumes when the user returns to a Leaflet projection.
+    if (isGlobe3D) return;
 
     const selected = (mapRotationConfig.selectedIds || []).filter((id) => availableBaseMapIds.includes(id));
     if (selected.length < 2) return;
@@ -628,10 +683,10 @@ export const WorldMap = ({
 
         try {
           const stored = JSON.parse(localStorage.getItem('openhamclock_mapSettings') || '{}');
-          localStorage.setItem(
-            'openhamclock_mapSettings',
-            JSON.stringify({ ...stored, mapStyle: nextStyle, mapProjection }),
-          );
+          // Only mapStyle belongs to the rotator. Writing mapProjection here
+          // would bypass projectionPersistBlockedRef and discard a saved 3D
+          // preference after a fallback — the save effect owns that key.
+          localStorage.setItem('openhamclock_mapSettings', JSON.stringify({ ...stored, mapStyle: nextStyle }));
         } catch {}
 
         return nextStyle;
@@ -644,7 +699,7 @@ export const WorldMap = ({
     mapRotationConfig.intervalSeconds,
     mapRotationConfig.selectedIds,
     availableBaseMapIds,
-    mapProjection,
+    isGlobe3D,
   ]);
 
   const setMainMapRotation = useCallback((next) => {
@@ -694,6 +749,10 @@ export const WorldMap = ({
   // loaded by the time this component mounts, we poll and flip this flag to retry.
   const [leafletReady, setLeafletReady] = useState(() => typeof window.L !== 'undefined');
   const effectiveBandColors = useMemo(() => getEffectiveBandColors(bandColorOverrides), [bandColorOverrides]);
+  const visibleBandLegendOrder = useMemo(
+    () => (band630mEnabled ? BAND_LEGEND_ORDER : BAND_LEGEND_ORDER.filter((band) => band !== '630m')),
+    [band630mEnabled],
+  );
 
   const getScaledZoomLevel = (inverseMultiplier) => {
     // Ensure the input stays within 1–100
@@ -837,7 +896,9 @@ export const WorldMap = ({
         JSON.stringify({
           ...existing,
           mapStyle,
-          mapProjection,
+          mapProjection: projectionPersistBlockedRef.current
+            ? (existing.mapProjection ?? mapProjection)
+            : mapProjection,
           center: mapView.center,
           zoom: mapView.zoom,
           wheelPxPerZoomLevel: getScaledZoomLevel(mouseZoom),
@@ -2370,7 +2431,12 @@ export const WorldMap = ({
     <div style={{ position: 'relative', height: '100%', minHeight: '200px' }}>
       {/* Azimuthal equidistant projection (canvas-based) */}
       {isAzimuthal && (
-        <AzimuthalErrorBoundary onFallback={() => setMapProjection('mercator')}>
+        <AzimuthalErrorBoundary
+          onFallback={() => {
+            projectionPersistBlockedRef.current = true;
+            setMapProjection('mercator');
+          }}
+        >
           <AzimuthalMap
             leafletReady={leafletReady}
             deLocation={deLocation}
@@ -2408,6 +2474,74 @@ export const WorldMap = ({
         </AzimuthalErrorBoundary>
       )}
 
+      {/* 3D globe (three.js / WebGL) */}
+      {isGlobe3D && (
+        <AzimuthalErrorBoundary
+          label="Globe3D"
+          onFallback={() => {
+            projectionPersistBlockedRef.current = true;
+            setMapProjection('mercator');
+          }}
+        >
+          <React.Suspense
+            fallback={
+              <div
+                style={{
+                  height: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--text-secondary)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '11px',
+                  // Matches Globe3D's own backdrop so the handover is seamless.
+                  background:
+                    'radial-gradient(circle at 50% 45%, rgba(255,255,255,0.05) 0%, rgba(0,0,0,0.12) 75%), var(--bg-panel)',
+                  borderRadius: '8px',
+                }}
+              >
+                Loading 3D engine…
+              </div>
+            }
+          >
+            <Globe3D
+              deLocation={deLocation}
+              dxLocation={dxLocation}
+              onDXChange={onDXChange}
+              dxLocked={dxLocked}
+              potaSpots={potaSpots}
+              wwffSpots={wwffSpots}
+              sotaSpots={sotaSpots}
+              wwbotaSpots={wwbotaSpots}
+              dxPaths={globeDxPaths}
+              mapBandFilter={mapBandFilter}
+              pskReporterSpots={pskReporterSpots}
+              wsjtxSpots={wsjtxSpots}
+              showDXPaths={showDXPaths}
+              showPOTA={showPOTA}
+              showWWFF={showWWFF}
+              showSOTA={showSOTA}
+              showWWBOTA={showWWBOTA}
+              showPSKReporter={showPSKReporter}
+              showWSJTX={showWSJTX}
+              onSpotClick={onSpotClick}
+              callsign={callsign}
+              showDeDxMarkers={showDeDxMarkers}
+              satellites={satellites}
+              satellitesEnabled={pluginLayerStates.satellites?.enabled ?? true}
+              suppressedLayers={suppressed2DLayers.map((l) => t(l.name))}
+              allUnits={allUnits}
+              config={config}
+              hideUi={mapUiHidden}
+              tileStyle={mapStyle}
+              lowMemoryMode={lowMemoryMode}
+              nightDarkness={nightDarkness}
+              onNightDarknessChange={setNightDarkness}
+            />
+          </React.Suspense>
+        </AzimuthalErrorBoundary>
+      )}
+
       <div
         ref={mapRef}
         style={{
@@ -2415,7 +2549,7 @@ export const WorldMap = ({
           width: '100%',
           borderRadius: '8px',
           background: mapStyle === 'countries' ? '#4a90d9' : undefined,
-          display: isAzimuthal ? 'none' : undefined,
+          display: isLeafletHidden ? 'none' : undefined,
         }}
       />
 
@@ -2423,47 +2557,51 @@ export const WorldMap = ({
       {/* Key includes projection so hooks fully remount when map instance changes.
           This resets internal refs (layerGroupRef, controlRef) that are bound to a
           specific Leaflet map — without this, layers stay on the hidden old map. */}
-      {getAllLayers().map((layerDef) => {
-        // Merge location config into satellite layer to keep config access consistent
-        const layerConfig = pluginLayerStates[layerDef.id]?.config ?? layerDef.config;
-        const finalConfig =
-          layerDef.id === 'satellites' && deLocation
-            ? {
-                ...layerConfig,
-                location: {
-                  lat: deLocation.lat,
-                  lon: deLocation.lon,
-                  stationAlt: parseInt(deLocation.stationAlt) || 100,
-                },
-                satellite: {
-                  minElev: config?.satellite?.minElev ?? layerConfig?.satellite?.minElev ?? 5,
-                },
-              }
-            : layerConfig;
+      {/* Plugin layers attach to a Leaflet map instance, so they cannot render on
+          the 3D globe — skip them entirely rather than binding to a hidden map.
+          The note below keeps that visible instead of silent. */}
+      {!isGlobe3D &&
+        getAllLayers().map((layerDef) => {
+          // Merge location config into satellite layer to keep config access consistent
+          const layerConfig = pluginLayerStates[layerDef.id]?.config ?? layerDef.config;
+          const finalConfig =
+            layerDef.id === 'satellites' && deLocation
+              ? {
+                  ...layerConfig,
+                  location: {
+                    lat: deLocation.lat,
+                    lon: deLocation.lon,
+                    stationAlt: parseInt(deLocation.stationAlt) || 100,
+                  },
+                  satellite: {
+                    minElev: config?.satellite?.minElev ?? layerConfig?.satellite?.minElev ?? 5,
+                  },
+                }
+              : layerConfig;
 
-        return (
-          <PluginLayer
-            key={`${layerDef.id}-${isAzimuthal ? 'az' : 'merc'}`}
-            plugin={layerDef}
-            enabled={pluginLayerStates[layerDef.id]?.enabled ?? layerDef.defaultEnabled}
-            opacity={pluginLayerStates[layerDef.id]?.opacity ?? layerDef.defaultOpacity}
-            onDXChange={onDXChange}
-            mapBandFilter={mapBandFilter}
-            config={finalConfig}
-            map={isAzimuthal ? azimuthalMapRef.current : mapInstanceRef.current}
-            satellites={satellites}
-            allUnits={allUnits}
-            callsign={callsign}
-            locator={deLocator}
-            deLat={deLocation?.lat ?? null}
-            deLon={deLocation?.lon ?? null}
-            lowMemoryMode={lowMemoryMode}
-          />
-        );
-      })}
+          return (
+            <PluginLayer
+              key={`${layerDef.id}-${isAzimuthal ? 'az' : 'merc'}`}
+              plugin={layerDef}
+              enabled={pluginLayerStates[layerDef.id]?.enabled ?? layerDef.defaultEnabled}
+              opacity={pluginLayerStates[layerDef.id]?.opacity ?? layerDef.defaultOpacity}
+              onDXChange={onDXChange}
+              mapBandFilter={mapBandFilter}
+              config={finalConfig}
+              map={isAzimuthal ? azimuthalMapRef.current : mapInstanceRef.current}
+              satellites={satellites}
+              allUnits={allUnits}
+              callsign={callsign}
+              locator={deLocator}
+              deLat={deLocation?.lat ?? null}
+              deLon={deLocation?.lon ?? null}
+              lowMemoryMode={lowMemoryMode}
+            />
+          );
+        })}
 
       {/* Unified map control dock */}
-      {!isAzimuthal && (
+      {!isLeafletHidden && (
         <div
           style={{
             position: 'absolute',
@@ -2625,7 +2763,7 @@ export const WorldMap = ({
         </div>
       )}
 
-      {mapStyle === 'MODIS' && !mapUiHidden && (
+      {mapStyle === 'MODIS' && !mapUiHidden && !isGlobe3D && (
         <div
           style={{
             position: 'absolute',
@@ -2689,10 +2827,29 @@ export const WorldMap = ({
             {[
               { key: 'mercator', label: 'Flat' },
               { key: 'azimuthal', label: 'Azimuthal' },
+              { key: 'globe3d', label: '3D' },
             ].map(({ key, label }) => (
               <button
                 key={key}
-                onClick={() => setMapProjection(key)}
+                onClick={() => {
+                  const wasBlocked = projectionPersistBlockedRef.current;
+                  projectionPersistBlockedRef.current = false;
+                  setMapProjection(key);
+                  // Re-selecting the projection the session already fell back
+                  // to is a no-op state change, so the save effect never runs
+                  // and the cleared block would not persist. Write it here.
+                  if (wasBlocked && key === mapProjection) {
+                    try {
+                      const existing = getStoredMapSettings();
+                      localStorage.setItem(
+                        'openhamclock_mapSettings',
+                        JSON.stringify({ ...existing, mapProjection: key }),
+                      );
+                    } catch (e) {
+                      console.error('Failed to save map settings:', e);
+                    }
+                  }
+                }}
                 style={{
                   background: mapProjection === key ? '#00ffcc' : 'transparent',
                   color: mapProjection === key ? '#000' : '#888',
@@ -2711,6 +2868,10 @@ export const WorldMap = ({
 
           {/* Style dropdown */}
           <select
+            // The globe cannot build MODIS (its GIBS URL is generated
+            // dynamically by the 2D projections). The option stays present but
+            // disabled in 3D: aliasing the controlled value to 'dark' instead
+            // made picking Dark a no-op, since the DOM value never changed.
             value={mapStyle}
             id="mapStyle"
             onChange={(e) => {
@@ -2734,8 +2895,9 @@ export const WorldMap = ({
             {Object.entries(MAP_STYLES)
               .filter(([, style]) => !style.legacy)
               .map(([key, style]) => (
-                <option key={key} value={key}>
+                <option key={key} value={key} disabled={isGlobe3D && key === 'MODIS'}>
                   {style.name}
+                  {isGlobe3D && key === 'MODIS' ? ' (2D only)' : ''}
                 </option>
               ))}
           </select>
@@ -3025,7 +3187,7 @@ export const WorldMap = ({
             >
               ALL
             </button>
-            {BAND_LEGEND_ORDER.map((band) => {
+            {visibleBandLegendOrder.map((band) => {
               const bg = getBandColorForBand(band, effectiveBandColors);
               const fg = getBandTextColor(bg);
               const isEditing = editingBand === band;

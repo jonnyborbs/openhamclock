@@ -560,7 +560,10 @@ export default function ModernLayout(props) {
 
           {/* Solar */}
           {config.panels?.solar?.visible !== false &&
-            mobileCard(<SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} />, 'solar')}
+            mobileCard(
+              <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} config={config} />,
+              'solar',
+            )}
 
           {/* Propagation */}
           {config.panels?.propagation?.visible !== false &&
@@ -626,7 +629,7 @@ export default function ModernLayout(props) {
               {deLocationPanel}
               {config.panels?.dxLocation?.visible !== false && dxLocationPanel}
               {config.panels?.solar?.visible !== false && (
-                <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} />
+                <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} config={config} />
               )}
               {config.panels?.propagation?.visible !== false && (
                 <PropagationPanel
@@ -706,7 +709,7 @@ export default function ModernLayout(props) {
             </div>
           )}
           {config.panels?.solar?.visible !== false && (
-            <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} />
+            <SolarPanel solarIndices={solarIndices} bandConditions={bandConditions} config={config} />
           )}
           {config.panels?.propagation?.visible !== false && (
             <PropagationPanel

@@ -25,6 +25,7 @@ import { emojiToIso2 } from '../utils/countryFlags';
 import { getAlertSettings, saveAlertSettings, playTone, TONE_PRESETS, ALERT_FEEDS } from '../utils/audioAlerts';
 import { setRelaySessionId, setRelayConfigured, clearRelaySession } from '../utils/relaySession';
 import { getCallbookCredentials, setCallbookCredentials } from '../utils/callbookAuth.js';
+import { getCartoApiKey, CARTO_KEY_STORAGE } from '../utils/config.js';
 import { CALLBOOKS, getCallbook } from '../utils/callbook.js';
 
 export const SettingsPanel = ({
@@ -231,6 +232,11 @@ export const SettingsPanel = ({
   const [qrzUsername, setQrzUsername] = useState(() => getCallbookCredentials().qrzUsername || '');
   const [qrzPassword, setQrzPassword] = useState('');
   // Per-browser callbook credentials (hosted instances) — see utils/callbookAuth.js
+  // CARTO basemap key — stored under a non-synced localStorage key (dash prefix,
+  // like ohc-callbook-auth) so it stays personal to this browser on shared
+  // instances. See MAP_STYLES in utils/config.js.
+  const [cartoKey, setCartoKey] = useState(() => getCartoApiKey());
+  const [cartoKeyDirty, setCartoKeyDirty] = useState(false);
   const [personalQrz, setPersonalQrz] = useState(() => !!getCallbookCredentials().qrzUsername);
   const [personalHamqth, setPersonalHamqth] = useState(() => !!getCallbookCredentials().hamqthUsername);
   const [qrzStatus, setQrzStatus] = useState(null); // { configured, hasSession, source, ... }
@@ -2625,6 +2631,79 @@ export const SettingsPanel = ({
                   }}
                 >
                   {isLocalInstall ? 'Local mode' : 'Hosted mode'}
+                </div>
+              </div>
+
+              {/* CARTO basemap key — personal to this browser, never synced */}
+              <div
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '10px',
+                  padding: '14px 16px',
+                  marginBottom: 16,
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                  🗺️ {t('station.settings.carto.title', 'CARTO Basemap Key')}
+                </div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 10 }}>
+                  {t(
+                    'station.settings.carto.describe',
+                    'The Dark and Streets styles use Esri tiles by default. Paste a free CARTO key (carto.com/basemaps/apikey, 5M tiles/month) to switch them back to the original CARTO look with localized labels. The key is saved only in this browser — it is never synced to the server or shared with other users of this instance.',
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <input
+                    type="text"
+                    value={cartoKey}
+                    onChange={(e) => {
+                      setCartoKey(e.target.value);
+                      setCartoKeyDirty(true);
+                    }}
+                    placeholder={t('station.settings.carto.placeholder', 'CARTO API key (optional)')}
+                    aria-label={t('station.settings.carto.title', 'CARTO Basemap Key')}
+                    autoComplete="off"
+                    spellCheck={false}
+                    style={{
+                      flex: '1 1 240px',
+                      padding: '6px 10px',
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: 6,
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: 12,
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={!cartoKeyDirty}
+                    onClick={() => {
+                      try {
+                        const trimmed = cartoKey.trim();
+                        if (trimmed) window.localStorage.setItem(CARTO_KEY_STORAGE, trimmed);
+                        else window.localStorage.removeItem(CARTO_KEY_STORAGE);
+                        // MAP_STYLES is resolved at module load, so a reload is
+                        // what actually applies the change.
+                        window.location.reload();
+                      } catch {
+                        /* localStorage unavailable — nothing to save */
+                      }
+                    }}
+                    style={{
+                      padding: '6px 14px',
+                      background: cartoKeyDirty ? 'var(--accent-amber)' : 'var(--bg-secondary)',
+                      color: cartoKeyDirty ? '#000' : 'var(--text-muted)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: 6,
+                      cursor: cartoKeyDirty ? 'pointer' : 'default',
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {t('station.settings.carto.apply', 'Save & Reload')}
+                  </button>
                 </div>
               </div>
 

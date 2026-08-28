@@ -130,8 +130,12 @@ const CONFIG = {
     // (e.g. http://fletcher.railway.internal:3000) the CelesTrak / AMSAT /
     // SatNOGS fetches in routes/satellites.js are rewritten to traverse the
     // proxy service so they use its egress IP instead of OpenHamClock's.
-    // Empty string = direct upstream (default).
-    fletcherUrl: (process.env.FLETCHER_URL || '').trim().replace(/\/+$/, ''),
+    // Empty string = direct upstream (default). TLE_FETCHER_URL is the
+    // service's pre-rename env name — health.js already honors it, and a
+    // deploy whose Railway env still uses it must keep routing through the
+    // relay rather than silently going direct (CelesTrak drops requests
+    // from the production egress IP).
+    fletcherUrl: (process.env.FLETCHER_URL || process.env.TLE_FETCHER_URL || '').trim().replace(/\/+$/, ''),
     celestrak: {
       get enabled() {
         return !(process.env.CELESTRAK_ENABLED && process.env.CELESTRAK_ENABLED === 'false');

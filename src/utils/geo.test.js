@@ -381,3 +381,74 @@ describe('miscellaneous functionality tests', () => {
     });
   }
 });
+
+// ─── Moon az/el + rise/set (EME) ──────────────────────────────────────────────
+// Cross-validated against suncalc v2 (max err: az 0.30°, el 0.64° — the el
+// delta is suncalc's refraction correction, which geometric EME elevation
+// intentionally omits; distance within ~500 km).
+import { getMoonAzEl, getMoonTimes } from './geo.js';
+
+describe('getMoonAzEl', () => {
+  const T = new Date('2026-07-28T23:00:00Z');
+
+  it('is near zenith at the sublunar point and deeply negative at its antipode', () => {
+    const sub = getMoonPosition(T);
+    const zenith = getMoonAzEl(T, sub.lat, sub.lon);
+    expect(zenith.elevation).toBeGreaterThan(89);
+    const antipode = getMoonAzEl(T, -sub.lat, ((sub.lon + 360) % 360) - 180);
+    expect(antipode.elevation).toBeLessThan(-85);
+  });
+
+  it('shows ~0.95° of parallax 90° away from the sublunar point', () => {
+    const sub = getMoonPosition(T);
+    // 90° along the same meridian: geometric horizon would be 0° for an
+    // infinitely distant object; the moon dips by atan(Re/r) ≈ 0.9°.
+    const quarter = getMoonAzEl(T, sub.lat - 90 < -90 ? sub.lat + 90 : sub.lat - 90, sub.lon);
+    expect(quarter.elevation).toBeLessThan(-0.6);
+    expect(quarter.elevation).toBeGreaterThan(-1.3);
+  });
+
+  it('returns azimuth in [0, 360) and a physical Earth–Moon distance', () => {
+    for (const [lat, lon] of [
+      [40, -105],
+      [-33.9, 151.2],
+      [64, -22],
+    ]) {
+      const p = getMoonAzEl(T, lat, lon);
+      expect(p.azimuth).toBeGreaterThanOrEqual(0);
+      expect(p.azimuth).toBeLessThan(360);
+      expect(p.distanceKm).toBeGreaterThan(356000);
+      expect(p.distanceKm).toBeLessThan(407000);
+    }
+  });
+
+  it('matches suncalc-validated reference values (pinned)', () => {
+    // Reference: suncalc v2 for Boulder, 2026-07-28T23:00Z → az 93.6°, el −33.6°
+    // (theirs refraction-corrected; ours geometric — agree within tolerance)
+    const p = getMoonAzEl(T, 40.015, -105.27);
+    expect(p.azimuth).toBeCloseTo(93.5, 0);
+    expect(p.elevation).toBeCloseTo(-34.3, 0);
+  });
+});
+
+describe('getMoonTimes', () => {
+  it('finds the next rise and set within 25h at mid-latitude', () => {
+    const start = new Date('2026-07-28T07:00:00Z');
+    const { rise, set } = getMoonTimes(start, 40.015, -105.27);
+    expect(rise).toBeInstanceOf(Date);
+    expect(set).toBeInstanceOf(Date);
+    expect(rise.getTime()).toBeGreaterThan(start.getTime());
+    expect(set.getTime()).toBeGreaterThan(start.getTime());
+    // suncalc reference: set 2026-07-28T10:44Z, next rise 2026-07-29T02:08Z
+    // (refracted limb); geometric center crossings land within ~10 min.
+    expect(Math.abs(set.getTime() - Date.parse('2026-07-28T10:44:20Z'))).toBeLessThan(12 * 60 * 1000);
+    expect(Math.abs(rise.getTime() - Date.parse('2026-07-29T02:08:32Z'))).toBeLessThan(12 * 60 * 1000);
+  });
+
+  it('elevation is positive between rise and set-after-rise', () => {
+    const start = new Date('2026-07-28T07:00:00Z');
+    const { rise } = getMoonTimes(start, 40.015, -105.27);
+    const midPass = getMoonAzEl(new Date(rise.getTime() + 3 * 3600 * 1000), 40.015, -105.27);
+    expect(midPass.elevation).toBeGreaterThan(0);
+  });
+});

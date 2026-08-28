@@ -2,8 +2,9 @@
  * SolarPanel Component
  * Cycles between: Solar Image → Solar Indices → X-Ray Flux Chart → Lunar Phase
  */
-import { useState, useEffect, useCallback } from 'react';
-import { getMoonPhase } from '../utils/geo.js';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { getMoonPhase, getMoonAzEl, getMoonTimes, latLonToMaidenhead } from '../utils/geo.js';
+import { loadConfig } from '../utils/config.js';
 import useAutoRotate from '../hooks/app/useAutoRotate.js';
 
 const MODES = ['image', 'indices', 'xray', 'lunar'];
@@ -46,7 +47,7 @@ const formatFlux = (flux) => {
   return `${cls.letter}${base.toFixed(1)}`;
 };
 
-export const SolarPanel = ({ solarIndices, bandConditions, forcedMode }) => {
+export const SolarPanel = ({ solarIndices, bandConditions, forcedMode, config }) => {
   const [internalMode, setMode] = useState(() => {
     try {
       const saved = localStorage.getItem('openhamclock_solarPanelMode');
@@ -368,6 +369,44 @@ export const SolarPanel = ({ solarIndices, bandConditions, forcedMode }) => {
   const [moonImageError, setMoonImageError] = useState(false);
   const [moonData, setMoonData] = useState(null);
 
+  // EME (moonbounce) pointing data from the DE location — az/el updates on a
+  // one-minute tick (the moon moves ~0.25°/min through the sky at most).
+  const [moonTick, setMoonTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setMoonTick((t) => t + 1), 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const emeData = useMemo(() => {
+    // Prefer the live app config (server config already merged); loadConfig()
+    // is the fallback for render paths that don't pass it down.
+    const cfg = config || loadConfig();
+    const lat = cfg?.location?.lat;
+    const lon = cfg?.location?.lon;
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const now = new Date();
+    const pos = getMoonAzEl(now, lat, lon);
+    const times = getMoonTimes(now, lat, lon);
+    // EME path loss goes with distance^4 (two-way): Δ vs the mean distance
+    // spans about ±2.2 dB across the perigee–apogee cycle.
+    const pathDeltaDb = 40 * Math.log10(pos.distanceKm / 384400);
+    // Sky track for the polar chart: above-horizon samples over the next 24h
+    // (one lunar pass) at 20-min steps, drawn horizon-to-horizon.
+    const track = [];
+    for (let m = 0; m <= 24 * 60; m += 20) {
+      const p = getMoonAzEl(new Date(now.getTime() + m * 60 * 1000), lat, lon);
+      if (p.elevation >= 0) track.push({ az: p.azimuth, el: p.elevation });
+    }
+    return {
+      ...pos,
+      ...times,
+      pathDeltaDb,
+      track,
+      grid: (cfg.locator || latLonToMaidenhead({ lat, lon }, 6) || '').toUpperCase(),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moonTick, config]);
+
   useEffect(() => {
     const fetchMoonImage = () => {
       setMoonImageUrl(`/api/moon-image?t=${Math.floor(Date.now() / 3600000)}`);
@@ -595,6 +634,177 @@ export const SolarPanel = ({ solarIndices, bandConditions, forcedMode }) => {
         <div style={{ textAlign: 'center', marginBottom: '6px' }}>
           <span style={{ fontSize: '8px', color: 'var(--text-muted)', opacity: 0.6 }}>NASA/SVS Dial-A-Moon</span>
         </div>
+
+        {/* EME pointing — polar sky chart (center = zenith, edge = horizon)
+            with the moon's position and its track over the coming pass */}
+        {emeData && (
+          <>
+            <div
+              style={{
+                display: 'flex',
+                gap: '10px',
+                justifyContent: 'center',
+                alignItems: 'center',
+                marginBottom: '6px',
+              }}
+            >
+              {(() => {
+                const DIAL = 96;
+                const C = DIAL / 2;
+                const R = 40;
+                const toXY = (az, el) => {
+                  const r = (R * (90 - Math.max(0, Math.min(90, el)))) / 90;
+                  const a = (az * Math.PI) / 180;
+                  return [C + r * Math.sin(a), C - r * Math.cos(a)];
+                };
+                const trackPts = (emeData.track || []).map(({ az, el }) => toXY(az, el).join(',')).join(' ');
+                const up = emeData.elevation >= 0;
+                const [mx, my] = up ? toXY(emeData.azimuth, emeData.elevation) : toXY(emeData.azimuth, 0);
+                return (
+                  <svg
+                    width={DIAL}
+                    height={DIAL}
+                    viewBox={`0 0 ${DIAL} ${DIAL}`}
+                    role="img"
+                    aria-label="Moon sky position"
+                  >
+                    {/* Horizon + elevation rings (0/30/60°), zenith at center */}
+                    <circle
+                      cx={C}
+                      cy={C}
+                      r={R}
+                      fill="var(--bg-tertiary)"
+                      stroke="var(--border-color)"
+                      strokeWidth="1"
+                    />
+                    <circle
+                      cx={C}
+                      cy={C}
+                      r={(R * 2) / 3}
+                      fill="none"
+                      stroke="var(--border-color)"
+                      strokeWidth="0.5"
+                      opacity="0.7"
+                    />
+                    <circle
+                      cx={C}
+                      cy={C}
+                      r={R / 3}
+                      fill="none"
+                      stroke="var(--border-color)"
+                      strokeWidth="0.5"
+                      opacity="0.7"
+                    />
+                    <line
+                      x1={C}
+                      y1={C - R}
+                      x2={C}
+                      y2={C + R}
+                      stroke="var(--border-color)"
+                      strokeWidth="0.5"
+                      opacity="0.5"
+                    />
+                    <line
+                      x1={C - R}
+                      y1={C}
+                      x2={C + R}
+                      y2={C}
+                      stroke="var(--border-color)"
+                      strokeWidth="0.5"
+                      opacity="0.5"
+                    />
+                    <text x={C} y={7} textAnchor="middle" fontSize="7" fill="var(--text-muted)">
+                      N
+                    </text>
+                    <text x={DIAL - 3} y={C + 2.5} textAnchor="end" fontSize="7" fill="var(--text-muted)">
+                      E
+                    </text>
+                    <text x={C} y={DIAL - 1} textAnchor="middle" fontSize="7" fill="var(--text-muted)">
+                      S
+                    </text>
+                    <text x={3} y={C + 2.5} textAnchor="start" fontSize="7" fill="var(--text-muted)">
+                      W
+                    </text>
+                    {/* Sky track for the coming pass */}
+                    {trackPts && (
+                      <polyline
+                        points={trackPts}
+                        fill="none"
+                        stroke="var(--accent-amber)"
+                        strokeWidth="1.2"
+                        strokeDasharray="2,2"
+                        opacity="0.8"
+                      />
+                    )}
+                    {/* The moon: filled when up, hollow on the horizon ring at its
+                        azimuth when below (shows where it is coming up) */}
+                    {up ? (
+                      <circle
+                        cx={mx}
+                        cy={my}
+                        r="4.5"
+                        fill="var(--accent-green)"
+                        stroke="var(--bg-primary)"
+                        strokeWidth="1"
+                      />
+                    ) : (
+                      <circle cx={mx} cy={my} r="3.5" fill="none" stroke="var(--text-muted)" strokeWidth="1.5" />
+                    )}
+                  </svg>
+                );
+              })()}
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                  fontSize: '10px',
+                  fontFamily: 'var(--font-mono)',
+                }}
+              >
+                <div style={{ background: 'var(--bg-tertiary)', borderRadius: '4px', padding: '3px 8px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>AZ </span>
+                  <span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>
+                    {Math.round(emeData.azimuth)}°
+                  </span>
+                </div>
+                <div style={{ background: 'var(--bg-tertiary)', borderRadius: '4px', padding: '3px 8px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>EL </span>
+                  <span
+                    style={{
+                      color: emeData.elevation >= 0 ? 'var(--accent-green)' : 'var(--text-muted)',
+                      fontWeight: '600',
+                    }}
+                  >
+                    {emeData.elevation >= 0 ? '▲' : '▼'} {Math.abs(emeData.elevation).toFixed(1)}°
+                  </span>
+                </div>
+                <div style={{ background: 'var(--bg-tertiary)', borderRadius: '4px', padding: '3px 8px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>{emeData.elevation >= 0 ? 'Set ' : 'Rise '}</span>
+                  <span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}>
+                    {(() => {
+                      const next = emeData.elevation >= 0 ? emeData.set : emeData.rise;
+                      return next ? next.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '—';
+                    })()}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div
+              style={{
+                textAlign: 'center',
+                fontSize: '9px',
+                fontFamily: 'var(--font-mono)',
+                color: 'var(--text-muted)',
+                marginBottom: '6px',
+              }}
+            >
+              EME @ {emeData.grid || 'DE'} · {Math.round(emeData.distanceKm).toLocaleString()} km ·{' '}
+              {emeData.pathDeltaDb >= 0 ? '+' : ''}
+              {emeData.pathDeltaDb.toFixed(1)} dB
+            </div>
+          </>
+        )}
 
         {/* Next phases */}
         <div

@@ -234,6 +234,15 @@ export const getMoonPosition = (date) => {
   // Moon's ecliptic latitude (simplified)
   const moonLat = 5.128 * Math.sin(FRad) + 0.281 * Math.sin(MRad + FRad) + 0.278 * Math.sin(MRad - FRad);
 
+  // Earth–Moon distance in km (truncated Meeus series — ±~100 km, plenty for
+  // parallax and EME path-loss display; full range is ~356,500–406,700 km)
+  const distanceKm =
+    385000.56 -
+    20905.355 * Math.cos(MRad) -
+    3699.111 * Math.cos(2 * DRad - MRad) -
+    2955.968 * Math.cos(2 * DRad) -
+    569.925 * Math.cos(2 * MRad);
+
   // Convert ecliptic to equatorial coordinates
   const obliquity = 23.439 - 0.0000004 * (JD - 2451545.0);
   const oblRad = (obliquity * Math.PI) / 180;
@@ -263,7 +272,75 @@ export const getMoonPosition = (date) => {
   // Sublunar point longitude
   const sublunarLon = ((((RA - GMST) % 360) + 540) % 360) - 180;
 
-  return { lat: dec, lon: sublunarLon };
+  return { lat: dec, lon: sublunarLon, distanceKm };
+};
+
+/**
+ * Topocentric moon azimuth/elevation for an observer — the EME ("moonbounce")
+ * numbers: where to point the array, and how far the reflector is.
+ *
+ * Works from the sublunar point rather than hour angles: the moon sits
+ * directly over that point at distanceKm from Earth's center, so for an
+ * observer at angular distance d from it (spherical Earth),
+ *   elevation = atan2(cos d − Re/r, sin d)
+ *   azimuth   = great-circle initial bearing toward the sublunar point.
+ * The Re/r term IS the topocentric parallax (up to ~0.95° of elevation) —
+ * exact for a spherical Earth, no separate correction needed.
+ *
+ * @param {Date} date
+ * @param {number} lat - observer latitude (degrees)
+ * @param {number} lon - observer longitude (degrees)
+ * @returns {{azimuth: number, elevation: number, distanceKm: number}}
+ *          azimuth 0–360° from true north, elevation −90..+90°
+ */
+export const getMoonAzEl = (date, lat, lon) => {
+  const EARTH_RADIUS_KM = 6371;
+  const sub = getMoonPosition(date);
+  const dRad = calculateDistance(lat, lon, sub.lat, sub.lon) / EARTH_RADIUS_KM;
+  const elevation = (Math.atan2(Math.cos(dRad) - EARTH_RADIUS_KM / sub.distanceKm, Math.sin(dRad)) * 180) / Math.PI;
+  const azimuth = calculateBearing(lat, lon, sub.lat, sub.lon);
+  return { azimuth, elevation, distanceKm: sub.distanceKm };
+};
+
+/**
+ * Next moonrise and moonset after `date` for an observer, within ~25 hours.
+ * Scans topocentric elevation in 10-minute steps and bisects each horizon
+ * crossing down to the minute. Uses the geometric horizon (0°) — right for
+ * EME, where the array can work the moon the moment the disk clears 0°.
+ * Either field is null when no crossing occurs in the window (polar
+ * extremes of the lunar declination cycle).
+ *
+ * @returns {{rise: Date|null, set: Date|null}}
+ */
+export const getMoonTimes = (date, lat, lon) => {
+  const STEP_MS = 10 * 60 * 1000;
+  const WINDOW_MS = 25 * 60 * 60 * 1000;
+  const elevationAt = (t) => getMoonAzEl(new Date(t), lat, lon).elevation;
+
+  const refine = (lo, hi) => {
+    // Bisect a bracketed horizon crossing down to the minute
+    while (hi - lo > 60 * 1000) {
+      const mid = (lo + hi) / 2;
+      if (elevationAt(lo) < 0 === elevationAt(mid) < 0) lo = mid;
+      else hi = mid;
+    }
+    return new Date((lo + hi) / 2);
+  };
+
+  let rise = null;
+  let set = null;
+  let prevT = date.getTime();
+  let prevUp = elevationAt(prevT) >= 0;
+  for (let t = prevT + STEP_MS; t <= date.getTime() + WINDOW_MS && (!rise || !set); t += STEP_MS) {
+    const up = elevationAt(t) >= 0;
+    if (up !== prevUp) {
+      if (up && !rise) rise = refine(prevT, t);
+      if (!up && !set) set = refine(prevT, t);
+    }
+    prevT = t;
+    prevUp = up;
+  }
+  return { rise, set };
 };
 
 /**
@@ -591,6 +668,8 @@ export default {
   calculateDistance,
   getSunPosition,
   getMoonPosition,
+  getMoonAzEl,
+  getMoonTimes,
   getMoonPhase,
   getMoonPhaseEmoji,
   calculateSunTimes,
