@@ -104,6 +104,23 @@ export default function useFilters() {
     } catch (e) {}
   }, [wwbotaFilters]);
 
+  // CANParks Filters
+  const [canparksFilters, setCanparksFilters] = useState(() => {
+    try {
+      const stored = localStorage.getItem('openhamclock_canparksFilters');
+      return stored ? JSON.parse(stored) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('openhamclock_canparksFilters', JSON.stringify(canparksFilters));
+      syncAllSettingsToServer();
+    } catch (e) {}
+  }, [canparksFilters]);
+
   const [mapBandFilter, setMapBandFilter] = useState(() => {
     try {
       const stored = localStorage.getItem('openhamclock_mapBandFilter');
@@ -129,11 +146,13 @@ export default function useFilters() {
     sotaFilters,
     wwffFilters,
     wwbotaFilters,
+    canparksFilters,
     setPskFilters,
     setPotaFilters,
     setSotaFilters,
     setWwffFilters,
     setWwbotaFilters,
+    setCanparksFilters,
     mapBandFilter,
     setMapBandFilter,
   };

@@ -31,8 +31,10 @@ export function extractBaseCall(raw) {
 }
 
 // ── The callsign link itself ──
-// onPopup(call, anchorEl, location?) — callback for popup mode
+// onPopup(call, anchorEl, location?, spot?) — callback for popup mode
 // location — { grid: string } or { lat: number, lon: number } (optional)
+// spot — { freq: number (kHz), mode: string|null } (optional) — spot context
+//        from surfaces that have it in hand; enables the popup's 🎧 listen link
 export default function CallsignLink({
   call,
   color = 'inherit',
@@ -42,6 +44,7 @@ export default function CallsignLink({
   children,
   onPopup,
   location,
+  spot,
 }) {
   const spanRef = useRef(null);
 
@@ -50,10 +53,10 @@ export default function CallsignLink({
       if (e.type === 'click' || e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         e.stopPropagation();
-        onPopup(call, spanRef.current, location);
+        onPopup(call, spanRef.current, location, spot);
       }
     },
-    [call, location, onPopup],
+    [call, location, spot, onPopup],
   );
 
   if (!call) return children || null;
@@ -61,7 +64,7 @@ export default function CallsignLink({
   if (onPopup) {
     const handleClick = (e) => {
       e.stopPropagation();
-      onPopup(call, spanRef.current, location);
+      onPopup(call, spanRef.current, location, spot);
     };
 
     return (

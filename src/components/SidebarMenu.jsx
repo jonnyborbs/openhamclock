@@ -9,11 +9,19 @@
  */
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconGear, IconExpand, IconShrink } from './Icons.jsx';
+import { IconGear, IconExpand, IconShrink, SETTINGS_TAB_ICONS, LiLock, LiUnlock, LiRotate } from './Icons.jsx';
 import DonateButton from './DonateButton.jsx';
+import LayoutPresetControl from './LayoutPresetControl.jsx';
 
 const COLLAPSED_WIDTH = 40;
 const EXPANDED_WIDTH = 180;
+// Press Start 2P (8-bit theme) runs ~2× wider than the UI font — the same
+// labels need a wider expanded menu or they clip.
+const EXPANDED_WIDTH_EIGHTBIT = 240;
+const expandedWidth = () =>
+  typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'eightbit'
+    ? EXPANDED_WIDTH_EIGHTBIT
+    : EXPANDED_WIDTH;
 const HOVER_DELAY = 150;
 const EDGE_TRIGGER_WIDTH = 6; // Invisible hover strip when fully hidden
 
@@ -62,6 +70,7 @@ export default function SidebarMenu({
       { id: 'community', icon: '🌐', label: t('station.settings.tab.title.community') },
       { id: 'alerts', icon: '🔔', label: t('station.settings.tab.title.alerts') },
       { id: 'rig-bridge', icon: '📻', label: t('station.settings.tab.title.rig-bridge') },
+      { id: 'help', icon: '❓', label: t('station.settings.tab.title.help') },
     ],
     [t],
   );
@@ -79,8 +88,16 @@ export default function SidebarMenu({
   const isExpanded = mode === MODE_PINNED || hoverExpanded;
   const isVisible = mode !== MODE_HIDDEN || hoverExpanded;
 
+  // Re-render on theme switches so the 8-bit width applies immediately
+  const [, setThemeTick] = useState(0);
+  useEffect(() => {
+    const onTheme = () => setThemeTick((n) => n + 1);
+    window.addEventListener('openhamclock-theme-change', onTheme);
+    return () => window.removeEventListener('openhamclock-theme-change', onTheme);
+  }, []);
+
   // Compute rendered width
-  const currentWidth = !isVisible ? 0 : isExpanded ? EXPANDED_WIDTH : COLLAPSED_WIDTH;
+  const currentWidth = !isVisible ? 0 : isExpanded ? expandedWidth() : COLLAPSED_WIDTH;
 
   const handleMouseEnter = useCallback(() => {
     clearTimeout(hideTimeout.current);
@@ -154,7 +171,8 @@ export default function SidebarMenu({
       )}
 
       {/* Sidebar panel */}
-      <div
+      <nav
+        aria-label="Main menu"
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         style={{
@@ -162,7 +180,7 @@ export default function SidebarMenu({
           left: 0,
           top: 0,
           bottom: 0,
-          width: isVisible ? (isExpanded ? EXPANDED_WIDTH : COLLAPSED_WIDTH) : 0,
+          width: currentWidth,
           background: 'var(--bg-panel)',
           borderRight: isVisible ? '1px solid var(--border-color)' : 'none',
           display: 'flex',
@@ -252,8 +270,20 @@ export default function SidebarMenu({
               onMouseOver={(e) => (e.currentTarget.style.background = 'var(--bg-tertiary)')}
               onMouseOut={(e) => (e.currentTarget.style.background = 'none')}
             >
-              <span aria-hidden="true" style={{ fontSize: '18px', flexShrink: 0, width: '24px', textAlign: 'center' }}>
-                {item.icon}
+              <span
+                aria-hidden="true"
+                style={{
+                  flexShrink: 0,
+                  width: '24px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                {(() => {
+                  const TabIcon = SETTINGS_TAB_ICONS[item.id];
+                  return TabIcon ? <TabIcon size={20} /> : item.icon;
+                })()}
               </span>
               {isExpanded && <span aria-hidden="true">{item.label}</span>}
             </button>
@@ -271,6 +301,9 @@ export default function SidebarMenu({
               gap: '4px',
             }}
           >
+            {/* Named layout presets — duplicate / switch / rename / delete */}
+            <LayoutPresetControl isExpanded={isExpanded} isVisible={isVisible} />
+
             {/* Layout Lock */}
             <button
               type="button"
@@ -286,8 +319,8 @@ export default function SidebarMenu({
                 color: layoutLocked ? 'var(--accent-amber)' : 'var(--text-secondary)',
               }}
             >
-              <span aria-hidden="true" style={{ fontSize: '14px', flexShrink: 0 }}>
-                {layoutLocked ? '🔒' : '🔓'}
+              <span aria-hidden="true" style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
+                {layoutLocked ? <LiLock size={20} /> : <LiUnlock size={20} />}
               </span>
               {isExpanded && <span aria-hidden="true">{layoutLocked ? 'Locked' : 'Unlocked'}</span>}
             </button>
@@ -349,8 +382,8 @@ export default function SidebarMenu({
                 cursor: updateInProgress ? 'wait' : 'pointer',
               }}
             >
-              <span aria-hidden="true" style={{ fontSize: '16px', flexShrink: 0 }}>
-                🔄
+              <span aria-hidden="true" style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center' }}>
+                <LiRotate size={20} />
               </span>
               {isExpanded && <span aria-hidden="true">{updateInProgress ? 'Updating...' : 'Update'}</span>}
             </button>
@@ -387,7 +420,7 @@ export default function SidebarMenu({
             {isExpanded && <span aria-hidden="true">Settings</span>}
           </button>
         </div>
-      </div>
+      </nav>
     </>
   );
 }
@@ -395,6 +428,7 @@ export default function SidebarMenu({
 // Export constants so App.jsx can compute sidebar width
 SidebarMenu.COLLAPSED_WIDTH = COLLAPSED_WIDTH;
 SidebarMenu.EXPANDED_WIDTH = EXPANDED_WIDTH;
+SidebarMenu.expandedWidth = expandedWidth; // theme-aware (8-bit needs more room)
 SidebarMenu.MODE_HIDDEN = MODE_HIDDEN;
 SidebarMenu.MODE_ICONS = MODE_ICONS;
 SidebarMenu.MODE_PINNED = MODE_PINNED;

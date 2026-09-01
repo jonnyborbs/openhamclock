@@ -1,5 +1,8 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import i18n from '../lang/i18n';
 import { getModeFromFreq, mapModeToRig } from '../utils/bandPlan.js';
+import { canTransmit, getLicenseClass, normalizeLicenseClass } from '../utils/privileges.js';
+import { showToast } from '../utils/toast.js';
 import { isRelayConfigured, setRelayConfigured, setRelaySessionId } from '../utils/relaySession.js';
 
 // Default config
@@ -535,6 +538,29 @@ export const RigProvider = ({ children, rigConfig }) => {
           if (targetMode && targetMode !== rigState.mode) {
             // console.log(`[RigContext] Setting Mode to ${targetMode}`);
             setMode(targetMode);
+          }
+        }
+
+        // License-class privilege check (non-blocking): still tune, but warn
+        // when the target freq+mode is outside the configured US license-class
+        // privileges. 'Other' (default, non-US) never warns. Only when rig
+        // control is enabled — otherwise nothing tuned, so nothing to warn about.
+        const licenseClass = getLicenseClass();
+        if (rigConfig?.enabled && normalizeLicenseClass(licenseClass)) {
+          // Check the mode the radio will actually be in after the tune:
+          // the auto-set mode when autoMode is on, else the rig's current mode.
+          const effectiveMode =
+            rigConfig?.autoMode !== false ? modeInput || getModeFromFreq(hz) : rigState.mode || getModeFromFreq(hz);
+          if (!canTransmit(licenseClass, hz / 1000, effectiveMode)) {
+            const freqMHz = (hz / 1e6).toFixed(4).replace(/\.?0+$/, '');
+            showToast(
+              i18n.t('app.rigControl.privilegeWarning', {
+                freq: freqMHz,
+                mode: String(effectiveMode || '').toUpperCase(),
+                licenseClass: i18n.t(`station.settings.licenseClass.${licenseClass}`),
+              }),
+              { variant: 'warning' },
+            );
           }
         }
       }

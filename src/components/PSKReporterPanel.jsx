@@ -9,7 +9,7 @@
  */
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getBandColor } from '../utils/callsign.js';
+import { getReadableBandColorForFreq } from '../utils/bandColors.js';
 import { ariaTabKeyDown } from '../utils/ariaTabKeyDown.js';
 import { IconSearch, IconRefresh, IconMap, IconTrash } from './Icons.jsx';
 import CallsignLink from './CallsignLink.jsx';
@@ -174,7 +174,7 @@ const PSKReporterPanel = ({
     Boolean,
   ).length;
 
-  const getFreqColor = (freqMHz) => (!freqMHz ? 'var(--text-muted)' : getBandColor(parseFloat(freqMHz)));
+  const getFreqColor = (freqMHz) => (!freqMHz ? 'var(--text-muted)' : getReadableBandColorForFreq(parseFloat(freqMHz)));
   const formatAge = (m) =>
     m < 1
       ? t('pskReporterPanel.time.now')
@@ -716,6 +716,7 @@ const PSKReporterPanel = ({
                           fontSize="11px"
                           onPopup={showPopup}
                           location={grid ? { grid } : undefined}
+                          spot={report.freq > 0 ? { freq: report.freq / 1000, mode: report.mode ?? null } : undefined}
                         />
                         {showMutualReception && isMutual(report) && (
                           <span
@@ -937,7 +938,7 @@ const PSKReporterPanel = ({
                       </span>
                       <span
                         style={{
-                          color: d.band ? getBandColor(d.dialFrequency / 1000000) : 'var(--text-muted)',
+                          color: d.band ? getReadableBandColorForFreq(d.dialFrequency / 1000000) : 'var(--text-muted)',
                           minWidth: '32px',
                           textAlign: 'right',
                           fontSize: '10px',
@@ -1051,17 +1052,18 @@ const PSKReporterPanel = ({
                     >
                       <span
                         style={{
-                          color: q.band ? getBandColor(q.frequency / 1000000) : 'var(--accent-green)',
+                          color: q.band ? getReadableBandColorForFreq(q.frequency / 1000000) : 'var(--accent-green)',
                           fontWeight: '600',
                           minWidth: '65px',
                         }}
                       >
                         <CallsignLink
                           call={q.dxCall}
-                          color={q.band ? getBandColor(q.frequency / 1000000) : 'var(--accent-green)'}
+                          color={q.band ? getReadableBandColorForFreq(q.frequency / 1000000) : 'var(--accent-green)'}
                           fontWeight="600"
                           onPopup={showPopup}
                           location={q.dxGrid ? { grid: q.dxGrid } : undefined}
+                          spot={q.frequency > 0 ? { freq: q.frequency / 1000, mode: q.mode ?? null } : undefined}
                         />
                       </span>
                       <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{q.band}</span>

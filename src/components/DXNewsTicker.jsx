@@ -16,6 +16,7 @@
  */
 import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useDXNews } from '../hooks/useDXNews.js';
 
 // Base font sizes (px) — all sizes are derived by multiplying with textScale
 const BASE_LABEL_SIZE = 10; // source label, separator ◆
@@ -35,9 +36,9 @@ function isDXNewsEnabled() {
 }
 
 export const DXNewsTicker = ({ sidebar = false }) => {
-  const [news, setNews] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [visible, setVisible] = useState(isDXNewsEnabled);
+  // Shared fetch path with the DX News reader panel (30-min refresh)
+  const { items: news, loading } = useDXNews(visible);
   const tickerRef = useRef(null);
   const contentRef = useRef(null);
   const [animDuration, setAnimDuration] = useState(120);
@@ -74,6 +75,22 @@ export const DXNewsTicker = ({ sidebar = false }) => {
     localStorage.setItem('openhamclock_dxNewsTextScale', String(textScale));
   }, [textScale]);
 
+  // Scroll speed multiplier persisted in localStorage (0.5 – 2.5, default 1.0)
+  const [speedScale, setSpeedScale] = useState(() => {
+    try {
+      const stored = localStorage.getItem('openhamclock_dxNewsSpeed');
+      if (stored) {
+        const n = parseFloat(stored);
+        if (Number.isFinite(n)) return Math.min(2.5, Math.max(0.5, n));
+      }
+    } catch {}
+    return 1.0;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('openhamclock_dxNewsSpeed', String(speedScale));
+  }, [speedScale]);
+
   // Listen for mapLayers changes (custom event for same-tab, storage for cross-tab)
   useEffect(() => {
     const checkVisibility = () => setVisible(isDXNewsEnabled());
@@ -86,34 +103,6 @@ export const DXNewsTicker = ({ sidebar = false }) => {
     };
   }, []);
 
-  // Fetch news
-  useEffect(() => {
-    if (!visible) return;
-
-    const fetchNews = async () => {
-      try {
-        const res = await fetch('/api/dxnews');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.items && data.items.length > 0) {
-            setNews(data.items);
-          } else {
-            setNews([]);
-          }
-        }
-      } catch (err) {
-        console.error('DX News ticker fetch error:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchNews();
-    // Refresh every 30 minutes
-    const interval = setInterval(fetchNews, 30 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [visible]);
-
   // Calculate animation duration based on content width.
   // textScale is included so speed recalculates after a font-size change
   // (useEffect runs after paint, so scrollWidth reflects the new size).
@@ -121,11 +110,11 @@ export const DXNewsTicker = ({ sidebar = false }) => {
     if (contentRef.current && tickerRef.current) {
       const contentWidth = contentRef.current.scrollWidth;
       const containerWidth = tickerRef.current.offsetWidth;
-      // ~90px per second scroll speed
-      const duration = Math.max(20, (contentWidth + containerWidth) / 90);
+      // ~90px per second base scroll speed, scaled by the user's « » setting
+      const duration = Math.max(10, (contentWidth + containerWidth) / (90 * speedScale));
       setAnimDuration(duration);
     }
-  }, [news, textScale]);
+  }, [news, textScale, speedScale]);
 
   // Inject keyframes animation style once, including CSS-only hover-pause (D-13)
   useEffect(() => {
@@ -179,6 +168,11 @@ export const DXNewsTicker = ({ sidebar = false }) => {
 
   const handleDecrease = () => setTextScale((s) => parseFloat(Math.max(0.7, s - 0.1).toFixed(1)));
   const handleIncrease = () => setTextScale((s) => parseFloat(Math.min(2.0, s + 0.1).toFixed(1)));
+
+  const atSlowest = speedScale <= 0.5;
+  const atFastest = speedScale >= 2.5;
+  const handleSlower = () => setSpeedScale((s) => parseFloat(Math.max(0.5, s - 0.25).toFixed(2)));
+  const handleFaster = () => setSpeedScale((s) => parseFloat(Math.min(2.5, s + 0.25).toFixed(2)));
 
   const sizeButtonStyle = (disabled) => ({
     background: 'transparent',
@@ -459,6 +453,40 @@ export const DXNewsTicker = ({ sidebar = false }) => {
             </div>
           </div>
         </>
+      )}
+
+      {/* Scroll speed controls (hidden in reduced-motion mode — nothing scrolls) */}
+      {!reducedMotion && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            flexShrink: 0,
+            borderLeft: '1px solid #444',
+            height: '100%',
+          }}
+        >
+          <button
+            onClick={handleSlower}
+            disabled={atSlowest}
+            data-testid="dxnews-slower"
+            title={t('app.dxNews.slower', { defaultValue: 'Scroll slower' })}
+            aria-label={t('app.dxNews.slower', { defaultValue: 'Scroll slower' })}
+            style={sizeButtonStyle(atSlowest)}
+          >
+            «
+          </button>
+          <button
+            onClick={handleFaster}
+            disabled={atFastest}
+            data-testid="dxnews-faster"
+            title={t('app.dxNews.faster', { defaultValue: 'Scroll faster' })}
+            aria-label={t('app.dxNews.faster', { defaultValue: 'Scroll faster' })}
+            style={sizeButtonStyle(atFastest)}
+          >
+            »
+          </button>
+        </div>
       )}
 
       {/* Text size controls */}

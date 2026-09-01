@@ -62,5 +62,5 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
-# For development with hot reload:
-# docker compose -f docker-compose.dev.yml up
+# For development with hot reload, run the app directly instead of Docker:
+# npm install, then `node server.js` (backend) and `npm run dev` (frontend)

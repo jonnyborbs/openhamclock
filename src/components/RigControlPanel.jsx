@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useRig } from '../contexts/RigContext';
+import BandPlanBar from './BandPlanBar';
 
 const RigControlPanel = () => {
   const { t } = useTranslation();
@@ -63,6 +64,9 @@ const RigControlPanel = () => {
           </div>
           <div className="mode-badge">{mode || '---'}</div>
         </div>
+
+        {/* Band plan strip — BandPlanBar renders null when freq is out of band */}
+        {connected && freq > 0 && <BandPlanBar freq={freq} />}
 
         <div className="rig-controls">
           <form onSubmit={handleSubmitFreq} className="flex-row">

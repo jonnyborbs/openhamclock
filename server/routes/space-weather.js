@@ -8,9 +8,6 @@ module.exports = function (app, ctx) {
 
   // Centralized cache for NOAA data (5-minute cache)
   const noaaCache = {
-    flux: { data: null, timestamp: 0 },
-    kindex: { data: null, timestamp: 0 },
-    sunspots: { data: null, timestamp: 0 },
     xray: { data: null, timestamp: 0 },
     aurora: { data: null, timestamp: 0 },
     solarIndices: { data: null, timestamp: 0 },
@@ -83,57 +80,6 @@ module.exports = function (app, ctx) {
       vhfConditions,
     };
   }
-
-  // NOAA Space Weather - Solar Flux
-  app.get('/api/noaa/flux', async (req, res) => {
-    try {
-      if (noaaCache.flux.data && Date.now() - noaaCache.flux.timestamp < NOAA_CACHE_TTL) {
-        return res.json(noaaCache.flux.data);
-      }
-      const response = await fetch('https://services.swpc.noaa.gov/json/f107_cm_flux.json');
-      const data = await response.json();
-      noaaCache.flux = { data, timestamp: Date.now() };
-      res.json(data);
-    } catch (error) {
-      logErrorOnce('NOAA Flux', error.message);
-      if (noaaCache.flux.data) return res.json(noaaCache.flux.data);
-      res.status(500).json({ error: 'Failed to fetch solar flux data' });
-    }
-  });
-
-  // NOAA Space Weather - K-Index
-  app.get('/api/noaa/kindex', async (req, res) => {
-    try {
-      if (noaaCache.kindex.data && Date.now() - noaaCache.kindex.timestamp < NOAA_CACHE_TTL) {
-        return res.json(noaaCache.kindex.data);
-      }
-      const response = await fetch('https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json');
-      const data = await response.json();
-      noaaCache.kindex = { data, timestamp: Date.now() };
-      res.json(data);
-    } catch (error) {
-      logErrorOnce('NOAA K-Index', error.message);
-      if (noaaCache.kindex.data) return res.json(noaaCache.kindex.data);
-      res.status(500).json({ error: 'Failed to fetch K-index data' });
-    }
-  });
-
-  // NOAA Space Weather - Sunspots
-  app.get('/api/noaa/sunspots', async (req, res) => {
-    try {
-      if (noaaCache.sunspots.data && Date.now() - noaaCache.sunspots.timestamp < NOAA_CACHE_TTL) {
-        return res.json(noaaCache.sunspots.data);
-      }
-      const response = await fetch('https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json');
-      const data = await response.json();
-      noaaCache.sunspots = { data, timestamp: Date.now() };
-      res.json(data);
-    } catch (error) {
-      logErrorOnce('NOAA Sunspots', error.message);
-      if (noaaCache.sunspots.data) return res.json(noaaCache.sunspots.data);
-      res.status(500).json({ error: 'Failed to fetch sunspot data' });
-    }
-  });
 
   // Solar Indices with History and Kp Forecast
   app.get('/api/solar-indices', async (req, res) => {
@@ -286,6 +232,89 @@ module.exports = function (app, ctx) {
       logErrorOnce('Solar Indices', error.message);
       if (noaaCache.solarIndices.data) return res.json(noaaCache.solarIndices.data);
       res.status(500).json({ error: 'Failed to fetch solar indices' });
+    }
+  });
+
+  // Solar Cycle — observed monthly SSN history vs the SWPC cycle-25 predicted
+  // range, for the Solar Cycle panel. Monthly data changes once a month, so a
+  // 24h cache is plenty. Observed history is trimmed to 2015+ (tail of cycle
+  // 24 for context through all of cycle 25) — the raw feed goes back to 1749.
+  const solarCycleCache = { data: null, timestamp: 0 };
+  const SOLAR_CYCLE_TTL = 24 * 60 * 60 * 1000;
+  const SOLAR_CYCLE_FROM = '2015-01';
+
+  app.get('/api/solar-cycle', async (req, res) => {
+    try {
+      if (solarCycleCache.data && Date.now() - solarCycleCache.timestamp < SOLAR_CYCLE_TTL) {
+        return res.json(solarCycleCache.data);
+      }
+
+      const [obsRes, predRes] = await Promise.allSettled([
+        fetch('https://services.swpc.noaa.gov/json/solar-cycle/observed-solar-cycle-indices.json', {
+          headers: { 'User-Agent': `OpenHamClock/${APP_VERSION}` },
+          signal: AbortSignal.timeout(15000),
+        }),
+        fetch('https://services.swpc.noaa.gov/products/solar-cycle-25-ssn-predicted-range.json', {
+          headers: { 'User-Agent': `OpenHamClock/${APP_VERSION}` },
+          signal: AbortSignal.timeout(15000),
+        }),
+      ]);
+
+      const result = { observed: [], predicted: [], timestamp: new Date().toISOString() };
+
+      // Observed: { time-tag 'YYYY-MM', ssn, smoothed_ssn, f10.7, ... }
+      // NOAA uses -1 as "not yet available" for smoothed values.
+      if (obsRes.status === 'fulfilled' && obsRes.value.ok) {
+        const data = await obsRes.value.json();
+        if (Array.isArray(data)) {
+          result.observed = data
+            .filter((d) => typeof d['time-tag'] === 'string' && d['time-tag'] >= SOLAR_CYCLE_FROM)
+            .map((d) => ({
+              t: d['time-tag'],
+              ssn: Number.isFinite(d.ssn) && d.ssn >= 0 ? Math.round(d.ssn * 10) / 10 : null,
+              smoothed:
+                Number.isFinite(d.smoothed_ssn) && d.smoothed_ssn >= 0 ? Math.round(d.smoothed_ssn * 10) / 10 : null,
+              sfi: Number.isFinite(d['f10.7']) && d['f10.7'] >= 0 ? Math.round(d['f10.7'] * 10) / 10 : null,
+            }));
+        }
+      }
+
+      // Predicted range: { time-tag 'YYYY-MM', smoothed_ssn_min, smoothed_ssn_max }
+      if (predRes.status === 'fulfilled' && predRes.value.ok) {
+        const data = await predRes.value.json();
+        if (Array.isArray(data)) {
+          result.predicted = data
+            .filter(
+              (d) =>
+                typeof d['time-tag'] === 'string' &&
+                Number.isFinite(d.smoothed_ssn_min) &&
+                Number.isFinite(d.smoothed_ssn_max),
+            )
+            .map((d) => ({
+              t: d['time-tag'],
+              min: Math.max(0, Math.round(d.smoothed_ssn_min * 10) / 10),
+              max: Math.max(0, Math.round(d.smoothed_ssn_max * 10) / 10),
+            }));
+          // The feed's tail runs to 2040 with near-zero values — trim the
+          // dead years (predicted max under 5 ≈ solar minimum) so the
+          // chart's x-domain ends where the cycle effectively does.
+          while (result.predicted.length && result.predicted[result.predicted.length - 1].max < 5) {
+            result.predicted.pop();
+          }
+        }
+      }
+
+      if (result.observed.length === 0 && result.predicted.length === 0) {
+        throw new Error('Both SWPC solar-cycle feeds returned no data');
+      }
+
+      solarCycleCache.data = result;
+      solarCycleCache.timestamp = Date.now();
+      res.json(result);
+    } catch (error) {
+      logErrorOnce('Solar Cycle', error.message);
+      if (solarCycleCache.data) return res.json({ ...solarCycleCache.data, stale: true });
+      res.status(502).json({ error: 'Failed to fetch solar cycle data' });
     }
   });
 
@@ -659,6 +688,89 @@ module.exports = function (app, ctx) {
     }
   });
 
+  // NOAA D-RAP (D-Region Absorption Prediction)
+  // Global grid of the highest frequency affected by 1 dB absorption (MHz).
+  // Upstream is a fixed-width text table: '#' header lines (including
+  // "Product Valid At"), a row of longitudes, a dashed separator, then one
+  // row per latitude:  " 89 |  0.4  0.4 ..." (north → south).
+  const drapCache = { data: null, timestamp: 0 };
+  const DRAP_CACHE_TTL = 5 * 60 * 1000;
+
+  function parseDrapText(text) {
+    const lines = text.split('\n');
+    let validAt = null;
+    let lons = null;
+    const lats = [];
+    const freqs = [];
+    let maxFreq = 0;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      if (trimmed.startsWith('#')) {
+        const m = trimmed.match(/Product Valid At\s*:\s*(.+)$/i);
+        if (m) validAt = m[1].trim();
+        continue;
+      }
+      if (/^-+$/.test(trimmed)) continue;
+
+      if (trimmed.includes('|')) {
+        // Data row: "<lat> | <freq> <freq> ..."
+        const [latPart, valPart] = trimmed.split('|');
+        const lat = parseFloat(latPart);
+        if (!Number.isFinite(lat) || !valPart) continue;
+        const row = valPart
+          .trim()
+          .split(/\s+/)
+          .map((v) => {
+            const f = parseFloat(v);
+            return Number.isFinite(f) ? f : 0;
+          });
+        if (lons && row.length !== lons.length) continue; // malformed row
+        for (const f of row) if (f > maxFreq) maxFreq = f;
+        lats.push(lat);
+        freqs.push(row);
+      } else {
+        // Longitude header row (first non-comment, non-separator line)
+        const vals = trimmed.split(/\s+/).map(parseFloat);
+        if (!lons && vals.length > 10 && vals.every(Number.isFinite)) lons = vals;
+      }
+    }
+
+    if (!lons || lats.length === 0) throw new Error('Unrecognized DRAP format');
+    return {
+      source: 'NOAA SWPC D-RAP',
+      validAt,
+      lats, // north → south
+      lons, // west → east
+      freqs, // freqs[latIdx][lonIdx] = highest affected frequency (MHz)
+      maxFreq: Math.round(maxFreq * 10) / 10,
+    };
+  }
+
+  app.get('/api/drap', async (req, res) => {
+    try {
+      if (drapCache.data && Date.now() - drapCache.timestamp < DRAP_CACHE_TTL) {
+        return res.json(drapCache.data);
+      }
+      const response = await fetch('https://services.swpc.noaa.gov/text/drap_global_frequencies.txt', {
+        headers: { 'User-Agent': `OpenHamClock/${APP_VERSION}` },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const text = await response.text();
+      const data = { ...parseDrapText(text), fetchedAt: Date.now() };
+      drapCache.data = data;
+      drapCache.timestamp = Date.now();
+      res.json(data);
+    } catch (error) {
+      logErrorOnce('DRAP', error.message);
+      if (drapCache.data) return res.json({ ...drapCache.data, stale: true });
+      res.status(502).json({ error: 'Failed to fetch D-RAP data' });
+    }
+  });
+
   // N0NBH Parsed Band Conditions + Solar Data
   app.get('/api/n0nbh', async (req, res) => {
     try {
@@ -684,22 +796,6 @@ module.exports = function (app, ctx) {
         return res.json({ ...n0nbhCache.data, fetchedAt: n0nbhCache.timestamp, stale: true });
       }
       res.status(500).json({ error: 'Failed to fetch N0NBH data' });
-    }
-  });
-
-  // Legacy raw XML endpoint
-  app.get('/api/hamqsl/conditions', async (req, res) => {
-    try {
-      if (n0nbhCache.data && Date.now() - n0nbhCache.timestamp < N0NBH_CACHE_TTL) {
-        // Re-fetch raw XML from cache won't work since we only store parsed
-      }
-      const response = await fetch('https://www.hamqsl.com/solarxml.php');
-      const text = await response.text();
-      res.set('Content-Type', 'application/xml');
-      res.send(text);
-    } catch (error) {
-      logErrorOnce('HamQSL', error.message);
-      res.status(500).json({ error: 'Failed to fetch band conditions' });
     }
   });
 

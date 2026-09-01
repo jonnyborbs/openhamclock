@@ -8,6 +8,7 @@ import { apiFetch } from '../utils/apiFetch';
 
 export const useContests = () => {
   const [data, setData] = useState([]);
+  const [source, setSource] = useState(null);
   const [loading, setLoading] = useState(true);
   const fetchRef = useRef(null);
 
@@ -16,8 +17,10 @@ export const useContests = () => {
       try {
         const response = await apiFetch('/api/contests');
         if (response?.ok) {
-          const contests = await response.json();
-          setData(contests);
+          const payload = await response.json();
+          // Envelope { contests, source, fetchedAt }; tolerate the legacy bare array
+          setData(Array.isArray(payload) ? payload : payload.contests || []);
+          setSource(Array.isArray(payload) ? null : payload.source || null);
         }
       } catch (err) {
         console.error('Contests error:', err);
@@ -34,7 +37,7 @@ export const useContests = () => {
 
   useVisibilityRefresh(() => fetchRef.current?.(), 30000);
 
-  return { data, loading };
+  return { data, loading, source };
 };
 
 export default useContests;

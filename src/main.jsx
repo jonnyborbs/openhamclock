@@ -6,8 +6,10 @@ import './styles/main.css';
 import './lang/i18n';
 import { getDebugConfig } from './debug/debugConfig';
 import { overrideConsole } from './debug/consoleOverride';
+import { setupServiceWorker } from './pwa/registerServiceWorker';
 
 overrideConsole(getDebugConfig());
+setupServiceWorker();
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

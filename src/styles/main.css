@@ -8,10 +8,12 @@
 
 /* Accessibility: visible focus indicator for keyboard users (#997). Uses
    :focus-visible so mouse clicks don't draw the ring — only keyboard
-   navigation does. Sits above any component-level `outline: none` so we
-   don't leave keyboard users guessing where focus is. */
+   navigation does. The !important is load-bearing: a dozen components
+   suppress the default outline via inline style={{ outline: 'none' }},
+   and inline styles beat any stylesheet selector except an !important
+   one — without it, keyboard users get no ring exactly there. */
 :focus-visible {
-  outline: 2px solid var(--accent-cyan, #00d4ff);
+  outline: 2px solid var(--accent-cyan, #00d4ff) !important;
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -1365,4 +1367,403 @@ pre,
   .lightning-strike {
     animation: none !important;
   }
+}
+
+/* ============================================
+   MATRIX THEME - phosphor terminal treatment
+   ============================================ */
+
+/* Everything monospace, like Legacy */
+[data-theme='matrix'] body,
+[data-theme='matrix'] * {
+  font-family: var(--font-mono) !important;
+}
+
+/* Subtle phosphor glow on text (kept faint — it's a data display) */
+[data-theme='matrix'] body {
+  text-shadow: 0 0 6px rgba(0, 255, 65, 0.25);
+}
+
+/* ============================================
+   8-BIT THEME - console chrome
+   ============================================ */
+
+/* No rounded corners anywhere — everything is a sprite */
+[data-theme='eightbit'] *,
+[data-theme='eightbit'] .panel {
+  border-radius: 0 !important;
+}
+
+/* Chunky 2px panel borders */
+[data-theme='eightbit'] .panel {
+  border-width: 2px !important;
+  backdrop-filter: none !important;
+}
+
+/* ── Matrix: CRT terminal chrome ─────────────────────────── */
+
+/* Sharp terminal rectangles with a phosphor bloom */
+[data-theme='matrix'] .panel {
+  border-radius: 0 !important;
+  box-shadow:
+    0 0 10px rgba(0, 255, 65, 0.12),
+    inset 0 0 18px rgba(0, 255, 65, 0.04) !important;
+  backdrop-filter: none !important;
+}
+
+/* Inverted selection, like a terminal cursor sweep */
+[data-theme='matrix'] ::selection {
+  background: #00ff41;
+  color: #000;
+}
+
+/* Green terminal scrollbars */
+[data-theme='matrix'] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 65, 0.35) !important;
+  border-radius: 0 !important;
+}
+[data-theme='matrix'] ::-webkit-scrollbar-track {
+  background: rgba(0, 40, 10, 0.6) !important;
+}
+
+/* ── 8-Bit: console dialog chrome ────────────────────────── */
+
+/* NES dialog frames: white inner border, gap, colored outer frame */
+[data-theme='eightbit'] .panel {
+  border: 2px solid #f8f8f8 !important;
+  box-shadow:
+    0 0 0 2px #0f0f23,
+    0 0 0 4px #5f5fd3 !important;
+  backdrop-filter: none !important;
+}
+
+/* Hard offset button shadows — press to "push in" */
+[data-theme='eightbit'] button {
+  border-radius: 0 !important;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.7);
+}
+[data-theme='eightbit'] button:active {
+  transform: translate(2px, 2px);
+  box-shadow: none;
+}
+
+/* Chunky square scrollbars */
+[data-theme='eightbit'] ::-webkit-scrollbar-thumb {
+  background: #5f5fd3 !important;
+  border-radius: 0 !important;
+  border: 2px solid #0f0f23 !important;
+}
+[data-theme='eightbit'] ::-webkit-scrollbar-track {
+  background: #1a1a2e !important;
+}
+
+/* Nearest-neighbor map tiles — the world as sprites when zoomed */
+[data-theme='eightbit'] .leaflet-tile {
+  image-rendering: pixelated;
+}
+
+/* ── Steampunk: brass and rivets ─────────────────────────── */
+
+/* Lamp-lit room: a warm gaslight glow from above the workbench */
+[data-theme='steampunk'] body {
+  background: radial-gradient(1100px 700px at 50% -5%, rgba(255, 184, 70, 0.1), transparent 60%), var(--bg-primary);
+}
+
+/* Double brass frame with a lamp-lit inner shadow */
+[data-theme='steampunk'] .panel {
+  position: relative;
+  border: 1px solid #9a742e !important;
+  border-radius: 8px !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 220, 150, 0.12),
+    inset 0 0 0 1px rgba(240, 180, 41, 0.22),
+    inset 0 0 26px rgba(0, 0, 0, 0.55),
+    0 2px 8px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Corner rivets: domed, lit from the upper left */
+[data-theme='steampunk'] .panel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  pointer-events: none;
+  background-image:
+    radial-gradient(circle 3.5px at 8px 8px, #f7dc94 0%, #cf9c2e 45%, #6d4f1c 78%, transparent 80%),
+    radial-gradient(circle 3.5px at calc(100% - 8px) 8px, #f7dc94 0%, #cf9c2e 45%, #6d4f1c 78%, transparent 80%),
+    radial-gradient(circle 3.5px at 8px calc(100% - 8px), #f7dc94 0%, #cf9c2e 45%, #6d4f1c 78%, transparent 80%),
+    radial-gradient(
+      circle 3.5px at calc(100% - 8px) calc(100% - 8px),
+      #f7dc94 0%,
+      #cf9c2e 45%,
+      #6d4f1c 78%,
+      transparent 80%
+    );
+  background-repeat: no-repeat;
+}
+
+/* Headers: screwed-on brass nameplates with engraved serif text.
+   Self-contained (no negative margins) for the same reason as Trek's
+   pill — panels override the base 10px padding with 8-20px. */
+[data-theme='steampunk'] .panel > div:first-child {
+  background:
+    radial-gradient(circle 2.5px at 9px 50%, #fff3cf 0%, #8a6a2f 55%, #4d3a16 75%, transparent 78%),
+    radial-gradient(circle 2.5px at calc(100% - 9px) 50%, #fff3cf 0%, #8a6a2f 55%, #4d3a16 75%, transparent 78%),
+    linear-gradient(180deg, #e8bc52 0%, #c89a35 45%, #96702a 100%) !important;
+  color: #2b1a08 !important;
+  font-family: Georgia, 'Times New Roman', serif !important;
+  font-variant: small-caps;
+  letter-spacing: 1.5px;
+  text-shadow: 0 1px 0 rgba(255, 236, 190, 0.5);
+  border: 1px solid #6d4f1c !important;
+  border-radius: 4px !important;
+  padding: 2px 10px 2px 20px !important;
+  margin: 0 0 8px 0 !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 240, 200, 0.5),
+    inset 0 -1px 0 rgba(60, 38, 10, 0.5),
+    0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* Victorian serif buttons */
+[data-theme='steampunk'] button {
+  font-family: Georgia, 'Times New Roman', serif !important;
+  border-radius: 4px !important;
+}
+
+/* Aged-chart map tiles — warm parchment, not washed out */
+[data-theme='steampunk'] .leaflet-tile {
+  filter: sepia(0.5) saturate(1.05) contrast(1.05) hue-rotate(-8deg);
+}
+
+/* Brass scrollbars on leather tracks */
+[data-theme='steampunk'] ::-webkit-scrollbar-thumb {
+  background: linear-gradient(#d4a017, #8a6a2f) !important;
+  border-radius: 5px !important;
+  border: 1px solid #55401a !important;
+}
+[data-theme='steampunk'] ::-webkit-scrollbar-track {
+  background: rgba(18, 11, 5, 0.8) !important;
+}
+
+/* Brass text selection */
+[data-theme='steampunk'] ::selection {
+  background: #d4a017;
+  color: #1a1208;
+}
+
+/* ══════════════════════════════════════════════════════════
+   THEME V2 — deep design language (8-Bit / Matrix / Trek)
+   These extend (and where noted, override) the earlier
+   chrome blocks above; later rules win at equal specificity.
+   ══════════════════════════════════════════════════════════ */
+
+/* ── 8-Bit v2: NES dialog graphics ───────────────────────── */
+
+/* Stepped "pixel-rounded" corners: chamfer each corner in two 3px steps,
+   the way console dialog boxes rounded corners out of square tiles. The
+   clip replaces the outer box-shadow frames (clip-path would cut them). */
+[data-theme='eightbit'] .panel {
+  border: 3px solid #f8f8f8 !important;
+  box-shadow: none !important;
+  clip-path: polygon(
+    0 9px,
+    3px 9px,
+    3px 3px,
+    9px 3px,
+    9px 0,
+    calc(100% - 9px) 0,
+    calc(100% - 9px) 3px,
+    calc(100% - 3px) 3px,
+    calc(100% - 3px) 9px,
+    100% 9px,
+    100% calc(100% - 9px),
+    calc(100% - 3px) calc(100% - 9px),
+    calc(100% - 3px) calc(100% - 3px),
+    calc(100% - 9px) calc(100% - 3px),
+    calc(100% - 9px) 100%,
+    9px 100%,
+    9px calc(100% - 3px),
+    3px calc(100% - 3px),
+    3px calc(100% - 9px),
+    0 calc(100% - 9px)
+  );
+}
+
+/* Menu-bar panel headers: solid color block, pixel font, white text */
+[data-theme='eightbit'] .panel > div:first-child {
+  background: #5f5fd3 !important;
+  color: #ffffff !important;
+  font-family: 'Press Start 2P', var(--font-mono) !important;
+  font-size: 8px !important;
+  letter-spacing: 0;
+  padding: 4px 8px !important;
+  margin: -10px -10px 8px -10px !important;
+  text-transform: uppercase;
+}
+
+/* Pixel font on buttons too, scaled relative to their layout size */
+[data-theme='eightbit'] button {
+  font-family: 'Press Start 2P', var(--font-mono) !important;
+  font-size: 0.8em;
+  text-transform: uppercase;
+}
+
+/* ── Matrix v2: the movie treatment ──────────────────────── */
+/* The digital-rain canvas itself is the MatrixRain component; these
+   rules make the chrome sit on top of it like HUD glass. */
+
+/* Panels become translucent glass so the rain reads through them */
+[data-theme='matrix'] .panel {
+  background: rgba(1, 8, 2, 0.82) !important;
+}
+
+/* Header flicker — a barely-there CRT shimmer on panel titles */
+@keyframes matrix-flicker {
+  0%,
+  93%,
+  100% {
+    opacity: 1;
+  }
+  94% {
+    opacity: 0.75;
+  }
+  96% {
+    opacity: 0.92;
+  }
+  98% {
+    opacity: 0.68;
+  }
+}
+[data-theme='matrix'] .panel > div:first-child {
+  animation: matrix-flicker 7s infinite;
+  text-shadow: 0 0 8px rgba(0, 255, 65, 0.6);
+}
+
+/* ── Trek: LCARS chrome ──────────────────────────────────── */
+
+/* LCARS display face on the chrome. Set on body (plus form controls
+   and the map, which don't inherit) rather than `* !important`, so
+   the data readouts that pin var(--font-mono) inline keep their
+   monospace column alignment — Antonio is proportional and turns
+   aligned spot tables ragged. */
+[data-theme='trek'] body,
+[data-theme='trek'] button,
+[data-theme='trek'] input,
+[data-theme='trek'] select,
+[data-theme='trek'] textarea,
+[data-theme='trek'] .leaflet-container {
+  font-family: 'Antonio', 'Arial Narrow', 'Helvetica Neue', sans-serif;
+}
+
+/* Panels: black wells framed by an LCARS side bar and rounded elbows */
+[data-theme='trek'] .panel {
+  background: #000 !important;
+  border: none !important;
+  border-left: 14px solid var(--lcars-bar, #ff9c00) !important;
+  border-radius: 22px 6px 6px 22px !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 156, 0, 0.18) !important;
+  backdrop-filter: none !important;
+}
+
+/* Rotate bar colors so a wall of panels reads like an LCARS frame.
+   Keyed on the flexlayout tab containers: each .panel is the sole
+   element of its own tab, so striping panels against their own
+   siblings (.panel:nth-of-type) never matched — every bar sat orange. */
+[data-theme='trek'] .flexlayout__tab:nth-child(2n) .panel {
+  border-left-color: var(--lcars-alt, #9999cc) !important;
+}
+[data-theme='trek'] .flexlayout__tab:nth-child(3n) .panel {
+  border-left-color: #cc99cc !important;
+}
+
+/* Headers: the classic pill bar — black text on the section color.
+   Self-contained pill, no negative margins: panels override the base
+   10px padding with anything from 8px to 20px, so a -10px bleed lands
+   differently in every panel and clips into the elbow radius. */
+[data-theme='trek'] .panel > div:first-child {
+  background: var(--lcars-bar, #ff9c00) !important;
+  color: #000 !important;
+  border-radius: 999px !important;
+  padding: 2px 12px !important;
+  margin: 0 0 8px 0 !important;
+  text-transform: uppercase;
+  font-weight: 700 !important;
+  font-family: 'Antonio', 'Arial Narrow', 'Helvetica Neue', sans-serif !important;
+  letter-spacing: 0.6px;
+}
+[data-theme='trek'] .flexlayout__tab:nth-child(2n) .panel > div:first-child {
+  background: var(--lcars-alt, #9999cc) !important;
+}
+[data-theme='trek'] .flexlayout__tab:nth-child(3n) .panel > div:first-child {
+  background: #cc99cc !important;
+}
+
+/* Pill buttons, LCARS-style */
+[data-theme='trek'] button {
+  border-radius: 999px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* Orange pill scrollbars on black tracks */
+[data-theme='trek'] ::-webkit-scrollbar-thumb {
+  background: #ff9c00 !important;
+  border-radius: 999px !important;
+}
+[data-theme='trek'] ::-webkit-scrollbar-track {
+  background: #000 !important;
+}
+
+/* ── Season themes: light chrome, the canvas carries the mood ── */
+
+/* Winter: frost creeping down from the top edge of every panel */
+[data-theme='winter'] .panel {
+  background: linear-gradient(180deg, rgba(200, 230, 255, 0.08), transparent 22%), var(--bg-panel) !important;
+  border-top-color: rgba(200, 230, 255, 0.45) !important;
+}
+[data-theme='winter'] ::-webkit-scrollbar-thumb {
+  background: rgba(160, 210, 255, 0.4) !important;
+}
+
+/* Map-tile tints: cold, fresh, sunny, golden */
+[data-theme='winter'] .leaflet-tile {
+  filter: saturate(0.75) brightness(1.05) hue-rotate(12deg);
+}
+[data-theme='spring'] .leaflet-tile {
+  filter: saturate(1.1) brightness(1.02);
+}
+[data-theme='summer'] .leaflet-tile {
+  filter: saturate(1.15) brightness(1.04) sepia(0.08);
+}
+[data-theme='fall'] .leaflet-tile {
+  filter: sepia(0.25) saturate(1.15) hue-rotate(-10deg);
+}
+
+/* ── Themed-header opt-out ───────────────────────────────── */
+/* Every styled theme above treats .panel > div:first-child as a title bar
+   (solid block, pixel/serif font, negative margins). Panels whose first
+   child is real content — the contest quick-log strip's callsign row, for
+   one — opt out with .no-theme-header so their inputs aren't repainted as
+   a header. Higher specificity + later position beats the theme rules. */
+[data-theme='retro'] .panel.no-theme-header > div:first-child,
+[data-theme='steampunk'] .panel.no-theme-header > div:first-child,
+[data-theme='eightbit'] .panel.no-theme-header > div:first-child,
+[data-theme='matrix'] .panel.no-theme-header > div:first-child,
+[data-theme='trek'] .panel.no-theme-header > div:first-child {
+  background: none !important;
+  color: inherit !important;
+  font-family: inherit !important;
+  font-size: inherit !important;
+  font-weight: inherit !important;
+  font-variant: normal;
+  letter-spacing: inherit;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  text-transform: none !important;
+  animation: none;
+  text-shadow: none;
 }

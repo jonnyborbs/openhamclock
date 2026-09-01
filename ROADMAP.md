@@ -1,7 +1,7 @@
 # OpenHamClock Roadmap
 
 > Amateur Radio Dashboard — A modern web-based HamClock alternative
-> Created by K0CJH | Current version: v26.2.1 | License: MIT
+> Created by K0CJH | Current version: v26.6.0 | License: MIT
 
 ---
 
@@ -72,61 +72,90 @@ Adopted year-based versioning: X = year, Y = visual/UI, Z = backend. The jump fr
 - **SDR integration** — FlexRadio SmartSDR and RTL-SDR support via rig-bridge
 - **DX favorites** — Save up to 10 DX target grid squares for quick switching
 
+### Monthly Releases & Real Physics (v26.3 — v26.6 — May–Sep 2026)
+
+The project settled into a monthly release cadence (first Tuesday), and each drop carried a headline. v26.3 brought VOACAP-grade propagation: the actual ITU-R P.533 model compiled to WebAssembly and run in the browser, later corrected to model each digital mode at its real decode threshold (FT8 at −19 dB, not SSB-plus-a-fudge) and fixed at the root for the infamous "vertical line through China" midpoint bug. v26.4 added a live aircraft tracking layer (adsb.lol), a worldwide ATC sectors overlay, and the first big accessibility push — W3C tablist patterns, aria-live announcements, and a non-map text view for screen-reader users, extended in round two the following cycle. v26.5 stood up **OHC Cluster**, our own DX cluster node feeding the hosted site (ending dependence on public DXSpider nodes), alongside N3FJP integration, real-time Kp, and Prometheus metrics. Throughout, the satellite pipeline was hardened end to end — multi-source TLE failover (CelesTrak → AMSAT → SatNOGS), a proper state machine with tests, and the "fletcher" relay for blocked egress IPs. v26.6 capped the era with a **3D globe projection**: a WebGL Earth with true great-circle arcs, shader-computed day/night terminator, and satellites at real orbital altitude — efficient enough to run on a Raspberry Pi.
+
 ---
 
-## Current State (v26.2.1)
+## Current State (v26.6.0)
 
 ### What's Working Well
 
-- **30+ dashboard modules** — DX Cluster, PSK Reporter, WSJT-X, POTA, SOTA, WWFF, WWBOTA, satellites, APRS, contests, DXpeditions, propagation, solar indices, weather, and more
+- **30+ dashboard modules** — DX Cluster, PSK Reporter, WSJT-X, POTA, SOTA, WWFF, WWBOTA, satellites, APRS, contests, DXpeditions, propagation, solar indices, weather, band activity, MeshCom, and more
+- **3 map projections** — Flat, Azimuthal, and the new 3D globe with great-circle arcs and satellites at orbital altitude
 - **6 layouts** — Modern, Classic, Tablet, Compact, Dockable, EmComm
 - **5 themes** — Dark, Light, Legacy, Retro, Custom
-- **Rig control** — Click-to-tune across all spot panels, unified rig-bridge with 22 plugins, cloud relay for remote operation
-- **EmComm platform** — Full emergency communications dashboard with APRS station tracking (internet + local RF), net operations, point-to-point APRS messaging, resource token aggregation, NWS alerts, FEMA shelters/disasters, and telemetry parsing
-- **Multi-platform** — Browser, Electron desktop, Raspberry Pi kiosk, Docker, Railway
+- **Real propagation physics** — ITU-R P.533 (VOACAP-grade) predictions via in-browser WASM, mode-aware decode thresholds for FT8/FT4/WSPR/JT65/CW, with REST and heuristic fallbacks
+- **OHC Cluster** — Our own DX cluster node serving the hosted site: RBN plus human spots (POTA, SOTA, WWFF, Parks n Peaks, DX Summit), mode-balanced so SSB/CW survive the FT8 flood
+- **Rig control** — Click-to-tune across all spot panels, unified rig-bridge with 22 plugins, cloud relay for remote operation, proper Yaesu band-select on band changes
+- **EmComm platform** — Full emergency communications dashboard with APRS station tracking (internet + local RF), net operations, point-to-point APRS messaging, resource token aggregation, NWS alerts, FEMA shelters/disasters, Winlink gateway layer, and telemetry parsing
+- **Accessibility** — W3C tablist keyboard navigation, aria-live event announcements, and a non-map "Map Data" text view for screen-reader users
+- **Multi-platform** — Browser, Electron desktop, Raspberry Pi kiosk, Docker/GHCR, Railway, FreeBSD
 - **16 languages** — ca, de, en, es, fr, it, ja, ka, ko, ms, nl, pt, ru, sl, th, zh
 - **Real-time data** — PSK Reporter via server-side MQTT proxy, WSJT-X via UDP, APRS-IS, DX cluster telnet
+- **Observability** — Authenticated Prometheus /metrics endpoint, /api/health subsystem snapshot, external watchtower probes for the hosted site
 
 ### Open Issues
 
-| #    | Type    | Description                                                                       |
-| ---- | ------- | --------------------------------------------------------------------------------- |
-| #797 | Feature | Button to disable/enable hamlib rig control                                       |
-| #790 | Feature | Mutual reception indicator for FT8 (implemented, pending release)                 |
-| #453 | Feature | Rig config persistence across updates + auto-launch                               |
-| #297 | Feature | Winlink gateway layer — plugin built, waiting on API key from Winlink team (W3QA) |
+| #     | Type          | Description                                                                           |
+| ----- | ------------- | ------------------------------------------------------------------------------------- |
+| #1165 | Hardening     | Satellite pipeline release-day resilience — fletcher probe depth, cold-start, backoff |
+| #1152 | Feature       | More space for DX Cluster spots                                                       |
+| #1135 | Ops           | api/health statistics over run container card                                         |
+| #1112 | Accessibility | Color contrast fails WCAG AA in Light and Retro themes                                |
+| #1095 | Bug           | RBN should query spot/cluster caches before querying QRZ for location                 |
+| #1015 | Feature       | Open API for QSO Map layer                                                            |
+| #997  | Accessibility | Audit and improve experience for blind / screen-reader users                          |
+| #882  | Feature       | Rig-Bridge mode overrides                                                             |
 
 ---
 
 ## What's Coming
 
-### Rig Control Improvements
+### Shipped on Staging Toward the Next Release
 
-- Hamlib enable/disable toggle without restarting (#797)
-- Rig config persistence across updates (#453)
-- Rig bridge auto-launch option on startup
+Already built and merged to Staging, headed for the next monthly release:
 
-### EmComm & APRS Expansion
+- **Native logbook** — IndexedDB storage, ADIF import/export, log-from-spot
+- **PWA / offline mode** — Service worker, versioned caches, update prompts
+- **3D globe map overlays** — Grid, zones, D-RAP, and aurora rendered on the globe
+- **Three new map layers** — Maidenhead grid, D-RAP absorption, CQ/ITU zones
+- **Space Weather Alerts panel** — With audio alert feed
+- **Meteor Showers panel**
+- **APRS telemetry dashboard** — Plus RF-heard shelter reports merged into EmComm
+- **IBP listening-log timeline** — Beacon reception history
+- **Worked-before / dupe badges** — On DX cluster and activation spots
+- **Band plan overlay** — On the Rig Control frequency display
+- **Click-to-listen web SDRs** — Auto-picked nearest live KiwiSDR, tuned to the spot, from spot rows and callsign popups
+- **Aircraft track prediction** — Configurable lead-time slider
+- **Configurable satellite track duration** — 15–120 min
+- **Azimuthal rendering fixes** — Curved zone/grid/ATC lines, square-level grid
+- **Contributor list refresh** — 14 missing contributors added to the Community page
 
-- Winlink gateway map layer — plugin built, waiting on API key (#297)
-- Winlink Pat client integration for RF messaging (works now without API key)
-- APRS telemetry visualization (sensor dashboards, resource trend charts)
-- Event log export (CSV/PDF) for After Action Reviews
+### In Progress Right Now
 
-### DX Cluster & Spots
-
-- Enhanced spot deduplication across sources
-- Cross-source spot correlation (DX Cluster + PSK Reporter + RBN)
-- Improved frequency-based mode inference
+- **Award tracking** — DXCC / WAZ / WAS / VUCC progress from the logbook, with needed-spot highlighting
+- **Worked-grids map layer** — Your confirmed grids painted on the map
+- **Browser notifications** — For the existing alert feeds
+- **Documentation overhaul** — Full user manual plus quickstart
 
 ### On the Horizon
 
-- **Logbook integration** — ADIF import/export, QSO logging directly from spots
-- **Contest mode** — Dedicated layout optimized for contest operation with rate meters and multiplier tracking
-- **Band plan overlay** — Visual band plan segments on frequency displays
-- **Offline mode** — Service worker for basic functionality without internet
-- **Mobile app** — React Native or PWA for dedicated mobile experience
-- **Plugin system** — Community-contributed map layers and data panels
+- **Log sync** — LoTW confirmation download, push to Cloudlog/Wavelog/QRZ Logbook
+- **Contest mode** — Dedicated layout with rate meters, multiplier tracking, and dupe sheet
+- **True Web Push notifications** — Alerts with the browser closed (requires a VAPID push server)
+- **Band-opening detection** — Alert when spot/PSK activity shows a band opening toward your target
+- **Sked planner** — Mutual VOACAP windows for you and a chosen DX target
+- **Ionosonde panel** — Live GIRO foF2/MUF readings from nearby stations
+- **Stats dashboard** — QSO heatmaps, distance records, activity trends from the logbook
+- **Open REST API** — Documented endpoints for third parties, including a QSO map layer (#1015)
+- **Panel plugin system** — Community-contributed data panels (map-layer plugins already exist)
+- **Kiosk scene rotation** — Cycle through layouts/views on a timer for shack displays
+- **EmComm event log export** — CSV/PDF export for After Action Reviews
+- **Winlink live-pathways layer** — Gateway layer shipped in v26.3; live traffic view is blocked on upstream stream credentials (the Winlink team granted a key for the listing APIs, live stream still pending)
+- **Winlink Express CSV ingest** — Message-log import for EOC dashboards
+- **Mobile experience** — The PWA now covers much of the original "mobile app" goal; remaining work is mobile-first layout polish rather than a separate native app
 
 ---
 
@@ -140,4 +169,4 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instr
 
 ---
 
-_Last updated: 2026-03-26_ <!-- markdownlint-disable-line MD036 -->
+_Last updated: 2026-08-28_ <!-- markdownlint-disable-line MD036 -->

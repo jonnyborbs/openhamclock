@@ -14,6 +14,7 @@
 
 const REFRESH_MS = 30 * 1000;
 const PROBE_TIMEOUT_MS = 5 * 1000;
+const FLETCHER_RELAY_ERROR_WINDOW_MS = 10 * 60 * 1000; // relay error newer than this (and newer than the last success) => degraded
 const RBN_STALE_AFTER_MS = 10 * 60 * 1000; // no spot in 10 min => degraded
 const SATELLITES_GRACE_MS = 60 * 60 * 1000; // 1h past OMM_CACHE_DURATION before degraded
 const SATELLITES_CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // mirrors OMM_CACHE_DURATION
@@ -39,6 +40,20 @@ async function probeHttp(url, label) {
   }
 }
 
+async function probeJson(url, label) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) return { ok: false, status: res.status, label };
+    return { ok: true, status: res.status, label, json: await res.json() };
+  } catch (err) {
+    return { ok: false, status: 0, label, error: err.message || String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function checkFletcher(ctx) {
   // Read the env var directly so this works both pre and post the
   // tle-fetcher → fletcher rename in #1063 (config.js key was renamed there
@@ -53,11 +68,29 @@ async function checkFletcher(ctx) {
   if (!base) {
     return { status: 'unknown', detail: 'FLETCHER_URL/TLE_FETCHER_URL unset (direct upstream mode)' };
   }
-  const result = await probeHttp(`${base}/health`, 'fletcher');
-  if (result.ok) return { status: 'ok', detail: `${result.status} from ${base}/health` };
+  // Probe /stats rather than the bare /health liveness endpoint: fletcher
+  // can be alive while every relayed upstream fetch fails, which is exactly
+  // the state that burned the v26.6.0 release day (#1165). /stats carries
+  // lastUpstreamOkAt/lastUpstreamErrorAt so we can report relay trouble.
+  const result = await probeJson(`${base}/stats`, 'fletcher');
+  if (result.ok) {
+    const s = result.json || {};
+    const errAt = typeof s.lastUpstreamErrorAt === 'number' ? s.lastUpstreamErrorAt : 0;
+    const okAt = typeof s.lastUpstreamOkAt === 'number' ? s.lastUpstreamOkAt : 0;
+    if (errAt > okAt && Date.now() - errAt < FLETCHER_RELAY_ERROR_WINDOW_MS) {
+      const secs = Math.round((Date.now() - errAt) / 1000);
+      const status = s.lastUpstreamStatus === 0 ? 'no response' : `HTTP ${s.lastUpstreamStatus}`;
+      return { status: 'degraded', detail: `alive but relays failing (${status}, last error ${secs}s ago)` };
+    }
+    return { status: 'ok', detail: `${result.status} from ${base}/stats` };
+  }
+
+  // Older fletcher builds without the outcome fields still answer /health.
+  const liveness = await probeHttp(`${base}/health`, 'fletcher');
+  if (liveness.ok) return { status: 'ok', detail: `${liveness.status} from ${base}/health (liveness only)` };
   return {
     status: 'down',
-    detail: result.error ? `probe failed: ${result.error}` : `HTTP ${result.status}`,
+    detail: liveness.error ? `probe failed: ${liveness.error}` : `HTTP ${liveness.status}`,
   };
 }
 

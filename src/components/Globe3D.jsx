@@ -6,21 +6,42 @@
  * great circles are drawn as true 3D arcs (slerp between unit vectors) and the
  * day/night terminator is a shader on the sphere rather than a canvas overlay.
  *
- * Consequence: Leaflet-bound plugin layers (satellites, aurora, lightning) are
- * not available here — WorldMap suppresses them while this projection is active.
+ * Consequence: Leaflet-bound plugin layers cannot attach here. Satellites
+ * render natively in 3D, and the globe-capable overlay subset (Maidenhead
+ * grid, CQ/ITU zones, D-RAP, aurora — see utils/globeOverlays.js) paints onto
+ * one shared equirectangular canvas draped as a transparent shell over the
+ * sphere. Everything else stays 2D-only and WorldMap suppresses it (with a
+ * visible note) while this projection is active.
  */
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { getBandColor, getBandFromFreq } from '../utils/callsign.js';
-import { getSunPosition } from '../utils/geo.js';
+import { getSunPosition, getMoonPosition, densifyGeoJson } from '../utils/geo.js';
+import { lzwDecode } from '../plugins/layers/useLightning.js';
 import { MAP_STYLES } from '../utils/config.js';
-import { buildGlobeTexture, chooseGlobeTileZoom } from '../utils/globeTexture.js';
+import { buildGlobeTexture, buildGlobeDetailPatch, chooseGlobeTileZoom } from '../utils/globeTexture.js';
+import {
+  classifySatellite,
+  getArchetypeTemplate,
+  getEnterpriseTemplate,
+  loadIssTemplate,
+} from '../utils/satelliteModels.js';
+import { GLOBE_OVERLAY_PAINTERS, ZONE_SOURCES, workedGridCounts, decimateAircraft } from '../utils/globeOverlays.js';
+import logbookStore from '../services/logbookStore.js';
+import {
+  acquire as acquireHistory,
+  release as releaseHistory,
+  subscribe as subscribeHistory,
+  buildTransportControl as buildHistoryTransportControl,
+} from '../services/historyPlaybackStore.js';
+import { makeDraggable } from '../plugins/layers/makeDraggable.js';
+import { addMinimizeToggle } from '../plugins/layers/addMinimizeToggle.js';
 import { ACTIVITY_COLORS } from '../utils/activityColors.js';
 // Project icon set — exists because bare glyphs/emoji render inconsistently
 // (or as tofu) depending on the platform's font coverage.
-import { IconRefresh } from './Icons.jsx';
+import { LiEye, LiEyeOff, LiRotate } from './Icons.jsx';
 import SatelliteInfoPanel from './SatelliteInfoPanel.jsx';
 
 const DEG = Math.PI / 180;
@@ -29,6 +50,14 @@ const DEFAULT_CAM_DISTANCE = 3.2;
 // Altitude of every overlay above the sphere, as a multiple of EARTH_R.
 // Markers and arc endpoints share it so arcs start exactly at the dot.
 const MARKER_ALT = 1.012;
+// Plugin overlay shell: above the surface (so it never z-fights the earth
+// mesh) but below the markers, so heatmaps never cover spot dots.
+const OVERLAY_ALT = 1.005;
+// Shared plugin-overlay canvas resolution (equirectangular, 2:1). At 2048
+// wide a 1° aurora cell is ~5.7 px — smooth enough once the GPU's bilinear
+// filtering has its say. The whole feature is skipped in low-memory mode.
+const OVERLAY_TEX_W = 2048;
+const OVERLAY_TEX_H = 1024;
 // Below this panel width WorldMap's projection toggle wraps across the top of
 // the map, so the globe's own controls have to move out from under it.
 const NARROW_PANEL_PX = 480;
@@ -169,6 +198,16 @@ const GLOBE_COLORS = {
 // selected in Flat mode stays selected when switching to 3D and back.
 const SAT_SELECTED_KEY = 'selected_satellites';
 
+// Camera distance (earth radii from center) below which satellites swap from
+// dots to 3D models. Selected satellites show their model at any distance.
+const SAT_MODEL_LOD_DIST = 2.6;
+
+// Built globe textures, keyed by template|zoom|lang. Entries are 4096- or
+// 8192-wide canvases (up to ~130 MB each), so keep only the last two — enough
+// that the detail upgrade and a style toggle don't refetch their tiles.
+const textureCanvasCache = new Map();
+const TEXTURE_CACHE_MAX = 2;
+
 function readSelectedSats() {
   try {
     const raw = sessionStorage.getItem(SAT_SELECTED_KEY);
@@ -251,6 +290,9 @@ const EARTH_VERT = /* glsl */ `
 
 const EARTH_FRAG = /* glsl */ `
   uniform sampler2D uMap;
+  uniform sampler2D uDetail;    // close-zoom patch for the visible window
+  uniform float uDetailOn;      // 0/1
+  uniform vec4 uDetailBounds;   // uMin, uSpan, vTop, vBottom (base-texture UV space)
   uniform vec3 uSunDir;         // in view space
   uniform float uNightDarkness; // 0..1, same meaning as the flat map's overlay opacity
   uniform float uBrightness;    // lift for dark basemaps
@@ -259,6 +301,20 @@ const EARTH_FRAG = /* glsl */ `
 
   void main() {
     vec3 tex = texture2D(uMap, vUv).rgb * uBrightness;
+    // High-zoom detail patch: replaces the base inside its window, feathered
+    // at the edges so the seam never reads as a hard line. Longitude compare
+    // wraps so a patch spanning the antimeridian still works.
+    if (uDetailOn > 0.5) {
+      float du = mod(vUv.x - uDetailBounds.x + 1.0, 1.0);
+      float vSpan = uDetailBounds.z - uDetailBounds.w;
+      if (du < uDetailBounds.y && vUv.y > uDetailBounds.w && vUv.y < uDetailBounds.z) {
+        vec2 duv = vec2(du / uDetailBounds.y, (vUv.y - uDetailBounds.w) / vSpan);
+        vec3 det = texture2D(uDetail, duv).rgb * uBrightness;
+        float f = smoothstep(0.0, 0.04, duv.x) * smoothstep(0.0, 0.04, 1.0 - duv.x) *
+                  smoothstep(0.0, 0.04, duv.y) * smoothstep(0.0, 0.04, 1.0 - duv.y);
+        tex = mix(tex, det, f);
+      }
+    }
     float d = dot(normalize(vNormal), normalize(uSunDir));
     // Soft band across the terminator rather than a hard edge.
     float day = smoothstep(-0.14, 0.14, d);
@@ -304,6 +360,7 @@ export default function Globe3D({
   wwffSpots,
   sotaSpots,
   wwbotaSpots,
+  canparksSpots,
   dxPaths,
   mapBandFilter,
   pskReporterSpots,
@@ -313,6 +370,7 @@ export default function Globe3D({
   showWWFF,
   showSOTA,
   showWWBOTA,
+  showCANParks,
   showPSKReporter,
   showWSJTX,
   onSpotClick,
@@ -321,9 +379,16 @@ export default function Globe3D({
   satellites,
   satellitesEnabled = true,
   suppressedLayers = [],
+  // { layerId: { enabled, opacity } } for the globe-capable plugin layers —
+  // same states the flat map persists to openhamclock_mapSettings.layers.
+  overlayLayerStates = null,
   allUnits = { dist: 'imperial' },
   config,
   hideUi = false,
+  // Flips WorldMap's mapUiHidden state (persisted as openhamclock_mapUiHidden)
+  // — the globe's counterpart to the flat map's eye button, which lives in a
+  // Leaflet-only dock that never renders in 3D.
+  onToggleHideUi,
   tileStyle = 'dark',
   lowMemoryMode = false,
   nightDarkness = 60,
@@ -357,6 +422,15 @@ export default function Globe3D({
     }, AUTOROTATE_IDLE_MS);
   }, []);
   const [textureLoading, setTextureLoading] = useState(true);
+  // One-way per-session detail upgrade: once the camera has been close enough
+  // that tile resolution visibly limits the basemap (labels pixelate), the
+  // texture rebuilds at +1 tile zoom in the background. Sticky so zooming
+  // back out doesn't thrash rebuilds.
+  const [detailBump, setDetailBump] = useState(false);
+  const detailBumpRef = useRef(false);
+  // template|lang of the texture currently on the sphere — tells the texture
+  // effect whether a rebuild is a silent detail upgrade or a visible change.
+  const appliedTextureKeyRef = useRef('');
   const [textureProgress, setTextureProgress] = useState(0);
   const [tooltip, setTooltip] = useState(null);
   // On by default, but remembered — otherwise switching it off would not
@@ -478,6 +552,7 @@ export default function Globe3D({
     if (showWWFF) pushSimple(wwffSpots, ACTIVITY_COLORS.wwff, 'WWFF');
     if (showSOTA) pushSimple(sotaSpots, ACTIVITY_COLORS.sota, 'SOTA');
     if (showWWBOTA) pushSimple(wwbotaSpots, ACTIVITY_COLORS.wwbota, 'WWBOTA');
+    if (showCANParks) pushSimple(canparksSpots, ACTIVITY_COLORS.canparks, 'CANParks');
 
     if (showDXPaths && dxPaths?.length) {
       dxPaths.forEach((p) => {
@@ -554,6 +629,7 @@ export default function Globe3D({
     wwffSpots,
     sotaSpots,
     wwbotaSpots,
+    canparksSpots,
     dxPaths,
     pskReporterSpots,
     wsjtxSpots,
@@ -561,6 +637,7 @@ export default function Globe3D({
     showWWFF,
     showSOTA,
     showWWBOTA,
+    showCANParks,
     showDXPaths,
     showPSKReporter,
     showWSJTX,
@@ -665,6 +742,9 @@ export default function Globe3D({
     const earthMat = new THREE.ShaderMaterial({
       uniforms: {
         uMap: { value: new THREE.CanvasTexture(placeholder) },
+        uDetail: { value: new THREE.CanvasTexture(placeholder) },
+        uDetailOn: { value: 0 },
+        uDetailBounds: { value: new THREE.Vector4(0, 0, 0, 0) },
         uSunDir: { value: new THREE.Vector3(1, 0, 0) },
         uNightDarkness: { value: THREE.MathUtils.clamp(nightDarknessRef.current / 100, 0, 1) },
         uBrightness: { value: 1 },
@@ -706,6 +786,30 @@ export default function Globe3D({
     const satGroup = new THREE.Group();
     scene.add(satGroup);
 
+    // Plugin overlay shell — one shared equirectangular canvas (Maidenhead,
+    // zones, D-RAP, aurora) draped on a transparent sphere just above the
+    // earth mesh. SphereGeometry's UV layout matches the canvas's lat/lon
+    // projection exactly, so painters stay pure 2D. Repainted only when a
+    // layer toggle/opacity/dataset changes — never per frame. Skipped
+    // entirely in low-memory mode, like the starfield and satellite models.
+    let overlayShell = null;
+    let overlayTexture = null;
+    let overlayCanvas = null;
+    if (!lowMem) {
+      overlayCanvas = document.createElement('canvas');
+      overlayCanvas.width = OVERLAY_TEX_W;
+      overlayCanvas.height = OVERLAY_TEX_H;
+      overlayTexture = new THREE.CanvasTexture(overlayCanvas);
+      overlayTexture.colorSpace = THREE.SRGBColorSpace;
+      overlayTexture.anisotropy = renderer.capabilities.getMaxAnisotropy?.() ?? 1;
+      overlayShell = new THREE.Mesh(
+        new THREE.SphereGeometry(EARTH_R * OVERLAY_ALT, 64, 48),
+        new THREE.MeshBasicMaterial({ map: overlayTexture, transparent: true, depthWrite: false }),
+      );
+      overlayShell.visible = false; // until a painter actually draws something
+      scene.add(overlayShell);
+    }
+
     const raycaster = new THREE.Raycaster();
     raycaster.params.Points.threshold = 0.02;
     const pointer = new THREE.Vector2();
@@ -722,6 +826,10 @@ export default function Globe3D({
       stars,
       overlayGroup,
       satGroup,
+      overlayShell,
+      overlayTexture,
+      overlayCanvas,
+      overlayCtx: overlayCanvas ? overlayCanvas.getContext('2d') : null,
       raycaster,
       pointer,
       dotTexture: makeDotTexture(),
@@ -761,6 +869,46 @@ export default function Globe3D({
       if (s.stationMarkers?.length) {
         const k = s.camera.position.length() / DEFAULT_CAM_DISTANCE;
         for (let i = 0; i < s.stationMarkers.length; i++) s.stationMarkers[i].scale.setScalar(k);
+      }
+      // Satellite 3D models: shown inside the LOD distance (always for
+      // selected birds), scaled per frame to a constant apparent size. The
+      // dots underneath stay visible and remain the raycast target.
+      if (s.satModels?.length) {
+        const near = s.camera.position.length() < SAT_MODEL_LOD_DIST;
+        const h = s.renderer.domElement.clientHeight || 1;
+        const fovK = 2 * Math.tan((s.camera.fov * Math.PI) / 360);
+        const dots = s.satDotSizes;
+        let dotsChanged = false;
+        for (let i = 0; i < s.satModels.length; i++) {
+          const m = s.satModels[i];
+          const show = near || m.userData.satSelected;
+          m.visible = show;
+          // Hide the dot under a visible model — it would sit on top of the
+          // mesh and obscure it. Sat i's model and dot share an index.
+          if (dots && i < dots.attr.count) {
+            const want = show ? 0 : dots.base[i];
+            if (dots.attr.array[i] !== want) {
+              dots.attr.array[i] = want;
+              dotsChanged = true;
+            }
+          }
+          if (!show) continue;
+          const px = m.userData.satSelected ? 46 : 34;
+          m.scale.setScalar((px * fovK * s.camera.position.distanceTo(m.position)) / h);
+        }
+        if (dotsChanged && dots) dots.attr.needsUpdate = true;
+      }
+      // Close-zoom detail: when the camera first dwells inside the sphere's
+      // pixelation range on capable hardware, trigger the one-way texture
+      // upgrade. GPU must fit an 8192-wide texture; lowMem never upgrades.
+      if (
+        !detailBumpRef.current &&
+        !lowMem &&
+        s.camera.position.length() < 1.8 &&
+        (s.renderer?.capabilities?.maxTextureSize ?? 0) >= 8192
+      ) {
+        detailBumpRef.current = true;
+        setDetailBump(true);
       }
       // Sun direction is fixed in world space; convert to view space per frame.
       if (s.sunWorld) {
@@ -820,6 +968,11 @@ export default function Globe3D({
       earthMat.dispose();
       atmosphere.geometry.dispose();
       atmosphere.material.dispose();
+      if (overlayShell) {
+        overlayShell.geometry.dispose();
+        overlayShell.material.dispose();
+        overlayTexture.dispose();
+      }
       if (stars) {
         stars.geometry.dispose();
         stars.material.dispose();
@@ -869,46 +1022,182 @@ export default function Globe3D({
     if (!template) return undefined;
 
     const ac = new AbortController();
-    setTextureLoading(true);
-    setTextureProgress(0);
+    const baseZoom = chooseGlobeTileZoom({ lowMemory: lowMem, pixelRatio: window.devicePixelRatio || 1 });
+    const zoom = Math.min(5, baseZoom + (detailBump && !lowMem ? 1 : 0));
+    const cacheKey = `${template}|${zoom}|${mapLang}`;
+    // A detail upgrade replaces a texture this style is already showing — do
+    // it silently in the background rather than blanking the globe with the
+    // loading overlay. Style/language changes keep the visible progress.
+    const isUpgrade = appliedTextureKeyRef.current === `${template}|${mapLang}`;
+    if (!isUpgrade) {
+      setTextureLoading(true);
+      setTextureProgress(0);
+    }
+
+    const applyBuilt = ({ canvas, meanLuma }) => {
+      const s = gl.current;
+      if (!s.earthMat) return;
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.anisotropy = s.renderer?.capabilities.getMaxAnisotropy?.() ?? 1;
+      tex.wrapS = THREE.RepeatWrapping;
+      const old = s.earthMat.uniforms.uMap.value;
+      s.earthMat.uniforms.uMap.value = tex;
+      old?.dispose?.();
+      // Dark basemaps read as a black ball on a sphere; lift them toward the
+      // brightness satellite imagery already has (mean luma ≈ 0.30) while
+      // leaving anything that bright untouched — the clamp floor of 1 means
+      // this only ever brightens.
+      s.earthMat.uniforms.uBrightness.value = THREE.MathUtils.clamp(0.3 / Math.max(meanLuma, 0.001), 1, 4);
+      appliedTextureKeyRef.current = `${template}|${mapLang}`;
+      s.requestRender?.();
+      setTextureLoading(false);
+    };
+
+    const cached = textureCanvasCache.get(cacheKey);
+    if (cached) {
+      applyBuilt(cached);
+      return () => ac.abort();
+    }
 
     buildGlobeTexture({
       tileUrlTemplate: template,
-      tileZoom: chooseGlobeTileZoom({ lowMemory: lowMem, pixelRatio: window.devicePixelRatio || 1 }),
+      tileZoom: zoom,
       lang: mapLang,
       // Countries ships transparent overlay tiles; flat mode paints this same
       // blue behind them via the map div's background.
       baseColor: MAP_STYLES[style].countriesOverlay ? '#4a90d9' : undefined,
-      onProgress: (p) => setTextureProgress(p),
+      // ...and fills every country under those tiles, same as the flat map (#1166).
+      countries: !!MAP_STYLES[style].countriesOverlay,
+      // Real imagery for the polar caps, where this basemap has a polar source.
+      polar: MAP_STYLES[style].polar,
+      onProgress: isUpgrade ? undefined : (p) => setTextureProgress(p),
       signal: ac.signal,
     })
-      .then(({ canvas, meanLuma }) => {
+      .then((built) => {
         if (ac.signal.aborted) return;
-        const s = gl.current;
-        if (!s.earthMat) return;
-        const tex = new THREE.CanvasTexture(canvas);
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.anisotropy = s.renderer?.capabilities.getMaxAnisotropy?.() ?? 1;
-        tex.wrapS = THREE.RepeatWrapping;
-        const old = s.earthMat.uniforms.uMap.value;
-        s.earthMat.uniforms.uMap.value = tex;
-        old?.dispose?.();
-        // Dark basemaps read as a black ball on a sphere; lift them toward the
-        // brightness satellite imagery already has (mean luma ≈ 0.30) while
-        // leaving anything that bright untouched — the clamp floor of 1 means
-        // this only ever brightens.
-        s.earthMat.uniforms.uBrightness.value = THREE.MathUtils.clamp(0.3 / Math.max(meanLuma, 0.001), 1, 4);
-        s.requestRender?.();
-        setTextureLoading(false);
+        textureCanvasCache.set(cacheKey, built);
+        while (textureCanvasCache.size > TEXTURE_CACHE_MAX) {
+          textureCanvasCache.delete(textureCanvasCache.keys().next().value);
+        }
+        applyBuilt(built);
       })
       .catch((e) => {
         if (!ac.signal.aborted) {
           console.warn('[Globe3D] texture build failed:', e);
-          setTextureLoading(false);
+          if (!isUpgrade) setTextureLoading(false);
         }
       });
 
     return () => ac.abort();
+  }, [tileStyle, lowMem, mapLang, detailBump]);
+
+  // ── Close-zoom detail patch ──────────────────────────────
+  // A whole-globe texture cannot match tiled LOD up close, so once the camera
+  // settles inside 2.3 earth radii we stream Leaflet-grade tiles for just the
+  // visible window and blend them over the base in the shader. Zoom ladder is
+  // chosen to keep every rebuild under ~200 tile requests; closer camera =
+  // higher zoom over a narrower (center-screen) window. Debounced on control
+  // changes, so nothing rebuilds mid-drag or during auto-rotate.
+  useEffect(() => {
+    const s = gl.current;
+    if (!s.controls || lowMem) return undefined;
+    const style = MAP_STYLES[tileStyle]?.url ? tileStyle : 'dark';
+    const template = MAP_STYLES[style].url;
+    if (!template) return undefined;
+
+    let ac = null;
+    let last = null; // { zoom, lat, lon }
+    let timer = null;
+
+    const disable = () => {
+      if (s.earthMat && s.earthMat.uniforms.uDetailOn.value !== 0) {
+        s.earthMat.uniforms.uDetailOn.value = 0;
+        s.requestRender?.();
+      }
+      last = null;
+    };
+
+    const update = () => {
+      if (!s.camera || !s.earthMat) return;
+      const d = s.camera.position.length();
+      if (d > 2.3) {
+        disable();
+        return;
+      }
+      const { lat, lon } = vec3ToLatLon(s.camera.position);
+      const horizonDeg = Math.acos(Math.min(1, 1 / d)) / DEG;
+      // Zoom ladder: closer camera → higher zoom over a narrower window that
+      // covers where the user is actually looking; the feather hands off to
+      // the base texture outside it.
+      let zoom;
+      let span;
+      if (d < 1.35) {
+        zoom = 7;
+        span = 40;
+      } else if (d < 1.7) {
+        zoom = 6;
+        span = 70;
+      } else {
+        zoom = 5;
+        span = 140;
+      }
+      span = Math.min(span, 2 * horizonDeg + 24);
+      // Reuse the current patch while the view stays well inside it.
+      const lonDelta = Math.abs(((((lon - (last?.lon ?? 999)) % 360) + 540) % 360) - 180);
+      if (last && last.zoom === zoom && Math.abs(lat - last.lat) < span * 0.2 && lonDelta < span * 0.2) return;
+
+      ac?.abort();
+      ac = new AbortController();
+      const signal = ac.signal;
+      const req = { zoom, lat, lon };
+      buildGlobeDetailPatch({
+        tileUrlTemplate: template,
+        lang: mapLang,
+        zoom,
+        lonMin: lon - span / 2,
+        lonSpan: span,
+        latTop: Math.min(80, lat + span / 2),
+        latBottom: Math.max(-80, lat - span / 2),
+        countries: !!MAP_STYLES[style].countriesOverlay,
+        signal,
+      })
+        .then(({ canvas, bounds }) => {
+          if (signal.aborted || !s.earthMat) return;
+          last = req;
+          const tex = new THREE.CanvasTexture(canvas);
+          tex.colorSpace = THREE.SRGBColorSpace;
+          tex.anisotropy = s.renderer?.capabilities.getMaxAnisotropy?.() ?? 1;
+          const old = s.earthMat.uniforms.uDetail.value;
+          s.earthMat.uniforms.uDetail.value = tex;
+          old?.dispose?.();
+          s.earthMat.uniforms.uDetailBounds.value.set(
+            (bounds.lonMin + 180) / 360,
+            bounds.lonSpan / 360,
+            1 - (90 - bounds.latTop) / 180,
+            1 - (90 - bounds.latBottom) / 180,
+          );
+          s.earthMat.uniforms.uDetailOn.value = 1;
+          s.requestRender?.();
+        })
+        .catch(() => {
+          /* aborted or offline — the base texture stays */
+        });
+    };
+
+    const onChange = () => {
+      clearTimeout(timer);
+      timer = setTimeout(update, 700);
+    };
+    s.controls.addEventListener('change', onChange);
+    update();
+
+    return () => {
+      clearTimeout(timer);
+      ac?.abort();
+      s.controls?.removeEventListener('change', onChange);
+      disable();
+    };
   }, [tileStyle, lowMem, mapLang]);
 
   // ── Terminator: track the subsolar point ─────────────────
@@ -926,6 +1215,774 @@ export default function Globe3D({
     const id = setInterval(update, 60_000);
     return () => clearInterval(id);
   }, [lowMem]);
+
+  // ── Moon: real position, real phase ──────────────────────
+  // A sprite textured with NASA's Dial-A-Moon render (already proxied at
+  // /api/moon-image, hourly) — the photo shows the actual current phase and
+  // libration, so no phase shader is needed. The JPEG has no alpha channel,
+  // so it is luminance-keyed on a scratch canvas: the black background goes
+  // fully transparent (no square against space — the renderer canvas is
+  // alpha-composited over the page, so blending tricks can't hide it) and
+  // the unlit limb fades out naturally, which is how the moon actually
+  // looks in the sky. Placement follows the real sublunar point
+  // (getMoonPosition) at a compressed distance: far outside the camera's
+  // 8-unit orbit ceiling but inside the starfield, at an exaggerated size
+  // so it reads as the moon rather than a pixel (the true angular size at
+  // this distance would be invisible). Earth occludes it naturally via the
+  // depth test. Skipped in low-memory mode.
+  useEffect(() => {
+    if (lowMem) return undefined;
+    const s = gl.current;
+    if (!s.scene) return undefined;
+
+    const MOON_DIST = 12; // world units (camera maxDistance is 8, starfield ~22+)
+    const MOON_SIZE = 0.85; // sprite diameter in world units
+    const MOON_TEX_SIZE = 512;
+
+    const material = new THREE.SpriteMaterial({
+      depthWrite: false,
+      depthTest: true,
+      transparent: true,
+    });
+    const moon = new THREE.Sprite(material);
+    moon.scale.set(MOON_SIZE, MOON_SIZE, 1);
+    moon.visible = false; // until the texture arrives
+    s.scene.add(moon);
+
+    let alive = true;
+    let lastImageBucket = null;
+
+    const updatePosition = () => {
+      const pos = getMoonPosition(new Date());
+      latLonToVec3(pos.lat, pos.lon, MOON_DIST, moon.position);
+      s.requestRender?.();
+    };
+
+    // Luminance → alpha: below ~2% black stays fully transparent, and
+    // anything moderately lit ramps quickly to opaque so stars don't
+    // bleed through the maria. The steep ramp doubles as a soft edge.
+    const keyOutBlack = (img) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = MOON_TEX_SIZE;
+      const cctx = canvas.getContext('2d');
+      cctx.drawImage(img, 0, 0, MOON_TEX_SIZE, MOON_TEX_SIZE);
+      const pixels = cctx.getImageData(0, 0, MOON_TEX_SIZE, MOON_TEX_SIZE);
+      const d = pixels.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const lum = Math.max(d[i], d[i + 1], d[i + 2]);
+        d[i + 3] = lum <= 5 ? 0 : Math.min(255, (lum - 5) * 8);
+      }
+      cctx.putImageData(pixels, 0, 0);
+      return canvas;
+    };
+
+    const updateTexture = () => {
+      const bucket = Math.floor(Date.now() / 3600_000);
+      if (bucket === lastImageBucket) return;
+      lastImageBucket = bucket;
+      const img = new Image();
+      img.onload = () => {
+        if (!alive) return;
+        try {
+          const texture = new THREE.CanvasTexture(keyOutBlack(img));
+          texture.colorSpace = THREE.SRGBColorSpace;
+          const old = material.map;
+          material.map = texture;
+          material.needsUpdate = true;
+          old?.dispose();
+          moon.visible = true;
+          s.requestRender?.();
+        } catch {
+          lastImageBucket = null; // canvas readback failed — retry next tick
+        }
+      };
+      img.onerror = () => {
+        // image unavailable — retry next hourly tick
+        lastImageBucket = null;
+      };
+      img.src = `/api/moon-image?t=${bucket}`;
+    };
+
+    updatePosition();
+    updateTexture();
+    const posId = setInterval(updatePosition, 60_000);
+    const texId = setInterval(updateTexture, 600_000); // checks the hour bucket
+
+    return () => {
+      alive = false;
+      clearInterval(posId);
+      clearInterval(texId);
+      s.scene?.remove(moon);
+      material.map?.dispose();
+      material.dispose();
+      s.requestRender?.();
+    };
+  }, [lowMem]);
+
+  // ── Trek theme easter egg: the Enterprise on patrol ──────
+  // While the LCARS theme is active, a procedural Constitution-class
+  // silhouette flies a slow inclined orbit whose plane precesses so the
+  // ground track drifts around the planet. Purely decorative: never a
+  // raycast target (picking intersects earth/sats/spots explicitly). The
+  // flight is continuous by nature, so its ticker keeps the on-demand
+  // render loop awake — same cost class as the auto-rotate screensaver —
+  // and is skipped entirely in low-memory mode. themeTick re-runs this
+  // effect whenever [data-theme] changes.
+  useEffect(() => {
+    if (lowMem) return undefined;
+    if (document.documentElement.getAttribute('data-theme') !== 'trek') return undefined;
+    const s = gl.current;
+    if (!s.scene) return undefined;
+
+    const ship = getEnterpriseTemplate().clone();
+    s.scene.add(ship);
+
+    const ORBIT_R = EARTH_R * 1.35;
+    const PERIOD_MS = 95_000; // one lap ~95 s — brisk but stately
+    const RAAN_PERIOD_MS = 1_800_000; // orbit plane precesses once per 30 min
+    const INCLINATION = THREE.MathUtils.degToRad(35);
+    const SHIP_PX = 44; // constant apparent size, a touch over a selected sat
+    const TICK_MS = 33; // ~30 fps flight
+
+    const pos = new THREE.Vector3();
+    const forward = new THREE.Vector3();
+    const up = new THREE.Vector3();
+    const right = new THREE.Vector3();
+    const basis = new THREE.Matrix4();
+    const qIncl = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), INCLINATION);
+    const qRaan = new THREE.Quaternion();
+    const yAxis = new THREE.Vector3(0, 1, 0);
+
+    let raf = 0;
+    let last = 0;
+    const tick = (now) => {
+      raf = requestAnimationFrame(tick);
+      if (now - last < TICK_MS) return;
+      last = now;
+      if (!s.renderer) return;
+
+      const t = ((now % PERIOD_MS) / PERIOD_MS) * Math.PI * 2;
+      qRaan.setFromAxisAngle(yAxis, ((now % RAAN_PERIOD_MS) / RAAN_PERIOD_MS) * Math.PI * 2);
+      pos.set(Math.cos(t), 0, Math.sin(t)).applyQuaternion(qIncl).applyQuaternion(qRaan).multiplyScalar(ORBIT_R);
+      forward.set(-Math.sin(t), 0, Math.cos(t)).applyQuaternion(qIncl).applyQuaternion(qRaan);
+
+      // Nose along the velocity, saucer facing away from the planet
+      up.copy(pos).normalize();
+      right.crossVectors(up, forward).normalize();
+      forward.crossVectors(right, up); // re-orthogonalize
+      basis.makeBasis(right, up, forward);
+      ship.quaternion.setFromRotationMatrix(basis);
+      ship.position.copy(pos);
+
+      // Constant apparent size, same math as the satellite models
+      const h = s.renderer.domElement.clientHeight || 1;
+      const fovK = 2 * Math.tan((s.camera.fov * Math.PI) / 360);
+      ship.scale.setScalar((SHIP_PX * fovK * s.camera.position.distanceTo(ship.position)) / h);
+
+      s.requestRender?.();
+    };
+    raf = requestAnimationFrame(tick);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      s.scene?.remove(ship);
+      s.requestRender?.();
+      // Template geometry/materials are shared session-cached resources —
+      // never disposed, same convention as the satellite archetypes.
+    };
+  }, [lowMem, themeTick]);
+
+  // ── Plugin overlay layers (Maidenhead / zones / D-RAP / aurora / worked grids) ──────
+  // The globe-capable subset of the plugin layers, driven by the same
+  // enabled/opacity states the flat map persists (openhamclock_mapSettings
+  // .layers). Data is fetched with the same endpoints and cadence as the
+  // Leaflet hooks; painting happens on the shared overlay canvas only when a
+  // toggle, opacity, or dataset changes — the render loop never repaints it.
+  // In low-memory mode the whole feature is off and the layers stay in
+  // WorldMap's suppressed-layers note instead.
+  const drapOverlayOn = !lowMem && !!overlayLayerStates?.drap?.enabled;
+  const auroraOverlayOn = !lowMem && !!overlayLayerStates?.aurora?.enabled;
+  const zonesOverlayOn = !lowMem && !!overlayLayerStates?.zones?.enabled;
+  const workedGridsOverlayOn = !lowMem && !!overlayLayerStates?.['worked-grids']?.enabled;
+  const wxradarOverlayOn = !lowMem && !!overlayLayerStates?.wxradar?.enabled;
+  const lightningOverlayOn = !lowMem && !!overlayLayerStates?.lightning?.enabled;
+  const earthquakesOverlayOn = !lowMem && !!overlayLayerStates?.earthquakes?.enabled;
+  const wildfiresOverlayOn = !lowMem && !!overlayLayerStates?.wildfires?.enabled;
+  const floodsOverlayOn = !lowMem && !!overlayLayerStates?.floods?.enabled;
+  const tornadoOverlayOn = !lowMem && !!overlayLayerStates?.['tornado-warnings']?.enabled;
+  const aircraftOverlayOn = !lowMem && !!overlayLayerStates?.aircraft?.enabled;
+  const atcOverlayOn = !lowMem && !!overlayLayerStates?.['atc-sectors']?.enabled;
+  const historyOverlayOn = !lowMem && !!overlayLayerStates?.['history-playback']?.enabled;
+  const [overlayDrap, setOverlayDrap] = useState(null);
+  const [overlayAurora, setOverlayAurora] = useState(null);
+  const [overlayZones, setOverlayZones] = useState(null);
+  const [overlayWorkedGrids, setOverlayWorkedGrids] = useState(null);
+  const [overlayWxRadar, setOverlayWxRadar] = useState(null);
+  const [overlayLightning, setOverlayLightning] = useState(null);
+  const [overlayEarthquakes, setOverlayEarthquakes] = useState(null);
+  const [overlayWildfires, setOverlayWildfires] = useState(null);
+  const [overlayFloods, setOverlayFloods] = useState(null);
+  const [overlayTornado, setOverlayTornado] = useState(null);
+  const [overlayAircraft, setOverlayAircraft] = useState(null);
+  const [overlayATC, setOverlayATC] = useState(null);
+  const [overlayHistory, setOverlayHistory] = useState(null);
+
+  useEffect(() => {
+    if (!drapOverlayOn) return undefined;
+    let alive = true;
+    const fetchDrap = async () => {
+      try {
+        const res = await fetch('/api/drap');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (alive && Array.isArray(data.lats) && Array.isArray(data.lons) && Array.isArray(data.freqs)) {
+          setOverlayDrap(data);
+        }
+      } catch (err) {
+        console.error('[Globe3D] D-RAP fetch error:', err);
+      }
+    };
+    fetchDrap();
+    const id = setInterval(fetchDrap, 300_000); // server caches 5 min, like the flat layer
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [drapOverlayOn]);
+
+  useEffect(() => {
+    if (!auroraOverlayOn) return undefined;
+    let alive = true;
+    const fetchAurora = async () => {
+      try {
+        const res = await fetch('/api/noaa/aurora');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (alive && Array.isArray(data.coordinates) && data.coordinates.length) {
+          setOverlayAurora(data.coordinates);
+        }
+      } catch (err) {
+        console.error('[Globe3D] aurora fetch error:', err);
+      }
+    };
+    fetchAurora();
+    const id = setInterval(fetchAurora, 600_000); // OVATION cadence, like the flat layer
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [auroraOverlayOn]);
+
+  useEffect(() => {
+    if (!zonesOverlayOn) return undefined;
+    // CQ vs ITU is whatever the flat layer's on-map control last persisted.
+    let zoneType = 'cq';
+    try {
+      zoneType = localStorage.getItem('openhamclock_zones_type') === 'itu' ? 'itu' : 'cq';
+    } catch {}
+    const src = ZONE_SOURCES[zoneType];
+    let alive = true;
+    fetch(src.file)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (alive && data && Array.isArray(data.features)) {
+          setOverlayZones({ geojson: data, color: src.color });
+        }
+      })
+      .catch((err) => console.error('[Globe3D] zones fetch error:', err));
+    return () => {
+      alive = false;
+    };
+  }, [zonesOverlayOn]);
+
+  useEffect(() => {
+    if (!workedGridsOverlayOn) return undefined;
+    // Same data source as the flat layer: the logbook cache, live via
+    // subscribe (newly logged QSOs repaint immediately). The flat layer's
+    // persisted band filter is honoured, read once per enable.
+    let band = null;
+    try {
+      band = localStorage.getItem('openhamclock_worked_grids_band') || null;
+    } catch {}
+    return logbookStore.subscribe((qsos) => {
+      setOverlayWorkedGrids(workedGridCounts(qsos, band));
+    });
+  }, [workedGridsOverlayOn]);
+
+  // NEXRAD radar: one full-extent EPSG:4326 WMS image, pixel-aligned with
+  // the 2048×1024 overlay canvas (n0r covers CONUS; elsewhere transparent).
+  // crossOrigin keeps the canvas clean for WebGL texture upload.
+  useEffect(() => {
+    if (!wxradarOverlayOn) return undefined;
+    let alive = true;
+    const fetchRadar = () => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        if (alive) setOverlayWxRadar(img);
+      };
+      img.onerror = () => {
+        if (alive) console.warn('[Globe3D] radar WMS image failed');
+      };
+      img.src =
+        'https://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi' +
+        '?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&LAYERS=nexrad-n0r' +
+        '&SRS=EPSG:4326&BBOX=-180,-90,180,90&WIDTH=2048&HEIGHT=1024' +
+        '&FORMAT=image/png&TRANSPARENT=true&t=' +
+        Math.floor(Date.now() / 120_000); // 2-min buckets, like the flat layer
+    };
+    fetchRadar();
+    const id = setInterval(fetchRadar, 120_000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      setOverlayWxRadar(null);
+    };
+  }, [wxradarOverlayOn]);
+
+  // Lightning: own Blitzortung socket (the Leaflet layer's socket never runs
+  // in globe mode). Strikes are buffered and flushed to state every 10 s —
+  // a deliberate cadence compromise between liveness and the globe's
+  // render-on-change design (each flush repaints the whole overlay canvas).
+  useEffect(() => {
+    if (!lightningOverlayOn) return undefined;
+    let alive = true;
+    let ws = null;
+    let serverIdx = 0;
+    const servers = [
+      'wss://ws8.blitzortung.org',
+      'wss://ws7.blitzortung.org',
+      'wss://ws2.blitzortung.org',
+      'wss://ws1.blitzortung.org',
+    ];
+    const buffer = [];
+    const flush = setInterval(() => {
+      if (!alive || !buffer.length) return;
+      const cutoff = Date.now() - 30 * 60 * 1000;
+      const kept = buffer.filter((s) => s.timestamp > cutoff).slice(-500);
+      buffer.length = 0;
+      buffer.push(...kept);
+      setOverlayLightning([...kept]);
+    }, 10_000);
+    const connect = () => {
+      if (!alive) return;
+      try {
+        ws = new WebSocket(servers[serverIdx % servers.length]);
+        ws.onopen = () => ws.send(JSON.stringify({ a: 111 }));
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(lzwDecode(event.data));
+            if (data.time && data.lat != null && data.lon != null) {
+              buffer.push({
+                lat: parseFloat(data.lat),
+                lon: parseFloat(data.lon),
+                timestamp: parseInt(data.time / 1000000, 10),
+              });
+            }
+          } catch {}
+        };
+        ws.onerror = () => {
+          serverIdx++;
+          try {
+            ws.close();
+          } catch {}
+        };
+        ws.onclose = () => {
+          if (alive) setTimeout(connect, 5000);
+        };
+      } catch {
+        serverIdx++;
+        if (alive) setTimeout(connect, 5000);
+      }
+    };
+    connect();
+    return () => {
+      alive = false;
+      clearInterval(flush);
+      try {
+        ws?.close();
+      } catch {}
+      setOverlayLightning(null);
+    };
+  }, [lightningOverlayOn]);
+
+  // Earthquakes: same USGS feed choice the flat layer persists.
+  useEffect(() => {
+    if (!earthquakesOverlayOn) return undefined;
+    let alive = true;
+    let feed = '2.5_day';
+    try {
+      feed = localStorage.getItem('earthquake-feed') || '2.5_day';
+    } catch {}
+    const fetchQuakes = async () => {
+      try {
+        const res = await fetch(`https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/${feed}.geojson`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (alive && Array.isArray(data.features)) setOverlayEarthquakes(data.features.slice(0, 100));
+      } catch (err) {
+        console.error('[Globe3D] earthquakes fetch error:', err);
+      }
+    };
+    fetchQuakes();
+    const id = setInterval(fetchQuakes, 300_000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      setOverlayEarthquakes(null);
+    };
+  }, [earthquakesOverlayOn]);
+
+  // Wildfires + floods: NASA EONET open events, same feeds as the flat layers.
+  useEffect(() => {
+    if (!wildfiresOverlayOn) return undefined;
+    let alive = true;
+    const fetchFires = async () => {
+      try {
+        const res = await fetch('https://eonet.gsfc.nasa.gov/api/v3/events?category=wildfires&status=open');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (alive && Array.isArray(data.events)) setOverlayWildfires(data.events.slice(0, 150));
+      } catch (err) {
+        console.error('[Globe3D] wildfires fetch error:', err);
+      }
+    };
+    fetchFires();
+    const id = setInterval(fetchFires, 600_000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      setOverlayWildfires(null);
+    };
+  }, [wildfiresOverlayOn]);
+
+  useEffect(() => {
+    if (!floodsOverlayOn) return undefined;
+    let alive = true;
+    const fetchFloods = async () => {
+      try {
+        const [floods, storms] = await Promise.all([
+          fetch('https://eonet.gsfc.nasa.gov/api/v3/events?category=floods&status=open').then((r) =>
+            r.ok ? r.json() : null,
+          ),
+          fetch('https://eonet.gsfc.nasa.gov/api/v3/events?category=severeStorms&status=open').then((r) =>
+            r.ok ? r.json() : null,
+          ),
+        ]);
+        const events = [...(floods?.events || []), ...(storms?.events || [])];
+        if (alive && events.length) setOverlayFloods(events.slice(0, 150));
+      } catch (err) {
+        console.error('[Globe3D] floods fetch error:', err);
+      }
+    };
+    fetchFloods();
+    const id = setInterval(fetchFloods, 600_000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      setOverlayFloods(null);
+    };
+  }, [floodsOverlayOn]);
+
+  // Tornado warnings: NWS active alerts, polygon geometries.
+  useEffect(() => {
+    if (!tornadoOverlayOn) return undefined;
+    let alive = true;
+    const fetchWarnings = async () => {
+      try {
+        const res = await fetch('https://api.weather.gov/alerts/active?event=Tornado%20Warning');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (alive && Array.isArray(data.features)) {
+          setOverlayTornado(data.features.filter((f) => f.geometry).slice(0, 150));
+        }
+      } catch (err) {
+        console.error('[Globe3D] tornado warnings fetch error:', err);
+      }
+    };
+    fetchWarnings();
+    const id = setInterval(fetchWarnings, 120_000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      setOverlayTornado(null);
+    };
+  }, [tornadoOverlayOn]);
+
+  // Aircraft: the server's world snapshot (adsb.lol proxy, 60 s cache).
+  // The globe shows the whole planet, so cap hard for canvas sanity.
+  useEffect(() => {
+    if (!aircraftOverlayOn) return undefined;
+    let alive = true;
+    const fetchPlanes = async () => {
+      try {
+        const res = await fetch('/api/aircraft');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (alive && Array.isArray(data.aircraft)) {
+          // Never prefix-slice this: adsb.lol orders the array west→east by
+          // longitude, so a cap here would drop everything east of some
+          // meridian. paintAircraft decimates spatially instead.
+          setOverlayAircraft(data.aircraft.filter((p) => p.lat != null && p.lon != null && !p.onGround));
+        }
+      } catch (err) {
+        console.error('[Globe3D] aircraft fetch error:', err);
+      }
+    };
+    fetchPlanes();
+    const id = setInterval(fetchPlanes, 60_000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      setOverlayAircraft(null);
+    };
+  }, [aircraftOverlayOn]);
+
+  // ATC sectors: static-ish boundaries (7-day server cache), densified like
+  // the flat layer so long edges follow the projection honestly.
+  useEffect(() => {
+    if (!atcOverlayOn) return undefined;
+    let alive = true;
+    fetch('/api/atc/sectors')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (alive && Array.isArray(data?.sectors)) {
+          setOverlayATC({
+            sectors: data.sectors.map((s) => ({ ...s, geometry: densifyGeoJson(s.geometry, 2) })),
+          });
+        }
+      })
+      .catch((err) => console.error('[Globe3D] ATC sectors fetch error:', err));
+    return () => {
+      alive = false;
+      setOverlayATC(null);
+    };
+  }, [atcOverlayOn]);
+
+  // History Playback: transport state, fetching, and the control UI live in
+  // the shared store (services/historyPlaybackStore.js) so the flat map and
+  // the globe scrub the same timeline. Subscribe for window data and mount
+  // the same transport control absolutely over the WebGL canvas.
+  useEffect(() => {
+    if (!historyOverlayOn) return undefined;
+    acquireHistory();
+    const unsub = subscribeHistory((snap) => setOverlayHistory(snap.result));
+
+    let control = null;
+    let wrapper = null;
+    const container = containerRef.current;
+    if (container) {
+      control = buildHistoryTransportControl(document);
+      const el = control.el;
+      // Same chrome as the Leaflet placement: .panel-wrapper > div carries
+      // the floating-panel styling.
+      wrapper = document.createElement('div');
+      wrapper.className = 'panel-wrapper';
+      wrapper.style.position = 'absolute';
+      wrapper.style.top = '52px'; // below the projection/style controls
+      wrapper.style.right = '10px';
+      wrapper.style.zIndex = '1000';
+      wrapper.appendChild(el);
+      container.appendChild(wrapper);
+      // Keep drags/scrolls on the control from grabbing the globe
+      for (const evt of ['pointerdown', 'wheel', 'dblclick']) {
+        el.addEventListener(evt, (e) => e.stopPropagation());
+      }
+      const saved = localStorage.getItem('history-playback-panel-position');
+      if (saved) {
+        try {
+          const { top, left } = JSON.parse(saved);
+          el.style.position = 'fixed';
+          el.style.top = top + 'px';
+          el.style.left = left + 'px';
+          el.style.right = 'auto';
+        } catch (_) {}
+      }
+      makeDraggable(el, 'history-playback-panel-position', { snap: 5 });
+      addMinimizeToggle(el, 'history-playback-panel-position', {
+        contentClassName: 'history-panel-content',
+        buttonClassName: 'history-minimize-btn',
+      });
+    }
+
+    return () => {
+      unsub();
+      releaseHistory();
+      setOverlayHistory(null);
+      if (control) {
+        control.dispose();
+        control.el.remove();
+      }
+      wrapper?.remove();
+    };
+  }, [historyOverlayOn]);
+
+  // Repaint the shared overlay canvas. Content-keyed on the states object so
+  // a parent re-render with identical enabled/opacity values repaints nothing.
+  const overlayStatesKey = JSON.stringify(overlayLayerStates ?? null);
+  useEffect(() => {
+    const s = gl.current;
+    if (!s.overlayCtx || !s.overlayShell) return;
+    const states = overlayLayerStates || {};
+    const { width, height } = s.overlayCanvas;
+    const ctx = s.overlayCtx;
+    ctx.clearRect(0, 0, width, height);
+    const dataById = {
+      zones: overlayZones,
+      drap: overlayDrap,
+      aurora: overlayAurora,
+      'worked-grids': overlayWorkedGrids,
+      wxradar: overlayWxRadar,
+      lightning: overlayLightning,
+      earthquakes: overlayEarthquakes,
+      wildfires: overlayWildfires,
+      floods: overlayFloods,
+      'tornado-warnings': overlayTornado,
+      'atc-sectors': overlayATC,
+      'history-playback': overlayHistory,
+    };
+    let painted = false;
+    for (const [id, painter] of Object.entries(GLOBE_OVERLAY_PAINTERS)) {
+      const st = states[id];
+      if (!st?.enabled) continue;
+      // Painters with no data yet draw nothing — the canvas fills in when
+      // the fetch effects above deliver.
+      painter(ctx, { width, height, opacity: st.opacity, data: dataById[id] });
+      painted = true;
+    }
+    s.overlayShell.visible = painted;
+    s.overlayTexture.needsUpdate = true;
+    s.requestRender?.();
+    // overlayStatesKey stands in for overlayLayerStates (content compare);
+    // lowMem: scene rebuild — repaint onto the fresh canvas.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    overlayStatesKey,
+    overlayZones,
+    overlayDrap,
+    overlayAurora,
+    overlayWorkedGrids,
+    overlayWxRadar,
+    overlayLightning,
+    overlayEarthquakes,
+    overlayWildfires,
+    overlayFloods,
+    overlayTornado,
+    overlayATC,
+    overlayHistory,
+    lowMem,
+  ]);
+
+  // ── Aircraft: native 3D models ───────────────────────────
+  // One InstancedMesh of flat airliner silhouettes (one draw call for
+  // thousands of aircraft), each positioned just above the surface and
+  // rotated to its true heading along the local tangent plane. Replaces
+  // the old equirect-canvas darts — actual objects on the globe instead
+  // of low-res arrows baked into a 2048px texture. Rebuilt when the 60 s
+  // snapshot refreshes; nothing animates per-frame, so the parked render
+  // loop stays parked.
+  useEffect(() => {
+    const s = gl.current;
+    if (!s.scene) return undefined;
+
+    const disposeMesh = () => {
+      if (s.aircraftMesh) {
+        s.scene.remove(s.aircraftMesh);
+        s.aircraftMesh.geometry.dispose();
+        s.aircraftMesh.material.dispose();
+        s.aircraftMesh = null;
+        s.requestRender?.();
+      }
+    };
+
+    if (!aircraftOverlayOn || !overlayAircraft?.length) {
+      disposeMesh();
+      return undefined;
+    }
+
+    const AIRCRAFT_ALT = 1.007; // above the overlay shell, below markers
+    const AIRCRAFT_SIZE = 0.0085; // world units — exaggerated for visibility
+    const opacity = overlayLayerStates?.aircraft?.opacity ?? 0.9;
+
+    const planes = decimateAircraft(overlayAircraft, 0.9);
+
+    // Airliner silhouette (top view, nose +Y), symmetric about the Y axis.
+    const half = [
+      [0, 1],
+      [0.07, 0.72],
+      [0.09, 0.28],
+      [0.78, -0.2],
+      [0.78, -0.32],
+      [0.1, -0.15],
+      [0.07, -0.6],
+      [0.34, -0.82],
+      [0.34, -0.92],
+      [0.04, -0.86],
+    ];
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 1);
+    for (const [x, y] of half.slice(1)) shape.lineTo(x, y);
+    shape.lineTo(0, -0.95);
+    for (const [x, y] of half.slice(1).reverse()) shape.lineTo(-x, y);
+    shape.closePath();
+    const geometry = new THREE.ShapeGeometry(shape);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xd7ecff,
+      side: THREE.DoubleSide,
+      transparent: opacity < 1,
+      opacity,
+      depthWrite: false,
+    });
+
+    disposeMesh();
+    const mesh = new THREE.InstancedMesh(geometry, material, planes.length);
+    mesh.frustumCulled = false;
+
+    const matrix = new THREE.Matrix4();
+    const pos = new THREE.Vector3();
+    const posUnit = new THREE.Vector3();
+    const northPt = new THREE.Vector3();
+    const eastPt = new THREE.Vector3();
+    const north = new THREE.Vector3();
+    const east = new THREE.Vector3();
+    const dir = new THREE.Vector3();
+    const xAxis = new THREE.Vector3();
+    const scale = new THREE.Vector3(AIRCRAFT_SIZE, AIRCRAFT_SIZE, AIRCRAFT_SIZE);
+
+    planes.forEach((plane, i) => {
+      latLonToVec3(plane.lat, plane.lon, AIRCRAFT_ALT, pos);
+      latLonToVec3(plane.lat, plane.lon, 1, posUnit);
+      // Local tangent frame, derived numerically so it matches whatever
+      // axis convention latLonToVec3 uses.
+      latLonToVec3(Math.min(89.5, plane.lat + 0.5), plane.lon, 1, northPt)
+        .sub(posUnit)
+        .normalize();
+      north.copy(northPt);
+      latLonToVec3(plane.lat, plane.lon + 0.5, 1, eastPt)
+        .sub(posUnit)
+        .normalize();
+      east.copy(eastPt);
+      const h = (((plane.heading ?? 0) % 360) * Math.PI) / 180;
+      dir.copy(north).multiplyScalar(Math.cos(h)).addScaledVector(east, Math.sin(h));
+      // Orthonormalize against the surface normal
+      posUnit.normalize();
+      dir.addScaledVector(posUnit, -dir.dot(posUnit)).normalize();
+      xAxis.crossVectors(dir, posUnit).normalize();
+      matrix.makeBasis(xAxis, dir, posUnit);
+      matrix.scale(scale);
+      matrix.setPosition(pos);
+      mesh.setMatrixAt(i, matrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    s.scene.add(mesh);
+    s.aircraftMesh = mesh;
+    s.requestRender?.();
+
+    return disposeMesh;
+    // overlayLayerStates is content-keyed elsewhere; opacity changes ride
+    // the aircraftOverlayOn/data refresh cadence.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aircraftOverlayOn, overlayAircraft, lowMem]);
 
   // ── Markers + arcs ───────────────────────────────────────
   useEffect(() => {
@@ -1115,11 +2172,20 @@ export default function Globe3D({
 
     while (s.satGroup.children.length) {
       const child = s.satGroup.children.pop();
+      // Model groups carry no root geometry/material of their own — their
+      // nested meshes share session-cached template resources that must
+      // survive this teardown, and these optional-chained disposes skip them.
       child.geometry?.dispose?.();
       if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose());
       else child.material?.dispose?.();
     }
     s.satData = [];
+    s.satModels = [];
+    s.satDotSizes = null; // the size attribute above was just disposed
+    // Invalidate any in-flight ISS glb swap on every rebuild path, including
+    // the disabled/empty early return below — a late .then must never add to
+    // a group that has since been cleared.
+    s.satModelToken = (s.satModelToken || 0) + 1;
 
     if (!satellitesEnabled || !satellites?.length) return;
 
@@ -1154,6 +2220,9 @@ export default function Globe3D({
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+    // renderFrame zeroes a dot's size while its 3D model is visible so the
+    // dot doesn't sit on top of the mesh; it restores from this copy.
+    s.satDotSizes = { attr: geo.getAttribute('size'), base: sizes.slice() };
 
     const mat = new THREE.ShaderMaterial({
       uniforms: {
@@ -1193,6 +2262,72 @@ export default function Globe3D({
     points.frustumCulled = false;
     s.satGroup.add(points);
     s.satData = sats;
+
+    // ── 3D models — an LOD layer above the dots ────────────────────
+    // Dots stay the raycast/interaction surface at every distance; models
+    // fade in when the camera is near (or the bird is selected) and hold a
+    // constant apparent size in renderFrame, like the station markers. The
+    // ISS gets NASA's real model (lazy 2 MB glb, cubesat stand-in until it
+    // arrives); everything else gets a procedural archetype. Skipped in
+    // low-memory mode, where the dots are the whole story.
+    const modelToken = s.satModelToken;
+    if (!lowMem) {
+      // Sun-following light rig: the Lambert model materials are the only
+      // lit objects in the scene, so this touches nothing else. Rebuilt with
+      // the group every 5 s, which also tracks the moving sun for free.
+      const lightRig = new THREE.Group();
+      lightRig.add(new THREE.AmbientLight(0xffffff, 0.55));
+      const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+      sun.position.copy(s.sunWorld || new THREE.Vector3(1, 0.4, 0.6)).multiplyScalar(10);
+      lightRig.add(sun);
+      s.satGroup.add(lightRig);
+
+      const placeModel = (obj, sat) => {
+        const altR = Math.max(1 + (Number.isFinite(sat.alt) ? sat.alt : 0) / 6371, MARKER_ALT);
+        const pos = latLonToVec3(sat.lat, sat.lon, EARTH_R * altR);
+        obj.position.copy(pos);
+        // Orient along the orbit: nose toward travel, belly toward the earth.
+        let forward = null;
+        if (Array.isArray(sat.track) && sat.track.length > 2) {
+          const mid = Math.floor(sat.track.length / 2);
+          const next = Math.min(mid + 1, sat.track.length - 1);
+          const a = latLonToVec3(sat.track[mid][0], sat.track[mid][1], EARTH_R * altR);
+          const b = latLonToVec3(sat.track[next][0], sat.track[next][1], EARTH_R * altR);
+          forward = b.sub(a);
+        }
+        if (!forward || forward.lengthSq() < 1e-10) {
+          forward = new THREE.Vector3(0, 1, 0).cross(pos);
+        }
+        obj.up.copy(pos).normalize();
+        obj.lookAt(pos.clone().add(forward.normalize()));
+        obj.visible = false; // renderFrame owns visibility via the LOD gate
+        obj.userData.satSelected = selectedSats.includes(sat.name);
+        s.satGroup.add(obj);
+        s.satModels.push(obj);
+      };
+
+      sats.forEach((sat) => {
+        const kind = classifySatellite(sat.name);
+        placeModel(getArchetypeTemplate(kind === 'iss' ? 'cubesat' : kind).clone(), sat);
+        if (kind !== 'iss') return;
+        // Swap the stand-in for NASA's model when the glb lands. The token
+        // guards against a 5 s rebuild (or scene teardown) racing the load.
+        const standIn = s.satModels[s.satModels.length - 1];
+        loadIssTemplate().then((tpl) => {
+          if (!tpl || s.satModelToken !== modelToken || !s.satGroup) return;
+          const real = tpl.clone();
+          real.position.copy(standIn.position);
+          real.quaternion.copy(standIn.quaternion);
+          real.userData.satSelected = standIn.userData.satSelected;
+          real.visible = false;
+          const idx = s.satModels.indexOf(standIn);
+          if (idx >= 0) s.satModels[idx] = real;
+          s.satGroup.remove(standIn);
+          s.satGroup.add(real);
+          s.requestRender?.();
+        });
+      });
+    }
 
     sats.forEach((sat) => {
       const isSelected = selectedSats.includes(sat.name);
@@ -1521,8 +2656,10 @@ export default function Globe3D({
         </div>
       )}
 
-      {/* Controls */}
-      {!hideUi && (
+      {/* Controls. The column itself survives hideUi so the eye button stays
+          as the un-hide affordance — the same pattern as the flat map, where
+          everything hides except the eye toggle. */}
+      {(!hideUi || onToggleHideUi) && (
         <div
           style={{
             position: 'absolute',
@@ -1537,103 +2674,119 @@ export default function Globe3D({
             gap: '5px',
           }}
         >
-          <button style={btnStyle} onClick={() => centerOn(lat0, lon0)} title="Center on your QTH">
-            DE
-          </button>
-          {dxLocation && (
-            <button style={btnStyle} onClick={() => centerOn(dxLocation.lat, dxLocation.lon)} title="Center on DX">
-              DX
+          {onToggleHideUi && (
+            <button
+              style={{
+                ...btnStyle,
+                border: hideUi ? '1px solid var(--accent-cyan)' : btnStyle.border,
+              }}
+              onClick={onToggleHideUi}
+              title={hideUi ? t('app.mapUi.show') : t('app.mapUi.hide')}
+            >
+              {hideUi ? <LiEye size={22} style={iconStyle} /> : <LiEyeOff size={22} style={iconStyle} />}
             </button>
           )}
-          <button
-            style={{
-              ...btnStyle,
-              color: autoRotate ? 'var(--bg-primary)' : 'var(--accent-cyan)',
-              background: autoRotate ? 'var(--accent-cyan)' : btnStyle.background,
-            }}
-            onClick={() => setAutoRotate((v) => !v)}
-            title={autoRotate ? 'Auto-rotate on — turns after 30 s idle' : 'Auto-rotate off'}
-          >
-            <IconRefresh size={15} style={iconStyle} />
-          </button>
-
-          {/* Night overlay darkness — shares state with the flat map's slider */}
-          {onNightDarknessChange && (
-            <div
-              title="Adjust night overlay darkness"
-              style={{
-                marginTop: '4px',
-                width: '30px',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: '5px',
-                color: 'var(--text-secondary)',
-                fontSize: '12px',
-                fontFamily: 'var(--font-mono)',
-                textAlign: 'center',
-              }}
-            >
-              <span>{nightDarkness}%</span>
-              <input
-                type="range"
-                min="0"
-                max="90"
-                value={nightDarkness}
-                onChange={(e) => onNightDarknessChange(parseInt(e.target.value, 10))}
+          {!hideUi && (
+            <>
+              <button style={btnStyle} onClick={() => centerOn(lat0, lon0)} title="Center on your QTH">
+                DE
+              </button>
+              {dxLocation && (
+                <button style={btnStyle} onClick={() => centerOn(dxLocation.lat, dxLocation.lon)} title="Center on DX">
+                  DX
+                </button>
+              )}
+              <button
                 style={{
-                  cursor: 'pointer',
-                  margin: 0,
-                  writingMode: 'vertical-lr',
-                  WebkitAppearance: 'slider-vertical',
-                  transform: 'rotate(180deg)',
+                  ...btnStyle,
+                  color: autoRotate ? 'var(--bg-primary)' : 'var(--accent-cyan)',
+                  background: autoRotate ? 'var(--accent-cyan)' : btnStyle.background,
                 }}
-              />
-            </div>
-          )}
+                onClick={() => setAutoRotate((v) => !v)}
+                title={autoRotate ? 'Auto-rotate on — turns after 30 s idle' : 'Auto-rotate off'}
+              >
+                <LiRotate size={22} style={iconStyle} />
+              </button>
 
-          {suppressedLayers.length > 0 && (
-            <div
-              title={suppressedLayers.join(', ')}
-              style={{
-                marginTop: '4px',
-                color: 'var(--text-muted)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: '10px',
-                background: 'var(--bg-panel)',
-                border: '1px solid var(--border-color)',
-                padding: '3px 8px',
-                borderRadius: '4px',
-                whiteSpace: 'nowrap',
-                cursor: 'help',
-              }}
-            >
-              {suppressedLayers.length} map layer{suppressedLayers.length !== 1 ? 's' : ''} 2D-only
-            </div>
-          )}
+              {/* Night overlay darkness — shares state with the flat map's slider */}
+              {onNightDarknessChange && (
+                <div
+                  title="Adjust night overlay darkness"
+                  style={{
+                    marginTop: '4px',
+                    width: '30px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '5px',
+                    color: 'var(--text-secondary)',
+                    fontSize: '12px',
+                    fontFamily: 'var(--font-mono)',
+                    textAlign: 'center',
+                  }}
+                >
+                  <span>{nightDarkness}%</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="90"
+                    value={nightDarkness}
+                    onChange={(e) => onNightDarknessChange(parseInt(e.target.value, 10))}
+                    style={{
+                      cursor: 'pointer',
+                      margin: 0,
+                      writingMode: 'vertical-lr',
+                      WebkitAppearance: 'slider-vertical',
+                      transform: 'rotate(180deg)',
+                    }}
+                  />
+                </div>
+              )}
 
-          {/* Usage hint only. The DE/DX figures that used to sit here duplicate
+              {suppressedLayers.length > 0 && (
+                <div
+                  title={suppressedLayers.join(', ')}
+                  style={{
+                    marginTop: '4px',
+                    color: 'var(--text-muted)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '10px',
+                    background: 'var(--bg-panel)',
+                    border: '1px solid var(--border-color)',
+                    padding: '3px 8px',
+                    borderRadius: '4px',
+                    whiteSpace: 'nowrap',
+                    cursor: 'help',
+                  }}
+                >
+                  {suppressedLayers.length} map layer{suppressedLayers.length !== 1 ? 's' : ''} 2D-only
+                </div>
+              )}
+
+              {/* Usage hint only. The DE/DX figures that used to sit here duplicate
               the DE and DX side panels, and as an opaque box on top of the
               globe they cost more than they gave. This disappears for good once
               the operator has actually used the controls. */}
-          {!hasInteracted && (
-            <div
-              style={{
-                marginTop: '4px',
-                color: 'var(--text-muted)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: '10px',
-                background: 'var(--bg-panel)',
-                padding: '4px 8px',
-                borderRadius: '4px',
-                pointerEvents: 'none',
-                lineHeight: 1.5,
-                whiteSpace: 'nowrap',
-                opacity: 0.75,
-              }}
-            >
-              drag to rotate · scroll to zoom · click to set DX
-            </div>
+              {!hasInteracted && (
+                <div
+                  style={{
+                    marginTop: '4px',
+                    color: 'var(--text-muted)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '10px',
+                    background: 'var(--bg-panel)',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
+                    pointerEvents: 'none',
+                    lineHeight: 1.5,
+                    whiteSpace: 'nowrap',
+                    opacity: 0.75,
+                  }}
+                >
+                  drag to rotate · scroll to zoom · click to set DX
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

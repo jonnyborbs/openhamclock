@@ -126,27 +126,35 @@ export const getSchedule = (date = new Date(), deLat = null, deLon = null) => {
 };
 
 /**
- * Return the full upcoming schedule for the next `numCycles` 3-minute cycles.
- * Useful for rendering a timeline.
- * TODO: consumed by Phase 4 (listening log timeline) — not yet used in this PR.
+ * Return the start of the 3-minute cycle containing `date`, as a Unix ms
+ * timestamp.  Cycles align to UTC midnight, so every 3-minute boundary is a
+ * cycle start.
+ */
+export const getCycleStartMs = (date = new Date()) => {
+  const utcSeconds = date.getUTCHours() * 3600 + date.getUTCMinutes() * 60 + date.getUTCSeconds();
+  return date.getTime() - (utcSeconds % CYCLE_SECONDS) * 1000 - date.getUTCMilliseconds();
+};
+
+/**
+ * Return the full schedule for `numCycles` 3-minute cycles, starting at the
+ * beginning of the cycle containing `date`.  Consumed by the listening-log
+ * timeline view in IBPPanel (Phase 4).
  *
  * @param {Date}   date
  * @param {number} numCycles
  * @returns {Array<{ startDate, slot, bands }>}  one entry per 10-second slot
  */
 export const getUpcomingSchedule = (date = new Date(), numCycles = 2) => {
-  const utcMs = date.getTime();
-  const utcSeconds = date.getUTCHours() * 3600 + date.getUTCMinutes() * 60 + date.getUTCSeconds();
-  const cycleStart = utcMs - (utcSeconds % CYCLE_SECONDS) * 1000;
+  const cycleStart = getCycleStartMs(date);
 
   const slots = [];
   const totalSlots = (numCycles * CYCLE_SECONDS) / SLOT_SECONDS;
   for (let i = 0; i < totalSlots; i++) {
     const slotMs = cycleStart + i * SLOT_SECONDS * 1000;
     const slotDate = new Date(slotMs);
-    const slot =
-      (i + (IBP_BEACONS.length - Math.floor(((utcMs - cycleStart) / 1000 / SLOT_SECONDS) % IBP_BEACONS.length))) %
-      IBP_BEACONS.length;
+    // Entry 0 sits exactly on a cycle boundary (slot 0), so the slot number
+    // of entry i is simply i modulo the beacon count.
+    const slot = i % IBP_BEACONS.length;
     slots.push({
       startDate: slotDate,
       slot,
@@ -157,4 +165,64 @@ export const getUpcomingSchedule = (date = new Date(), numCycles = 2) => {
     });
   }
   return slots;
+};
+
+/**
+ * Maximum number of 3-minute cycles retained in the listening-log history
+ * (10 cycles = the last 30 minutes).
+ */
+export const HISTORY_MAX_CYCLES = 10;
+
+/**
+ * Pure accumulator for the listening-log timeline (Phase 4).
+ *
+ * `history` is an array of cycle records, oldest → newest:
+ *   { cycleStartMs: number, heard: Map<callsign, { maxSNR, count }> }
+ *
+ * Merges an RBN snapshot (Map<callsign, { maxSNR, count }> from useIBPRBN)
+ * into the record for the cycle starting at `cycleStartMs`:
+ *  - same cycle as the newest record → merge (keep max SNR / max count)
+ *  - newer cycle → append a new record
+ *  - trims to `maxCycles` records
+ *
+ * Returns the SAME array reference when nothing changed (so React state
+ * setters can skip re-renders), otherwise a new array with new records.
+ *
+ * @param {Array}  history
+ * @param {number} cycleStartMs
+ * @param {Map}    rbnMap
+ * @param {number} maxCycles
+ */
+export const updateHeardHistory = (history, cycleStartMs, rbnMap, maxCycles = HISTORY_MAX_CYCLES) => {
+  const last = history.length ? history[history.length - 1] : null;
+
+  // Stale snapshot for an older cycle (e.g. clock skew) — ignore.
+  if (last && cycleStartMs < last.cycleStartMs) return history;
+
+  if (last && last.cycleStartMs === cycleStartMs) {
+    // Merge into the current cycle's record.
+    let changed = false;
+    const merged = new Map(last.heard);
+    for (const [cs, { maxSNR, count }] of rbnMap.entries()) {
+      const prev = merged.get(cs);
+      if (!prev) {
+        merged.set(cs, { maxSNR, count });
+        changed = true;
+      } else {
+        const newSNR = prev.maxSNR == null ? maxSNR : maxSNR == null ? prev.maxSNR : Math.max(prev.maxSNR, maxSNR);
+        const newCount = Math.max(prev.count, count);
+        if (newSNR !== prev.maxSNR || newCount !== prev.count) {
+          merged.set(cs, { maxSNR: newSNR, count: newCount });
+          changed = true;
+        }
+      }
+    }
+    if (!changed) return history;
+    return [...history.slice(0, -1), { cycleStartMs, heard: merged }];
+  }
+
+  // New cycle — append a fresh record (empty rbnMap still appends, so the
+  // timeline's "now" column advances even when nothing is heard).
+  const next = [...history, { cycleStartMs, heard: new Map(rbnMap) }];
+  return next.length > maxCycles ? next.slice(next.length - maxCycles) : next;
 };

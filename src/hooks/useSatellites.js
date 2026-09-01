@@ -6,6 +6,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import * as satellite from 'satellite.js';
 import Orbit from '../utils/orbit.js';
+import { computeOrbitTrack } from '../utils/satelliteTrack.js';
 import { getDebugConfig } from '../debug/debugConfig.js';
 
 function round(value, decimals) {
@@ -96,6 +97,7 @@ export const useSatellites = (observerLocation, satelliteConfig, filteredNames =
         );
         const startTimes = nextPass?.startTimes || [];
         const endTimes = nextPass?.endTimes || [];
+        const maxElevations = nextPass?.maxElevations || [];
 
         if (isCalcNeeded(satData)) {
           try {
@@ -141,23 +143,10 @@ export const useSatellites = (observerLocation, satelliteConfig, filteredNames =
               speedKmH = Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z) * 3600; // [km/s] → [km/h]
             }
 
-            // Calculate orbit track (past 45 min and future 45 min = 90 min total)
-            const track = [];
-            const trackMinutes = 90;
-            const stepMinutes = 1;
-
-            for (let m = -trackMinutes / 2; m <= trackMinutes / 2; m += stepMinutes) {
-              const trackTime = new Date(now.getTime() + m * 60 * 1000);
-              const trackPV = satellite.propagate(satrec, trackTime);
-
-              if (trackPV.position) {
-                const trackGmst = satellite.gstime(trackTime);
-                const trackGd = satellite.eciToGeodetic(trackPV.position, trackGmst);
-                const trackLat = satellite.degreesLat(trackGd.latitude);
-                const trackLon = satellite.degreesLong(trackGd.longitude);
-                track.push([trackLat, trackLon]);
-              }
-            }
+            // Calculate orbit track, symmetric around now (configurable in
+            // Settings → Satellites; default ±45 min). Both the flat-map layer
+            // and the 3D globe render this same array.
+            const track = computeOrbitTrack(satrec, now, satelliteConfig?.trackDurationMins);
 
             // Calculate footprint radius (visibility circle)
             // Formula: radius = Earth_radius * arccos(Earth_radius / (Earth_radius + altitude))
@@ -179,6 +168,7 @@ export const useSatellites = (observerLocation, satelliteConfig, filteredNames =
               isVisible, // visible if above minimum elevation
               nextPassStartTimes: startTimes,
               nextPassEndTimes: endTimes,
+              nextPassMaxElevations: maxElevations,
               isPopular: satData.priority <= 2,
               track,
               footprintRadius: Math.round(footprintRadius),
@@ -215,7 +205,7 @@ export const useSatellites = (observerLocation, satelliteConfig, filteredNames =
       console.error('Satellite calculation error:', err);
       setLoading(false);
     }
-  }, [observerLocation, satelliteData, nextPassData, filteredNames]);
+  }, [observerLocation, satelliteData, nextPassData, filteredNames, satelliteConfig]);
 
   // Calculate satellite next passes, finds the start/end times of the next 2 passes for each satellite that are above the minimum elevation
   // Loops every hour since passes don't change often
@@ -257,10 +247,12 @@ export const useSatellites = (observerLocation, satelliteConfig, filteredNames =
 
         const startTimes = [];
         const endTimes = [];
+        const maxElevations = [];
         passes.forEach((pass) => {
           if (pass.start && pass.end) {
             startTimes.push(pass.start);
             endTimes.push(pass.end);
+            maxElevations.push(pass.maxElevation ?? null);
           }
         });
 
@@ -268,6 +260,7 @@ export const useSatellites = (observerLocation, satelliteConfig, filteredNames =
           keyName,
           startTimes,
           endTimes,
+          maxElevations,
         });
       } catch (e) {
         // Skip satellite with invalid data, continue processing others

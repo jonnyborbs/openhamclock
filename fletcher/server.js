@@ -21,6 +21,13 @@
  */
 
 const http = require('http');
+const dns = require('dns');
+
+// Railway egress dials IPv6-first by default; CelesTrak relays were seen
+// taking 6-9s warm and >20s cold (#1165). Prefer IPv4 unless overridden.
+if ((process.env.FLETCHER_DNS_ORDER || 'ipv4first') === 'ipv4first') {
+  dns.setDefaultResultOrder('ipv4first');
+}
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 const HOST = '::'; // IPv6 — required for Railway private networking
@@ -45,6 +52,13 @@ const stats = {
   upstreamFails: 0,
   staleServed: 0,
   byUpstream: { celestrak: 0, amsat: 0, satnogs: 0 },
+  // Relay outcomes for health probing (#1165): openhamclock's /api/health
+  // reads these so "fletcher alive but every relay failing" no longer
+  // reports green. 403/429/5xx and network errors count as errors; 404 is a
+  // routine missing-satellite answer and counts as ok.
+  lastUpstreamOkAt: null,
+  lastUpstreamErrorAt: null,
+  lastUpstreamStatus: null,
 };
 
 const log = (level, msg) => {
@@ -92,6 +106,12 @@ async function relay(upstreamName, targetUrl, req, res) {
   try {
     const result = await fetchUpstream(targetUrl, req.headers['user-agent']);
     stats.upstreamHits++;
+    stats.lastUpstreamStatus = result.status;
+    if (result.status === 403 || result.status === 429 || result.status >= 500) {
+      stats.lastUpstreamErrorAt = now();
+    } else {
+      stats.lastUpstreamOkAt = now();
+    }
 
     if (result.status >= 200 && result.status < 300) {
       cache.set(cacheKey, { ...result, expires: now() + CACHE_TTL_MS });
@@ -105,6 +125,8 @@ async function relay(upstreamName, targetUrl, req, res) {
     res.end(result.body);
   } catch (err) {
     stats.upstreamFails++;
+    stats.lastUpstreamErrorAt = now();
+    stats.lastUpstreamStatus = 0;
     log('WARN', `${upstreamName} fetch failed (${targetUrl}): ${err.message}`);
 
     if (cached) {
@@ -168,6 +190,15 @@ server.listen(PORT, HOST, () => {
   log('INFO', `TLE Fetcher listening on [${HOST}]:${PORT}`);
   log('INFO', `Upstreams: ${Object.keys(UPSTREAMS).join(', ')}`);
   log('INFO', `Cache TTL: ${CACHE_TTL_MS}ms, fetch timeout: ${FETCH_TIMEOUT_MS}ms`);
+
+  // Prewarm upstream DNS so the first relayed request after a co-deploy
+  // doesn't pay resolution latency on top of a cold TLS handshake (#1165).
+  for (const base of Object.values(UPSTREAMS)) {
+    const { hostname } = new URL(base);
+    dns.lookup(hostname, (err) => {
+      if (err) log('WARN', `DNS prewarm failed for ${hostname}: ${err.message}`);
+    });
+  }
 });
 
 setInterval(() => {

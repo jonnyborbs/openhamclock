@@ -299,4 +299,39 @@ describe('DXNewsTicker', () => {
       window.matchMedia = originalMatchMedia;
     }
   });
+
+  // ─── Scroll speed ─────────────────────────────────────────────────────────
+
+  it('speed controls: « » adjust the persisted scroll-speed multiplier', async () => {
+    localStorage.removeItem('openhamclock_dxNewsSpeed');
+    const { container, root } = setup([makeItem({ id: 'a', title: 'Headline', url: 'https://example.com/a' })]);
+    await act(async () => {
+      await renderAndFlush(root);
+    });
+
+    const faster = container.querySelector('[data-testid="dxnews-faster"]');
+    const slower = container.querySelector('[data-testid="dxnews-slower"]');
+    expect(faster).not.toBeNull();
+    expect(slower).not.toBeNull();
+
+    await act(async () => {
+      faster.click();
+    });
+    expect(localStorage.getItem('openhamclock_dxNewsSpeed')).toBe('1.25');
+
+    await act(async () => {
+      slower.click();
+      slower.click();
+    });
+    expect(localStorage.getItem('openhamclock_dxNewsSpeed')).toBe('0.75');
+
+    // Clamps at the slow end (0.5) and disables the button there
+    await act(async () => {
+      slower.click();
+    });
+    expect(localStorage.getItem('openhamclock_dxNewsSpeed')).toBe('0.5');
+    expect(slower.disabled).toBe(true);
+
+    teardown(container, root);
+  });
 });

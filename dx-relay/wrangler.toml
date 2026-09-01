@@ -1,0 +1,10 @@
+name = "dx-relay"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+# Optional shared secret: `npx wrangler secret put RELAY_KEY` — when set, requests
+# must send the same value in an `x-relay-key` header. Without it the worker is
+# still safe (hard upstream allowlist, no open-proxy surface), just public.
+
+[observability]
+enabled = true

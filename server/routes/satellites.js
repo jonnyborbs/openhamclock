@@ -11,6 +11,7 @@ const { tleToOmm, parseTleBlock } = require('../utils/tle-to-omm');
 const { normalizeJsonTree } = require('../utils/normalize');
 const { MutexCounter } = require('../utils/mutex');
 const { StateMachine } = require('../utils/statemachine');
+const { celestrakFailurePolicy } = require('../utils/celestrakFailurePolicy');
 const csvToJson = require('convert-csv-to-json');
 const wrapper = require('axios-cookiejar-support');
 const CookieJar = require('tough-cookie');
@@ -800,6 +801,7 @@ module.exports = function (app, ctx) {
   const OMM_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours, period after which OMM data considered stale
   const SPACE_TRACK_BACKOFF = 120 * 60 * 1000; // 2 hour, any satellite not allowed to repeat query to Space-Track within this period
   const CELESTRAK_BACKOFF = 120 * 60 * 1000; // 2 hour, any satellite not allowed to repeat query to CelesTrak within this period
+  const CELESTRAK_RETRY_AFTER_FAILURE = 5 * 60 * 1000; // failed attempt: retry within minutes, not the full 2h backoff (#1165)
   const CELESTRAK_GROUP_MIN_DOWNLOAD_SIZE = 3; // minimum number of satellites to trigger group download as, if fewer, then more efficient to perform individual download
 
   const isStale = (timestamp) => {
@@ -833,6 +835,33 @@ module.exports = function (app, ctx) {
   let blockSatnogsUntil = Date.now() - 1; // Timestamp until which SatNOGS fallback fetches are blocked
   let celestrakNumSatNeedDownload = 0;
   let noradsToDownload = [];
+  let lastMarkedCelestrakSats = []; // sats whose backoffCelestrakUntil the INIT states just set optimistically
+  const stateMachineBootAt = Date.now();
+
+  // Shared non-200 handling for the three CelesTrak FETCH states (#1165):
+  // decide the global block (short inside the boot grace window, 120min in
+  // steady state) and roll the optimistic per-sat 2h backoff back to a short
+  // retry on transient failures so one cold-start timeout doesn't cost the
+  // whole group the full window.
+  const applyCelestrakFailure = (httpStatusCode, label) => {
+    const policy = celestrakFailurePolicy(httpStatusCode, Date.now() - stateMachineBootAt);
+    if (policy.blockMs > 0) {
+      logWarn(
+        `[Satellites] Detected CelesTrak rate limit or ban (${label}), blocking fetches for ${Math.round(policy.blockMs / 60000)}mins`,
+      );
+      blockCelesTrakUntil = Date.now() + policy.blockMs;
+    } else if (httpStatusCode === 404) {
+      logDebug(`[Satellites] detected 404 'not found' on ${label} query, may need investigation`);
+    } else if (httpStatusCode === 0) {
+      logErrorOnce('Satellites', 'CelesTrak OMM fetch failed with no response (possible timeout)');
+    }
+    if (policy.rollbackSats) {
+      const retryAt = Date.now() + CELESTRAK_RETRY_AFTER_FAILURE;
+      lastMarkedCelestrakSats.forEach((s) => {
+        if (s.backoffCelestrakUntil > retryAt) s.backoffCelestrakUntil = retryAt;
+      });
+    }
+  };
 
   // state-machine states
   const smStates = [
@@ -891,6 +920,7 @@ module.exports = function (app, ctx) {
       satsNeedDownload.forEach((s) => {
         s.backoffCelestrakUntil = now + CELESTRAK_BACKOFF;
       });
+      lastMarkedCelestrakSats = satsNeedDownload;
 
       return 'CELESTRAK_AMATEUR_GROUP_FETCH'; // return next state
     },
@@ -901,13 +931,8 @@ module.exports = function (app, ctx) {
         const { httpStatusCode, ommJson } = await fetchOmmFromCelesTrakGroups('amateur');
         if (httpStatusCode === 200) {
           if (ommJson && Object.keys(ommJson).length > 0) appendDataToOmmCache(ommJson);
-        } else if (httpStatusCode === 301 || httpStatusCode === 403 || httpStatusCode === 429) {
-          logWarn('[Satellites] Detected CelesTrak rate limit or ban, blocking fetches for 120mins');
-          blockCelesTrakUntil = Date.now() + 120 * 60 * 1000; // Block CelesTrak fetches for 120mins
-        } else if (httpStatusCode === 404) {
-          logDebug("[Satellites] detected 404 'not found' on a group query, may need investigation");
-        } else if (httpStatusCode === 0) {
-          logErrorOnce('Satellites', 'CelesTrak OMM fetch failed with no response (possible timeout)');
+        } else {
+          applyCelestrakFailure(httpStatusCode, "'amateur' group");
         }
       } catch (ex) {
         const msg = ex?.message || String(ex ?? '(unknown error)');
@@ -941,6 +966,7 @@ module.exports = function (app, ctx) {
       satsNeedDownload.forEach((s) => {
         s.backoffCelestrakUntil = now + CELESTRAK_BACKOFF;
       });
+      lastMarkedCelestrakSats = satsNeedDownload;
 
       return 'CELESTRAK_WEATHER_GROUP_FETCH'; // return next state
     },
@@ -951,13 +977,8 @@ module.exports = function (app, ctx) {
         const { httpStatusCode, ommJson } = await fetchOmmFromCelesTrakGroups('weather');
         if (httpStatusCode === 200) {
           if (ommJson && Object.keys(ommJson).length > 0) appendDataToOmmCache(ommJson);
-        } else if (httpStatusCode === 301 || httpStatusCode === 403 || httpStatusCode === 429) {
-          logWarn('[Satellites] Detected CelesTrak rate limit or ban, blocking fetches for 120mins');
-          blockCelesTrakUntil = Date.now() + 120 * 60 * 1000; // Block CelesTrak fetches for 120mins
-        } else if (httpStatusCode === 404) {
-          logDebug("[Satellites] detected 404 'not found' on a group query, may need investigation");
-        } else if (httpStatusCode === 0) {
-          logErrorOnce('Satellites', 'CelesTrak OMM fetch failed with no response (possible timeout)');
+        } else {
+          applyCelestrakFailure(httpStatusCode, "'weather' group");
         }
       } catch (ex) {
         const msg = ex?.message || String(ex ?? '(unknown error)');
@@ -989,6 +1010,7 @@ module.exports = function (app, ctx) {
         // set backoff so that it cannot be repeated for this satellite until CELESTRAK_BACKOFF has elapsed
         const sat = satsToDownload[0];
         sat.backoffCelestrakUntil = now + CELESTRAK_BACKOFF;
+        lastMarkedCelestrakSats = [sat];
 
         noradsToDownload = sat.norad;
         return 'CELESTRAK_INDIVIDUAL_FETCH'; // return next state
@@ -1005,15 +1027,8 @@ module.exports = function (app, ctx) {
         const { httpStatusCode, ommJson } = await fetchOmmFromCelesTrakIndividual(noradsToDownload);
         if (httpStatusCode === 200) {
           if (ommJson && Object.keys(ommJson).length > 0) appendDataToOmmCache(ommJson);
-        } else if (httpStatusCode === 301 || httpStatusCode === 403 || httpStatusCode === 429) {
-          logWarn('[Satellites] Detected CelesTrak rate limit or ban, blocking fetches for 120mins');
-          blockCelesTrakUntil = Date.now() + 120 * 60 * 1000; // Block CelesTrak fetches for 120mins
-        } else if (httpStatusCode === 404) {
-          logDebug(
-            `[Satellites] NORAD ID ${noradsToDownload}, detected 404 \'not found\', may need to manually check status of this satellite via CelesTrak website`,
-          );
-        } else if (httpStatusCode === 0) {
-          logErrorOnce('Satellites', 'CelesTrak OMM fetch failed with no response (possible timeout)');
+        } else {
+          applyCelestrakFailure(httpStatusCode, `NORAD ID ${noradsToDownload}`);
         }
       } catch (ex) {
         const msg = ex?.message || String(ex ?? '(unknown error)');

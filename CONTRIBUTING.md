@@ -28,25 +28,35 @@ Open `http://localhost:3000` — you should see the full dashboard with live dat
 
 ```bash
 docker compose up
-# → App running on http://localhost:3001
+# → App running on http://localhost:3000
 ```
 
 ## Project Structure
 
 ```text
 src/
-├── components/     # React UI panels (DXClusterPanel, SolarPanel, etc.)
+├── components/     # React UI panels (DXClusterPanel, SolarPanel, LogbookPanel, etc.)
 ├── hooks/          # Data fetching hooks (useDXCluster, usePOTASpots, etc.)
-├── plugins/layers/ # Map layer plugins (satellites, VOACAP, RBN, etc.)
-├── layouts/        # Page layouts (Modern, Classic, Dockable)
+├── plugins/layers/ # Built-in map layer plugins (satellites, VOACAP, RBN, etc.)
+├── plugins/local/  # Your custom layer plugins — auto-discovered, gitignored
+├── layouts/        # Page layouts (Modern, Classic, EmComm)
+├── DockableApp.jsx # Dockable layout — panel catalog and docking logic
 ├── contexts/       # React contexts (RigContext)
-├── utils/          # Pure utility functions (callsign, geo, filters)
-├── lang/           # i18n translation files
+├── services/       # Client-side stores (logbookStore — IndexedDB logbook)
+├── utils/          # Pure utility functions (callsign, geo, filters, awards)
+├── pwa/            # Service worker registration (offline mode)
+├── lang/           # i18n translation files (one JSON per language)
 └── styles/         # CSS files
 
-server.js           # Express backend — all API routes, SSE, data proxying
-public/             # Static assets, favicon, PWA manifest
-rig-listener/       # Standalone USB rig control bridge
+server.js           # Express entry point — mounts routes, SSE, UDP listeners
+server/routes/      # API route modules (dxcluster, satellites, propagation, ...)
+server/config.js    # Env var → runtime config loader
+public/             # Static assets, PWA manifest, service worker (sw.js)
+rig-bridge/         # Local rig control bridge with its plugin system
+dxspider-proxy/     # DX Spider telnet proxy microservice
+ohc-cluster/        # OpenHamClock's own DX cluster node
+iturhfprop-service/ # ITU-R P.533 propagation microservice
+wasm-build/         # P.533 → WebAssembly build for client-side propagation
 ```
 
 Full architecture details: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
@@ -96,10 +106,11 @@ Fixed the bug or confirmed a resolution? Close the issue directly:
 
 1. **Fork** the repo and create a branch from `Staging`
 2. **Make your changes** — keep commits focused and descriptive
-3. **Test** across all three themes (dark, light, retro) and at different screen sizes
-4. **Open a PR** against `Staging` with a clear description of what changed and why
+3. **Test** across themes (dark, light, retro at minimum) and at different screen sizes
+4. **Update the docs** — see [Documentation](#documentation) below
+5. **Open a PR** against `Staging` with a clear description of what changed and why
 
-> **⚠️ Important:** All pull requests should target the **`Staging`** branch, not `main`. The `Staging` branch is always the most up-to-date version of the codebase. We merge `Staging` into `main` on a weekly release cycle.
+> **⚠️ Important:** All pull requests should target the **`Staging`** branch, not `main`. The `Staging` branch is always the most up-to-date version of the codebase. `Staging` is merged into `main` on the monthly release cycle (first Tuesday of the month).
 
 #### Branch Naming
 
@@ -187,55 +198,9 @@ export const useMyData = () => {
 };
 ```
 
-### API Routes (server.js)
+### API Routes (server/routes/)
 
-All external APIs are proxied through `server.js` with caching:
-
-```jsx
-// Good utility
-export const calculateSomething = (input1, input2) => {
-  // Pure calculation, no API calls or DOM access
-  return result;
-};
-```
-
-## 🧰 Code Style & Dependency Consistency
-
-This repository uses shared formatting and dependency lock conventions so contributions remain consistent across editors, operating systems, and CI.
-
-### `.editorconfig`
-
-- Defines editor-level basics (for example indentation, line endings, and final newline).
-- Helps avoid "editor drift" where different IDE defaults create noisy formatting diffs.
-- Most editors apply it automatically.
-
-### `.prettierrc`
-
-- Defines one shared Prettier style for the project.
-- Reduces style discussions in PRs and keeps reviews focused on behavior and correctness.
-- If your editor has Prettier integration, format-on-save will follow the repo rules.
-
-### `package-lock.json` is tracked
-
-- The lockfile is intentionally committed and must stay in Git.
-- This ensures everyone (local dev, CI, and production) resolves the exact same dependency graph.
-- Avoids "works on my machine" issues caused by floating transitive dependency updates.
-
-### Use `npm ci` for installs
-
-- Preferred install command is `npm ci` (not `npm install`) when working from a clean checkout.
-- `npm ci` installs exactly what is in `package-lock.json`, which makes builds deterministic.
-- Typical workflow:
-
-```bash
-npm ci
-git checkout Staging
-npm run dev
-```
-
-## 🎨 CSS & Theming
-
-Use CSS variables for all colors:
+All external APIs are proxied through the Express backend with caching. Routes live in modules under `server/routes/`; each cache needs a TTL and a size cap:
 
 ```js
 let myCache = { data: null, timestamp: 0 };
@@ -252,16 +217,31 @@ app.get('/api/mydata', async (req, res) => {
 });
 ```
 
-### Map Layer Plugins
+### Utilities
 
-Create `src/plugins/layers/useMyLayer.js`:
+Pure functions go in `src/utils/` — no API calls, no DOM access — and should ship with colocated tests:
 
 ```js
-export const meta = {
-  name: 'my-layer',
-  label: 'My Layer',
+// src/utils/myMath.js
+export const calculateSomething = (input1, input2) => {
+  // Pure calculation
+  return result;
+};
+```
+
+### Map Layer Plugins
+
+Create `src/plugins/layers/useMyLayer.js` (or `src/plugins/local/useMyLayer.js` for a personal plugin that survives git updates — the `local/` directory is gitignored and auto-discovered):
+
+```js
+export const metadata = {
+  id: 'my-layer',
+  name: 'My Layer',
   description: 'What this layer shows',
+  icon: '🗺️',
+  category: 'overlay',
   defaultEnabled: false,
+  defaultOpacity: 0.6,
 };
 
 export const useLayer = ({ map, enabled, config }) => {
@@ -275,11 +255,15 @@ export const useLayer = ({ map, enabled, config }) => {
 };
 ```
 
-The layer registry auto-discovers plugins — no manual registration needed. See `src/plugins/OpenHamClock-Plugin-Guide.md` for the full plugin API.
+Local plugins in `src/plugins/local/` need no registration at all — Vite's glob import picks them up. Built-in plugins in `src/plugins/layers/` are imported in `src/plugins/layerRegistry.js` (add one import + one array entry, and optionally a pinned keyboard shortcut). See `src/plugins/OpenHamClock-Plugin-Guide.md` for the full plugin API.
+
+### Panel Plugins
+
+Custom dockable panels work the same way: drop a `.jsx` file into `src/plugins/local/panels/` exporting `metadata` (`{ id, name, icon }`) and a `Panel` component. Panels receive a stable v1 props contract of `{ config, t }` only, appear under **Plugins** in the "+" panel picker, and are wrapped in an ErrorBoundary so a broken plugin can't crash the app. See [docs/PLUGINS.md](docs/PLUGINS.md) for the full guide to both plugin types, including a working example panel.
 
 ### Theming
 
-Three themes: `dark`, `light`, `retro`. **Never hardcode colors** — always use CSS variables:
+Five themes: `dark`, `light`, `legacy`, `retro`, and `custom` (user-editable). **Never hardcode colors** — always use CSS variables:
 
 ```jsx
 // ✅ Good
@@ -291,34 +275,66 @@ Three themes: `dark`, `light`, `retro`. **Never hardcode colors** — always use
 
 Key variables: `--bg-primary`, `--bg-secondary`, `--bg-tertiary`, `--bg-panel`, `--border-color`, `--text-primary`, `--text-secondary`, `--text-muted`, `--accent-amber`, `--accent-green`, `--accent-red`, `--accent-cyan`
 
-## Testing Checklist
+## Translations
 
-Before submitting a PR, verify:
+The UI ships in 16 languages (see `src/lang/`). To improve one or add a new language:
+
+1. Every language file is a flat JSON of `"dotted.key": "value"` pairs. Copy `src/lang/en.json` for a new language, or edit the existing file.
+2. Keys must stay **alphabetically sorted** — CI enforces this. Fix ordering automatically with:
+
+   ```bash
+   npm run lang:sort    # sorts keys in place
+   npm run lang:check   # what CI runs
+   ```
+
+3. Register a new language in `src/lang/i18n.js` and submit a PR.
+
+Untranslated keys fall back to English, so partial translations are welcome — every string helps.
+
+## Testing
+
+Unit tests use Vitest and are colocated with the code they cover (`foo.js` → `foo.test.js`). See **[TESTING.md](TESTING.md)** for the full guide.
+
+```bash
+npm test             # watch mode
+npm run test:run     # single run (what CI does)
+```
+
+PRs that touch filtering, parsing, geo math, or other pure utilities should add or update the colocated tests.
+
+## Documentation
+
+**Every PR that adds or changes a user-facing feature must update [docs/MANUAL.md](docs/MANUAL.md)** — the user manual is part of the feature, not an afterthought. If your change affects installation or first-run setup, update [docs/QUICKSTART.md](docs/QUICKSTART.md) too. Reviewers and triage will check for this before merging.
+
+A short paragraph in the right section is enough: what the feature is, where to find it, and any configuration it needs. Match the surrounding tone.
+
+## Pre-PR Checklist
 
 - [ ] App loads without console errors
 - [ ] Works in **Dark**, **Light**, and **Retro** themes
 - [ ] Responsive at different screen sizes
-- [ ] If touching `server.js`: memory-safe (caches have TTLs and size caps)
+- [ ] If touching server code: memory-safe (caches have TTLs and size caps)
 - [ ] If adding an API route: includes caching and error handling
-- [ ] If adding a panel: wired into all three layouts (Modern, Classic, Dockable)
+- [ ] If adding a panel: registered in `DockableApp.jsx` panel definitions (and other layouts where it applies)
+- [ ] `docs/MANUAL.md` updated for user-facing changes
 - [ ] Existing features still work
 
 ```bash
 # Run tests
-npm test
+npm run test:run
 
 # Check formatting (CI will fail without this)
 npm run format:check
 
-# Auto-fix formatting
-npm run format
+# Check translation key ordering (CI will fail without this)
+npm run lang:check
 ```
 
 ## Important Notes
 
-- **`server.js` handles 2,000+ concurrent connections** — be mindful of memory. Every cache needs a TTL and a size cap.
-- **`src/` is what production runs** — the built React app from Vite. `public/index-monolithic.html` is a legacy fallback.
-- **Don't commit** `.bak`, `.backup`, `.old`, `tle_backup.txt`, test scripts, or other debug files. They're in `.gitignore`.
+- **The backend handles 2,000+ concurrent connections** on the hosted site — be mindful of memory. Every cache needs a TTL and a size cap.
+- **Use `npm ci`, not `npm install`**, when working from a clean checkout — it installs exactly what's in the committed `package-lock.json`, keeping local dev, CI, and production deterministic. The lockfile stays in git.
+- **Don't commit** `.bak`, `.backup`, `.old`, test scripts, or other debug files. They're in `.gitignore`.
 - **Frequencies**: POTA/SOTA use MHz, some APIs return kHz. Always normalize display to MHz.
 - **Rig control**: The `tuneTo()` function in `RigContext` handles all unit conversion. Pass the raw spot object.
 

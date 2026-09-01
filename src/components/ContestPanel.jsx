@@ -2,11 +2,35 @@
  * ContestPanel Component
  * Displays upcoming and active contests with live indicators
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import {
+  CONTEST_REMINDERS_EVENT,
+  contestReminderId,
+  getContestReminders,
+  toggleContestReminder,
+} from '../utils/contestReminders';
 
 export const ContestPanel = ({ data, loading }) => {
   const { t, i18n } = useTranslation();
+
+  // Per-contest start reminders (opt-in for the "Contest Starts" alert feed).
+  // Synced across panel instances/tabs via the change event + storage event.
+  const [reminders, setReminders] = useState(() => getContestReminders());
+  useEffect(() => {
+    const sync = () => setReminders(getContestReminders());
+    window.addEventListener(CONTEST_REMINDERS_EVENT, sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener(CONTEST_REMINDERS_EVENT, sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+
+  const handleReminderToggle = (contest, e) => {
+    e.stopPropagation();
+    setReminders(toggleContestReminder(contest));
+  };
 
   // Switchable option: open WA7BNM contest page on click
   const [openContestLinks, setOpenContestLinks] = useState(() => {
@@ -48,7 +72,10 @@ export const ContestPanel = ({ data, loading }) => {
         return 'var(--accent-purple)';
       case 'FT8':
       case 'FT4':
+      case 'Digital':
         return 'var(--accent-green)';
+      case 'VHF':
+        return 'var(--accent-blue)';
       case 'Mixed':
         return 'var(--text-secondary)';
       default:
@@ -288,6 +315,34 @@ export const ContestPanel = ({ data, loading }) => {
                     >
                       {contest.name}
                     </button>
+                    {/* Per-contest start reminder (Contest Starts alert feed) */}
+                    {!live &&
+                      (() => {
+                        const reminded = reminders.includes(contestReminderId(contest));
+                        return (
+                          <button
+                            type="button"
+                            onClick={(e) => handleReminderToggle(contest, e)}
+                            title={t(reminded ? 'contest.panel.notify.on' : 'contest.panel.notify.off')}
+                            aria-label={t(reminded ? 'contest.panel.notify.on' : 'contest.panel.notify.off')}
+                            aria-pressed={reminded}
+                            style={{
+                              cursor: 'pointer',
+                              fontSize: '10px',
+                              opacity: reminded ? 1 : 0.35,
+                              userSelect: 'none',
+                              transition: 'opacity 0.2s',
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              color: reminded ? 'var(--accent-amber)' : 'inherit',
+                              flexShrink: 0,
+                            }}
+                          >
+                            🔔
+                          </button>
+                        );
+                      })()}
                   </div>
                   <div
                     style={{

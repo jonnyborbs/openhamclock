@@ -1,0 +1,153 @@
+/**
+ * Unit tests for server/utils/push-helpers.js — the pure decision logic
+ * behind the Web Push feature (subscription store dedupe/cap/prune, severe
+ * SWPC alert selection, payload building).
+ */
+
+import { describe, expect, it } from 'vitest';
+
+const helpers = require('./push-helpers.js');
+
+const NOW = Date.parse('2026-08-28T12:00:00Z');
+
+function makeSub(n = 1) {
+  return {
+    endpoint: `https://push.example.com/sub/${n}`,
+    expirationTime: null,
+    keys: { p256dh: 'p256dh-key', auth: 'auth-key' },
+  };
+}
+
+function makeAlert(overrides = {}) {
+  return {
+    productId: 'ALTK07',
+    serial: 123,
+    issueTime: new Date(NOW - 5 * 60 * 1000).toISOString(),
+    type: 'ALERT',
+    title: 'Geomagnetic K-index of 7',
+    scale: { band: 'G', level: 3, text: 'G3 - Strong' },
+    message: '...',
+    ...overrides,
+  };
+}
+
+function emptyStore() {
+  return { subscriptions: {}, pushedAlerts: {} };
+}
+
+describe('isValidSubscription', () => {
+  it('accepts a well-formed https subscription', () => {
+    expect(helpers.isValidSubscription(makeSub())).toBe(true);
+  });
+
+  it('rejects malformed shapes', () => {
+    expect(helpers.isValidSubscription(null)).toBe(false);
+    expect(helpers.isValidSubscription({})).toBe(false);
+    expect(helpers.isValidSubscription({ endpoint: 'http://insecure.example', keys: makeSub().keys })).toBe(false);
+    expect(helpers.isValidSubscription({ endpoint: makeSub().endpoint })).toBe(false);
+    expect(helpers.isValidSubscription({ endpoint: makeSub().endpoint, keys: { p256dh: 'x' } })).toBe(false);
+    expect(
+      helpers.isValidSubscription({ endpoint: `https://x.example/${'a'.repeat(2050)}`, keys: makeSub().keys }),
+    ).toBe(false);
+  });
+});
+
+describe('addSubscription / removeSubscription', () => {
+  it('stores a subscription keyed by endpoint', () => {
+    const store = emptyStore();
+    expect(helpers.addSubscription(store, makeSub(), 10, NOW)).toEqual({ ok: true });
+    expect(Object.keys(store.subscriptions)).toEqual([makeSub().endpoint]);
+    expect(store.subscriptions[makeSub().endpoint].addedAt).toBe(NOW);
+  });
+
+  it('dedupes re-subscription of the same endpoint, keeping original addedAt', () => {
+    const store = emptyStore();
+    helpers.addSubscription(store, makeSub(), 10, NOW);
+    helpers.addSubscription(store, makeSub(), 10, NOW + 5000);
+    expect(Object.keys(store.subscriptions)).toHaveLength(1);
+    expect(store.subscriptions[makeSub().endpoint].addedAt).toBe(NOW);
+  });
+
+  it('enforces the cap for NEW endpoints but allows refreshing existing ones', () => {
+    const store = emptyStore();
+    helpers.addSubscription(store, makeSub(1), 2, NOW);
+    helpers.addSubscription(store, makeSub(2), 2, NOW);
+    expect(helpers.addSubscription(store, makeSub(3), 2, NOW)).toEqual({ ok: false, reason: 'full' });
+    expect(helpers.addSubscription(store, makeSub(2), 2, NOW)).toEqual({ ok: true });
+  });
+
+  it('rejects invalid subscriptions', () => {
+    const store = emptyStore();
+    expect(helpers.addSubscription(store, { nope: true }, 10, NOW)).toEqual({ ok: false, reason: 'invalid' });
+    expect(Object.keys(store.subscriptions)).toHaveLength(0);
+  });
+
+  it('removes by endpoint and reports whether anything was removed', () => {
+    const store = emptyStore();
+    helpers.addSubscription(store, makeSub(), 10, NOW);
+    expect(helpers.removeSubscription(store, makeSub().endpoint)).toBe(true);
+    expect(helpers.removeSubscription(store, makeSub().endpoint)).toBe(false);
+    expect(helpers.removeSubscription(store, undefined)).toBe(false);
+    expect(Object.keys(store.subscriptions)).toHaveLength(0);
+  });
+});
+
+describe('selectNewSevereAlerts', () => {
+  it('selects fresh severe alerts not yet pushed', () => {
+    const alerts = [makeAlert()];
+    expect(helpers.selectNewSevereAlerts(alerts, {}, NOW)).toHaveLength(1);
+  });
+
+  it('skips alerts below scale level 2 (same threshold as the in-app feed)', () => {
+    const alerts = [makeAlert({ scale: { band: 'G', level: 1, text: 'G1 - Minor' } }), makeAlert({ scale: null })];
+    expect(helpers.selectNewSevereAlerts(alerts, {}, NOW)).toHaveLength(0);
+  });
+
+  it('skips alerts already recorded in pushedKeys (dedupe by product/serial)', () => {
+    const alert = makeAlert();
+    const pushed = { [helpers.alertDedupeKey(alert)]: NOW - 1000 };
+    expect(helpers.selectNewSevereAlerts([alert], pushed, NOW)).toHaveLength(0);
+  });
+
+  it('skips stale alerts (cold-start protection) and missing issueTime', () => {
+    const old = makeAlert({ issueTime: new Date(NOW - 2 * 60 * 60 * 1000).toISOString() });
+    const noTime = makeAlert({ issueTime: null });
+    expect(helpers.selectNewSevereAlerts([old, noTime], {}, NOW)).toHaveLength(0);
+  });
+
+  it('handles non-array input', () => {
+    expect(helpers.selectNewSevereAlerts(null, {}, NOW)).toEqual([]);
+  });
+});
+
+describe('prunePushedKeys', () => {
+  it('drops keys past retention and keeps recent ones', () => {
+    const keys = {
+      old: NOW - helpers.PUSHED_KEY_RETENTION_MS - 1000,
+      recent: NOW - 1000,
+      garbage: 'not-a-number',
+    };
+    expect(helpers.prunePushedKeys(keys, NOW)).toBe(2);
+    expect(Object.keys(keys)).toEqual(['recent']);
+  });
+});
+
+describe('buildSwpcPushPayload', () => {
+  it('builds title from scale text and body from type + headline', () => {
+    expect(helpers.buildSwpcPushPayload(makeAlert())).toEqual({
+      title: 'Space Weather: G3 - Strong',
+      body: 'ALERT: Geomagnetic K-index of 7',
+      tag: 'ohc-push-swpc',
+    });
+  });
+
+  it('degrades gracefully with missing fields and truncates long bodies', () => {
+    const bare = helpers.buildSwpcPushPayload({});
+    expect(bare.title).toBe('Space Weather Alert');
+    expect(bare.tag).toBe('ohc-push-swpc');
+
+    const long = helpers.buildSwpcPushPayload(makeAlert({ title: 'x'.repeat(300) }));
+    expect(long.body.length).toBeLessThanOrEqual(140);
+    expect(long.body.endsWith('…')).toBe(true);
+  });
+});

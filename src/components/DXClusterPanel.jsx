@@ -4,14 +4,19 @@
  */
 import { useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { getBandColor } from '../utils/callsign.js';
+import { getReadableBandColorForFreq } from '../utils/bandColors.js';
 import { matchesDXSpotPath } from '../utils/dxClusterSpotMatcher';
 import { balanceSpotWindow } from '../utils/dxClusterFilters';
 import { IconSearch, IconMap, IconGlobe } from './Icons.jsx';
 import CallsignLink from './CallsignLink.jsx';
 import { useCallsignPopup } from './CallsignPopupManager.jsx';
 import { classifySpotMode } from '../hooks/useBandHealth.js';
+import { useWorkedBefore } from '../hooks/useWorkedBefore.js';
+import { useAwards } from '../hooks/useAwards.js';
+import { spotBadge } from '../utils/awards.js';
 import { apiFetch } from '../utils/apiFetch';
+import { getListenUrl, loadNearbyReceivers } from '../utils/webSdr.js';
+import { requestLogQso } from '../services/logbookStore.js';
 
 // Mirrors the server-side validator — good enough to gate the Spot button.
 const isValidCallsign = (call) =>
@@ -27,13 +32,43 @@ export const DXClusterPanel = ({
   onOpenFilters,
   onHoverSpot,
   onSpotClick,
+  // Optional second click hook (Contest layout): receives the spot so the
+  // quick-log strip can populate its callsign box. Undefined elsewhere —
+  // zero behavior change for other layouts.
+  onSpotSelect,
   hoveredSpot,
   showOnMap,
   onToggleMap,
   userCallsign,
+  deLat,
+  deLon,
 }) => {
   const { t } = useTranslation();
   const { showPopup } = useCallsignPopup();
+
+  // Warm the nearby web-SDR receiver cache (KiwiSDR public directory) so the
+  // 🎧 links can be computed synchronously at render time. One re-render when
+  // the list lands; getListenUrl() reads the module-level cache directly.
+  const [, setSdrDirectoryTick] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    loadNearbyReceivers(deLat, deLon).then((list) => {
+      if (!cancelled && list) setSdrDirectoryTick((n) => n + 1);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [deLat, deLon]);
+
+  // Worked-before / dupe flags from live logged QSOs (N3FJP + N1MM/DXLog).
+  // getStatus returns null for every call when neither source has data, so
+  // the badges simply never render unless the operator is actually logging.
+  const { getStatus: getWorkedStatus } = useWorkedBefore();
+
+  // Award status from the native logbook: 'new' = the spot's DXCC entity is
+  // not in the log at all (ATNO), 'new-band' = entity worked, but not on this
+  // band. Null for everyone until the logbook has QSOs — zero-config.
+  const { getSpotStatus: getAwardStatus } = useAwards();
 
   // ── Spot submission (only when this instance has an OHC Cluster) ────
   const [canSpot, setCanSpot] = useState(false);
@@ -519,6 +554,7 @@ export const DXClusterPanel = ({
             <span role="columnheader">Mode</span>
             {showSpotter && <span role="columnheader">Spotter</span>}
             <span role="columnheader">Age</span>
+            <span role="columnheader">Log / Listen</span>
           </div>
           {spots.map((spot, i) => {
             // Frequency can be in MHz (string like "14.070") or kHz (number like 14070)
@@ -538,11 +574,20 @@ export const DXClusterPanel = ({
               }
             }
 
-            const color = getBandColor(freqMHz);
+            const color = getReadableBandColorForFreq(freqMHz);
             const isHovered = matchesDXSpotPath(hoveredSpot, spot);
             // Mode is never on the wire — DX cluster format doesn't carry it. Derive from spot.comment if
             // it has an explicit mode keyword, otherwise fall back to frequency band-plan inference.
             const modeInfo = classifySpotMode(spot);
+            // 'dupe' = worked on this band+mode, 'worked' = in the log on
+            // another band/mode, null = not in the log (a "new one").
+            const workedStatus = getWorkedStatus(spot.call, freqMHz, modeInfo?.mode);
+            // Award angle from the native logbook: 'new' (ATNO) / 'new-band'.
+            // spotBadge collapses both statuses into the single badge shown —
+            // precedence: new > new-band > worked/dupe.
+            const badge = spotBadge(getAwardStatus(spot.call, freqMHz), workedStatus);
+            // Web SDR "listen" link — lets rig-less users hear the station.
+            const listen = freqMHz > 0 ? getListenUrl(freqMHz * 1000, modeInfo?.mode) : null;
 
             return (
               <div
@@ -552,16 +597,18 @@ export const DXClusterPanel = ({
                 onMouseLeave={() => onHoverSpot?.(null)}
                 onClick={() => {
                   onSpotClick?.(spot);
+                  onSpotSelect?.(spot);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     onSpotClick?.(spot);
+                    onSpotSelect?.(spot);
                   }
                 }}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: showSpotter ? '55px 1fr auto auto auto' : '55px 1fr auto auto',
+                  gridTemplateColumns: showSpotter ? '55px 1fr auto auto auto auto' : '55px 1fr auto auto auto',
                   gap: '6px',
                   padding: '5px 6px',
                   borderRadius: '3px',
@@ -596,7 +643,99 @@ export const DXClusterPanel = ({
                     fontWeight="700"
                     onPopup={showPopup}
                     location={{ grid: spot.dxGrid, lat: spot.dxLat, lon: spot.dxLon }}
+                    spot={freqMHz > 0 ? { freq: freqMHz * 1000, mode: modeInfo?.mode ?? null } : undefined}
                   />
+                  {badge === 'new' && (
+                    <span
+                      title={t('dxClusterPanel.workedBadge.newTooltip', {
+                        defaultValue: 'New one — this DXCC entity is not in your logbook (ATNO)',
+                      })}
+                      aria-label={t('dxClusterPanel.workedBadge.newTooltip', {
+                        defaultValue: 'New one — this DXCC entity is not in your logbook (ATNO)',
+                      })}
+                      style={{
+                        marginLeft: '4px',
+                        padding: '0 3px',
+                        fontSize: '8px',
+                        fontWeight: '700',
+                        letterSpacing: '0.5px',
+                        color: '#ff4444',
+                        background: 'rgba(255, 68, 68, 0.15)',
+                        border: '1px solid rgba(255, 68, 68, 0.6)',
+                        borderRadius: '2px',
+                        verticalAlign: 'middle',
+                      }}
+                    >
+                      {t('dxClusterPanel.workedBadge.new', { defaultValue: 'NEW' })}
+                    </span>
+                  )}
+                  {badge === 'new-band' && (
+                    <span
+                      title={t('dxClusterPanel.workedBadge.newBandTooltip', {
+                        defaultValue: 'Entity worked before, but not on this band — new band slot',
+                      })}
+                      aria-label={t('dxClusterPanel.workedBadge.newBandTooltip', {
+                        defaultValue: 'Entity worked before, but not on this band — new band slot',
+                      })}
+                      style={{
+                        marginLeft: '4px',
+                        padding: '0 3px',
+                        fontSize: '8px',
+                        fontWeight: '700',
+                        letterSpacing: '0.5px',
+                        color: '#ff8844',
+                        background: 'rgba(255, 136, 68, 0.12)',
+                        border: '1px solid rgba(255, 136, 68, 0.5)',
+                        borderRadius: '2px',
+                        verticalAlign: 'middle',
+                      }}
+                    >
+                      {t('dxClusterPanel.workedBadge.newBand', { defaultValue: 'BAND' })}
+                    </span>
+                  )}
+                  {badge === 'dupe' && (
+                    <span
+                      title={t('dxClusterPanel.workedBadge.dupeTooltip', {
+                        defaultValue: 'Already in your log on this band and mode — dupe',
+                      })}
+                      aria-label={t('dxClusterPanel.workedBadge.dupeTooltip', {
+                        defaultValue: 'Already in your log on this band and mode — dupe',
+                      })}
+                      style={{
+                        marginLeft: '4px',
+                        padding: '0 3px',
+                        fontSize: '8px',
+                        fontWeight: '700',
+                        letterSpacing: '0.5px',
+                        color: '#ffaa00',
+                        background: 'rgba(255, 170, 0, 0.15)',
+                        border: '1px solid rgba(255, 170, 0, 0.6)',
+                        borderRadius: '2px',
+                        verticalAlign: 'middle',
+                      }}
+                    >
+                      {t('dxClusterPanel.workedBadge.dupe', { defaultValue: 'DUPE' })}
+                    </span>
+                  )}
+                  {badge === 'worked' && (
+                    <span
+                      title={t('dxClusterPanel.workedBadge.workedTooltip', {
+                        defaultValue: 'In your log — worked before on a different band or mode',
+                      })}
+                      aria-label={t('dxClusterPanel.workedBadge.workedTooltip', {
+                        defaultValue: 'In your log — worked before on a different band or mode',
+                      })}
+                      style={{
+                        marginLeft: '4px',
+                        fontSize: '9px',
+                        color: 'var(--text-muted)',
+                        opacity: 0.75,
+                        verticalAlign: 'middle',
+                      }}
+                    >
+                      ✓
+                    </span>
+                  )}
                 </div>
                 <div
                   role="cell"
@@ -650,6 +789,76 @@ export const DXClusterPanel = ({
                   }}
                 >
                   {formatSpotTimeLabel(spot)}
+                </div>
+                <div role="cell" style={{ alignSelf: 'center', display: 'flex', gap: '2px', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      requestLogQso({
+                        call: spot.call,
+                        freq: freqMHz > 0 ? freqMHz : undefined,
+                        mode: modeInfo?.mode || undefined,
+                        gridsquare: spot.dxGrid || undefined,
+                      });
+                    }}
+                    title={t('logbook.logFromSpotTooltip', {
+                      defaultValue: 'Log a QSO with {{call}} in your logbook',
+                      call: spot.call,
+                    })}
+                    aria-label={t('logbook.logFromSpotTooltip', {
+                      defaultValue: 'Log a QSO with {{call}} in your logbook',
+                      call: spot.call,
+                    })}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      fontSize: '10px',
+                      cursor: 'pointer',
+                      opacity: 0.55,
+                      transition: 'opacity 0.15s',
+                      lineHeight: 1,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.opacity = '1';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.opacity = '0.55';
+                    }}
+                  >
+                    📓+
+                  </button>
+                  {listen && (
+                    <a
+                      href={listen.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      title={t('dxClusterPanel.listenTooltip', {
+                        defaultValue: 'Listen on a web SDR ({{receiver}})',
+                        receiver: listen.name,
+                      })}
+                      aria-label={t('dxClusterPanel.listenTooltip', {
+                        defaultValue: 'Listen on a web SDR ({{receiver}})',
+                        receiver: listen.name,
+                      })}
+                      style={{
+                        fontSize: '10px',
+                        textDecoration: 'none',
+                        opacity: 0.55,
+                        transition: 'opacity 0.15s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.opacity = '1';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.opacity = '0.55';
+                      }}
+                    >
+                      🎧
+                    </a>
+                  )}
                 </div>
               </div>
             );

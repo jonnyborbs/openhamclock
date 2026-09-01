@@ -21,7 +21,7 @@ export const DEFAULT_CONFIG = {
   headerSize: 1.0, // Float multiplies base px size (0.1 to 2.0)
   locator: '',
   location: { lat: 40.015, lon: -105.2705, stationAlt: 1630 }, // Boulder, CO (default), altitude [m]
-  satellite: { minElev: 5 }, // Minimum elevation for satellite visibility (degrees)
+  satellite: { minElev: 5, trackDurationMins: 45 }, // Min elevation for visibility (degrees); orbit track window (± minutes around now)
   defaultDX: { lat: 35.6762, lon: 139.6503 }, // Tokyo
   units: 'imperial', // 'imperial' or 'metric'
   allUnits: { dist: 'imperial', temp: 'imperial', press: 'imperial' },
@@ -31,6 +31,7 @@ export const DEFAULT_CONFIG = {
     power: 100, // TX power in watts
     antenna: 'isotropic', // Antenna profile key
   },
+  licenseClass: 'other', // US license class for privilege shading/warnings: 'other', 'technician', 'general', 'extra'
   theme: 'dark', // 'dark', 'light', 'legacy', or 'retro'
   layout: 'modern', // 'modern' or 'classic'
   mouseZoom: 50, // Factor to affect rate of zooming with scrollwheel (1-100)
@@ -201,6 +202,7 @@ export const saveConfig = (config) => {
 const SYNC_KEYS = [
   'openhamclock_config',
   'openhamclock_dockLayout',
+  'openhamclock_dockLayoutPresets',
   'openhamclock_dxFavorites',
   'openhamclock_dxFilters',
   'openhamclock_dxLocation',
@@ -214,6 +216,11 @@ const SYNC_KEYS = [
   'openhamclock_sotaFilters',
   'openhamclock_wwffFilters',
   'openhamclock_wwbotaFilters',
+  'openhamclock_canparksFilters',
+  'openhamclock_callsignSearchHistory',
+  'openhamclock_contestSession',
+  'openhamclock_freqMemories',
+  'openhamclock_netSchedule',
   'openhamclock_pskPanelMode',
   'openhamclock_bandColors',
   'openhamclock_satelliteFilters',
@@ -337,6 +344,12 @@ export const isConfigIncomplete = () => {
  */
 export const applyTheme = (theme) => {
   document.documentElement.setAttribute('data-theme', theme);
+  // Theme-aware chrome (e.g. the sidebar's 8-bit width) re-measures on this.
+  try {
+    window.dispatchEvent(new CustomEvent('openhamclock-theme-change', { detail: { theme } }));
+  } catch {
+    /* non-browser env */
+  }
 };
 
 /**
@@ -393,6 +406,14 @@ export const MAP_STYLES = {
     name: 'Satellite',
     url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     attribution: '&copy; Esri',
+    // Web Mercator stops at ±85.05°, so the globe's polar caps have no imagery
+    // from the tiles above. These polar-projected services cover the rest, and
+    // ArcGIS reprojects them to plate carrée server-side on request — see
+    // fetchPolarStrip() in utils/globeTexture.js.
+    polar: {
+      north: 'https://services.arcgisonline.com/arcgis/rest/services/Polar/Arctic_Imagery/MapServer',
+      south: 'https://services.arcgisonline.com/arcgis/rest/services/Polar/Antarctic_Imagery/MapServer',
+    },
   },
   MODIS: {
     name: 'Modis Truecolor', // NASA GIBS MODIS Truecolor Imagery

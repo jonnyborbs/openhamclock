@@ -6,8 +6,8 @@ A guide to navigating the codebase. Start here if you're new.
 
 OpenHamClock is a full-stack JavaScript application:
 
-- **Frontend**: React 18 (Vite build), Leaflet maps, inline CSS with CSS variables for theming
-- **Backend**: Express.js server that proxies 40+ external APIs, manages SSE/WebSocket connections, and serves static files
+- **Frontend**: React 18 (Vite build), Leaflet maps (plus a Three.js 3D globe and a canvas azimuthal projection), inline CSS with CSS variables for theming, PWA service worker for offline mode
+- **Backend**: Express.js server that proxies 40+ external APIs, manages SSE/WebSocket connections and UDP listeners, and serves static files
 - **Deployment**: Docker on Railway (production), `npm run dev` for local development
 
 ```text
@@ -16,130 +16,95 @@ OpenHamClock is a full-stack JavaScript application:
 │  App.jsx → Layout → Panels + WorldMap + Plugins      │
 │            ↕ fetch/SSE/MQTT                          │
 ├──────────────────────────────────────────────────────┤
-│                  server.js (Express)                  │
+│           server.js + server/routes/ (Express)        │
 │  /api/* → proxies to POTA, SOTA, QRZ, NOAA, etc.    │
 │  SSE → DX cluster spots, PSK Reporter, RBN          │
+│  UDP → WSJT-X (2237), N1MM/DXLog (12060)            │
 │  Static → dist/ (built) or public/ (fallback)        │
 ├──────────────────────────────────────────────────────┤
 │              External APIs & Data Sources             │
 │  POTA · SOTA · WWFF · QRZ · HamQTH · NOAA · N0NBH  │
-│  PSK Reporter MQTT · DX Spider Telnet · RBN Telnet   │
-│  CelesTrak TLEs · Ionosonde · VOACAP · WSPR         │
+│  PSK Reporter MQTT · OHC Cluster · DX Spider · RBN   │
+│  CelesTrak/AMSAT/SatNOGS TLEs · Ionosonde · WSPR    │
 └──────────────────────────────────────────────────────┘
 ```
 
 ## Directory Structure
 
 ```text
-openhamclock-main/
+openhamclock/
 ├── index.html              # Vite entry point → builds to dist/index.html
-├── server.js               # Express backend (all API routes, SSE, data aggregation)
-├── config.js               # Runtime configuration loader
+├── server.js               # Express entry point — middleware, static serving, route mounting
+├── server/                 # Backend modules
+│   ├── config.js               # Env var → runtime config loader (auto-creates .env)
+│   ├── health.js               # Subsystem health tracking for /api/health
+│   ├── middleware/             # Rate limiting, caching headers, usage tracking
+│   ├── routes/                 # One module per API area (dxcluster, satellites, aprs, ...)
+│   ├── services/               # Backend services
+│   └── utils/                  # Backend utilities (logging, upstream manager, ...)
+├── config.js               # Legacy runtime configuration loader
 ├── package.json            # Dependencies and scripts
 ├── vite.config.mjs         # Vite build configuration
-├── Dockerfile              # Production Docker build (multi-stage)
-├── docker-compose.yml      # Local Docker development
-├── railway.json            # Railway deployment config
+├── Dockerfile              # Production Docker build (multi-stage, node:22-alpine)
+├── docker-compose.yml      # Docker Compose deployment
+├── railway.toml/.json      # Railway deployment config
 │
 ├── src/                    # React frontend source
 │   ├── main.jsx            # React entry point
-│   ├── App.jsx             # Main app — uses ModernLayout or ClassicLayout
-│   ├── DockableApp.jsx     # Alternate dockable/windowed layout
+│   ├── App.jsx             # Main app — layout selection and wiring
+│   ├── DockableApp.jsx     # Dockable layout — panel catalog (panelDefs) + docking
 │   │
-│   ├── components/         # UI panels and widgets
+│   ├── components/         # UI panels and widgets (~60 components)
 │   │   ├── WorldMap.jsx        # Leaflet map (the big one)
+│   │   ├── AzimuthalMap.jsx    # Azimuthal-equidistant canvas projection
+│   │   ├── Globe3D.jsx         # Three.js 3D globe projection
 │   │   ├── SettingsPanel.jsx   # Settings modal with tabs
-│   │   ├── WhatsNew.jsx        # Version changelog popup
+│   │   ├── WhatsNew.jsx        # In-app release notes (the real changelog)
 │   │   ├── DXClusterPanel.jsx  # DX spot list
-│   │   ├── POTAPanel.jsx       # Parks on the Air
-│   │   ├── SOTAPanel.jsx       # Summits on the Air
-│   │   ├── WWFFPanel.jsx       # World Wide Flora & Fauna
-│   │   ├── SolarPanel.jsx      # Solar flux, K-index, SSN
-│   │   ├── PropagationPanel.jsx # HF propagation predictions
-│   │   ├── PSKReporterPanel.jsx # PSK Reporter spots
-│   │   ├── RigControlPanel.jsx # Rig frequency/mode display
-│   │   ├── RotatorPanel.jsx    # Antenna rotator control
-│   │   └── ...                 # ~30 more panels
+│   │   ├── LogbookPanel.jsx    # Native in-browser logbook (IndexedDB)
+│   │   └── ...                 # POTA/SOTA/WWFF/WWBOTA, solar, propagation, APRS, ...
 │   │
-│   ├── hooks/              # Data fetching and state management
-│   │   ├── useDXCluster.js     # DX cluster spots (SSE)
-│   │   ├── usePOTASpots.js     # POTA API polling
-│   │   ├── useSOTASpots.js     # SOTA API polling
-│   │   ├── usePSKReporter.js   # PSK Reporter MQTT
-│   │   ├── useSolarIndices.js  # NOAA solar data
-│   │   ├── useSatellites.js    # TLE data + orbital calcs
-│   │   └── app/                # App-level hooks
-│   │       ├── useAppConfig.js     # Config loading/saving
-│   │       ├── useMapLayers.js     # Map layer toggle state
-│   │       └── useVersionCheck.js  # Version check + update toast
-│   │
-│   ├── contexts/           # React contexts
-│   │   └── RigContext.jsx      # Rig control state + tuneTo()
-│   │
-│   ├── layouts/            # Page layouts
-│   │   ├── ModernLayout.jsx    # Default responsive grid
-│   │   ├── ClassicLayout.jsx   # HamClock-inspired layout
-│   │   └── DockableLayout.jsx  # Draggable windowed panels
-│   │
-│   ├── plugins/            # Map layer plugins (hot-pluggable)
-│   │   ├── layerRegistry.js    # Plugin discovery and loading
-│   │   └── layers/             # One file per map layer
-│   │       ├── useSatelliteLayer.js  # Satellite tracking
-│   │       ├── useVOACAPHeatmap.js   # Propagation heatmap
-│   │       ├── useMUFMap.js          # MUF ionospheric overlay
-│   │       ├── useRBN.js             # RBN skimmer markers
-│   │       ├── useWSPR.js            # WSPR heatmap
-│   │       ├── useEarthquakes.js     # Seismic activity
-│   │       ├── useLightning.js       # Lightning strikes
-│   │       └── ...
-│   │
-│   ├── utils/              # Pure utility functions
-│   │   ├── callsign.js         # Callsign parsing, DXCC lookup
-│   │   ├── ctyLookup.js        # cty.dat database interface
-│   │   ├── geo.js              # Grid square, great circle math
-│   │   ├── bandPlan.js         # Band/frequency utilities
-│   │   └── dxClusterFilters.js # DX spot filtering logic
-│   │
-│   ├── lang/               # i18n translation files
-│   ├── styles/             # CSS files
-│   └── store/              # State management (Zustand)
+│   ├── hooks/              # Data fetching and state management (one hook per source)
+│   │   └── app/                # App-level hooks (config, map layers, version check)
+│   ├── contexts/           # React contexts (RigContext — rig control + tuneTo())
+│   ├── layouts/            # Page layouts (ModernLayout, ClassicLayout, EmcommLayout)
+│   ├── plugins/            # Map layer plugin system
+│   │   ├── layerRegistry.js    # Built-in plugin imports + keyboard shortcut pins
+│   │   ├── layers/             # ~28 built-in layers (satellites, VOACAP, RBN, aurora, ...)
+│   │   └── local/              # User plugins — auto-discovered, gitignored
+│   ├── services/           # Client-side stores (logbookStore — IndexedDB logbook)
+│   ├── pwa/                # Service worker registration + update toast
+│   ├── store/              # Layout persistence (layoutStore)
+│   ├── utils/              # Pure utility functions (callsign, geo, filters, awards, ...)
+│   ├── lang/               # i18n translation files (16 languages, flat sorted JSON)
+│   ├── styles/             # Theme CSS variables, base styles
+│   └── test/               # Shared test setup (vitest + jsdom)
 │
 ├── public/                 # Static assets (copied to dist/ by Vite)
-│   ├── index-monolithic.html   # Self-contained fallback (entire app in one file)
-│   ├── favicon.ico             # Favicon (multi-resolution)
-│   ├── favicon-32x32.png       # PNG favicon
+│   ├── sw.js / sw-policy.js    # Service worker (offline mode / PWA)
 │   ├── manifest.json           # PWA manifest
-│   ├── robots.txt              # Search engine directives
-│   ├── sitemap.xml             # Sitemap for SEO
-│   └── icons/                  # App icons and OG image
+│   ├── index-monolithic.html   # Legacy self-contained fallback
+│   └── icons/, models/, geo/   # App icons, 3D satellite models, boundary data
 │
-├── rig-listener/           # Standalone USB rig control bridge
-│   ├── rig-listener.js         # Serial port ↔ WebSocket bridge
-│   ├── build.js                # Builds standalone executables
-│   └── start-rig-listener.*    # Platform launch scripts
-│
-├── dxspider-proxy/         # DX Spider telnet proxy service
-├── iturhfprop-service/     # ITU-R P.533 propagation engine
-├── wsjtx-relay/            # WSJT-X UDP → WebSocket relay
+├── rig-bridge/             # Local rig control bridge (plugin system, 20+ plugins)
+├── rig-listener/           # Older standalone USB rig control bridge
+├── dxspider-proxy/         # DX Spider telnet proxy microservice
+├── ohc-cluster/            # OpenHamClock's own DX cluster node (RBN + spots aggregation)
+├── iturhfprop-service/     # ITU-R P.533 propagation prediction microservice
+├── wasm-build/             # P.533 → WebAssembly build (client-side propagation)
+├── wsjtx-relay/            # WSJT-X UDP → HTTPS relay agent for cloud installs
+├── fletcher/               # TLE fetch egress proxy (hosted deployment)
+├── watchtower/             # Cloudflare Worker uptime probe
 ├── electron/               # Electron desktop wrapper (experimental)
-├── scripts/                # Build and setup scripts
+├── scripts/                # Setup/update scripts, lang tooling, wasm fetch
 │
-├── docs/                   # Documentation
-│   └── ARCHITECTURE.md         # This file
-│
-├── .github/
-│   ├── workflows/              # CI/CD
-│   │   ├── ci.yml                  # Test + lint
-│   │   ├── docker-image.yml        # Docker build
-│   │   └── rig-listener-build.yml  # Rig listener executables
-│   └── ISSUE_TEMPLATE/         # Bug report and feature request templates
+├── docs/                   # Documentation — see docs/README.md for the index
+├── .github/workflows/      # CI (format, lang-check, tests, docker), image builds
 │
 ├── CONTRIBUTING.md         # How to contribute
-├── CHANGELOG.md            # Version history
 ├── TESTING.md              # Test guide
-├── CODE_OF_CONDUCT.md      # Community standards
 ├── SECURITY.md             # Security policy
-└── LICENSE                 # License
+└── LICENSE                 # MIT
 ```
 
 ## Key Patterns
@@ -149,7 +114,7 @@ openhamclock-main/
 Every data panel follows the same pattern:
 
 ```text
-useXxxSpots.js (hook)     →  XxxPanel.jsx (component)  →  Layout.jsx
+useXxxSpots.js (hook)     →  XxxPanel.jsx (component)  →  Layout / DockableApp
   ├── fetch /api/xxx         ├── renders data list          ├── arranges panels
   ├── polling interval       ├── handles click events       └── passes props
   └── returns { data }       └── calls tuneTo() on click
@@ -159,24 +124,25 @@ useXxxSpots.js (hook)     →  XxxPanel.jsx (component)  →  Layout.jsx
 
 1. Create hook: `src/hooks/useMyFeature.js` — fetch data, return `{ data, loading }`
 2. Create component: `src/components/MyFeaturePanel.jsx` — render the data
-3. Add API route to `server.js` if you need to proxy an external API
-4. Wire it into the layout(s): `ModernLayout.jsx`, `ClassicLayout.jsx`, `DockableApp.jsx`
+3. Add an API route module under `server/routes/` if you need to proxy an external API (mount it in `server.js`)
+4. Register it in `DockableApp.jsx`'s `panelDefs` (and other layouts where it applies)
+5. Update `docs/MANUAL.md` — every user-facing panel gets a section in the manual
 
 ### Adding a Map Layer Plugin
 
 1. Create `src/plugins/layers/useMyLayer.js` following the plugin interface:
 
    ```js
-   export const meta = { name: 'my-layer', label: 'My Layer', ... };
+   export const metadata = { id: 'my-layer', name: 'My Layer', ... };
    export const useLayer = ({ map, enabled, config }) => { ... };
    ```
 
-2. The layer registry auto-discovers it — no manual registration needed
+2. Import it in `src/plugins/layerRegistry.js` and add it to the plugin array (personal plugins dropped in `src/plugins/local/` are auto-discovered instead — no registration, and they survive git updates)
 3. See `src/plugins/OpenHamClock-Plugin-Guide.md` for the full API
 
 ### Theming
 
-Three themes: `dark`, `light`, `retro`. All colors use CSS custom properties:
+Five themes: `dark`, `light`, `legacy`, `retro`, `custom`. All colors use CSS custom properties:
 
 ```css
 var(--bg-primary)      /* Main background */
@@ -187,11 +153,11 @@ var(--text-primary)    /* Main text */
 var(--text-muted)      /* Secondary text */
 ```
 
-Never hardcode colors — always use `var(--xxx)` so all three themes work.
+Never hardcode colors — always use `var(--xxx)` so every theme works.
 
 ### Server-Side API Proxy Pattern
 
-All external API calls go through `server.js` to avoid CORS issues and add caching:
+All external API calls go through the backend to avoid CORS issues and add caching:
 
 ```js
 // 1. Define cache
@@ -213,12 +179,11 @@ app.get('/api/myfeature', async (req, res) => {
 
 ## Monolithic Fallback
 
-`public/index-monolithic.html` is a self-contained copy of the entire frontend in a single HTML file. It exists for environments where `npm run build` isn't available (e.g. Raspberry Pi quick setup). When editing features, **always update the React source in `src/`** — that's what production runs.
+`public/index-monolithic.html` is a legacy self-contained copy of the frontend in a single HTML file, kept for environments where `npm run build` isn't available. When editing features, **always update the React source in `src/`** — that's what production runs.
 
 ## Performance Notes
 
-- **2,000+ concurrent SSE connections** at peak
-- **server.js** is a single Node.js process handling everything
+- **2,000+ concurrent SSE connections** at peak on the hosted site
+- The backend is a single Node.js process handling everything
 - Memory-sensitive: all caches have explicit size caps and TTLs
-- The `geoIPCache` Map and `callsignLocationCache` Map have eviction limits
-- Stats save interval is 5 minutes (not 60 seconds) to reduce GC pressure
+- Upstream calls go through a shared UpstreamManager with request deduplication, stale-while-revalidate, and exponential backoff

@@ -223,7 +223,9 @@ if (ITURHFPROP_URL) {
 }
 
 // WSJT-X settings
-const WSJTX_ENABLED = process.env.WSJTX_UDP_ENABLED === 'true';
+// WSJTX_ENABLED is the documented name; WSJTX_UDP_ENABLED kept as a fallback
+// so existing .env files keep working.
+const WSJTX_ENABLED = (process.env.WSJTX_ENABLED ?? process.env.WSJTX_UDP_ENABLED) === 'true';
 const WSJTX_UDP_PORT = parseInt(process.env.WSJTX_UDP_PORT || '2237');
 const WSJTX_MULTICAST_ADDRESS = process.env.WSJTX_MULTICAST_ADDRESS || '';
 const WSJTX_RELAY_KEY = process.env.WSJTX_RELAY_KEY || '';
@@ -235,8 +237,12 @@ const N1MM_MAX_QSOS = parseInt(process.env.N1MM_MAX_QSOS || '200');
 const N1MM_QSO_MAX_AGE = parseInt(process.env.N1MM_QSO_MAX_AGE_MINUTES || '360') * 60 * 1000;
 
 // Auto-update settings
-const AUTO_UPDATE_ENABLED = process.env.AUTO_UPDATE === 'true';
-const AUTO_UPDATE_INTERVAL_MINUTES = parseInt(process.env.AUTO_UPDATE_INTERVAL || '60');
+// AUTO_UPDATE_ENABLED / AUTO_UPDATE_INTERVAL_MINUTES are the documented names;
+// AUTO_UPDATE / AUTO_UPDATE_INTERVAL kept as fallbacks so existing .env files keep working.
+const AUTO_UPDATE_ENABLED = (process.env.AUTO_UPDATE_ENABLED ?? process.env.AUTO_UPDATE) === 'true';
+const AUTO_UPDATE_INTERVAL_MINUTES = parseInt(
+  process.env.AUTO_UPDATE_INTERVAL_MINUTES || process.env.AUTO_UPDATE_INTERVAL || '60',
+);
 
 // APRS settings
 const APRS_ENABLED = process.env.APRS_ENABLED === 'true';

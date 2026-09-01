@@ -5,7 +5,7 @@
  * 1. Serves the static web application
  * 2. Proxies API requests to avoid CORS issues
  * 3. Provides HF propagation predictions via ITU-R P.533-14 (ITURHFProp)
- * 4. Provides WebSocket support for future real-time features
+ * 4. Streams real-time updates to clients via Server-Sent Events (SSE)
  *
  * Configuration:
  * - Copy .env.example to .env and customize
@@ -186,7 +186,14 @@ const staticOptions = {
   etag: true,
   lastModified: true,
   setHeaders: (res, filePath) => {
-    if (filePath.endsWith('index.html') || filePath.endsWith('.html')) {
+    // Service worker files must never be served stale — a cached sw.js can
+    // pin users to an old deploy for up to a day.
+    if (
+      filePath.endsWith('index.html') ||
+      filePath.endsWith('.html') ||
+      filePath.endsWith(`${path.sep}sw.js`) ||
+      filePath.endsWith(`${path.sep}sw-policy.js`)
+    ) {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.setHeader('CDN-Cache-Control', 'no-store'); // Cloudflare-specific: never cache at edge
       res.setHeader('Pragma', 'no-cache');
@@ -245,7 +252,11 @@ Object.assign(ctx, spaceWeatherExports);
 // 3. Remaining routes (can use callsign + space-weather exports)
 require('./server/routes/rotator')(app, ctx);
 require('./server/routes/spots')(app, ctx);
+require('./server/routes/canparks')(app, ctx);
 require('./server/routes/emcomm')(app, ctx);
+const swpcAlertsExports = require('./server/routes/swpc-alerts')(app, ctx);
+Object.assign(ctx, swpcAlertsExports); // refreshSwpcAlerts + onSwpcAlertsRefreshed (used by push.js)
+require('./server/routes/websdr')(app, ctx);
 require('./server/routes/dxpeditions')(app, ctx);
 require('./server/routes/aircraft')(app, ctx);
 require('./server/routes/atc-sectors')(app, ctx);
@@ -259,18 +270,34 @@ Object.assign(ctx, pskreporterExports);
 const rbnExports = require('./server/routes/rbn')(app, ctx);
 Object.assign(ctx, rbnExports);
 
+// Band-opening detection (reads rbn + dxcluster spot caches — register after both)
+require('./server/routes/band-openings')(app, ctx);
+
+// 24h spot recorder for map history playback (samples the dxcluster cache)
+require('./server/routes/history')(app, ctx);
+
 require('./server/routes/satellites')(app, ctx);
 
 const propagationExports = require('./server/routes/propagation')(app, ctx);
 Object.assign(ctx, propagationExports);
 
 require('./server/routes/p533-data')(app, ctx);
+require('./server/routes/ionosonde')(app, ctx);
 require('./server/routes/winlink')(app, ctx);
+require('./server/routes/logsync')(app, ctx); // Wavelog/QRZ push + LoTW pull proxies (per-user creds, never stored)
 
 require('./server/routes/contests')(app, ctx);
+require('./server/routes/swpc-trends')(app, ctx); // solar wind/Bz/proton trend series (Space Wx Trends panel)
+require('./server/routes/wsprlive')(app, ctx); // wspr.live "my spots" proxy (WSPR My Spots panel)
+require('./server/routes/amsat-status')(app, ctx); // AMSAT status board proxy (AMSAT Status panel)
+require('./server/routes/repeaters')(app, ctx); // hearham.com repeater directory (Repeaters panel)
+require('./server/routes/pota-spot')(app, ctx); // POTA activator self-spotting + park lookup
 require('./server/routes/aprs')(app, ctx);
+require('./server/routes/field-reports')(app, ctx); // EmComm field reports (Winlink Express CSV ingest)
 require('./server/routes/wsjtx')(app, ctx);
 require('./server/routes/n1mm')(app, ctx);
+require('./server/routes/openapi')(app, ctx); // Open QSO-layer API (#1015) — see docs/API.md
+require('./server/routes/group-log')(app, ctx); // shared multi-operator log sessions (Field Day)
 require('./server/routes/meshtastic')(app, ctx);
 require('./server/routes/meshcom')(app, ctx);
 require('./server/routes/presence')(app, ctx);
@@ -278,6 +305,7 @@ require('./server/routes/rig-bridge')(app, ctx);
 require('./server/routes/config-routes')(app, ctx);
 require('./server/routes/geo-time')(app, ctx);
 require('./server/routes/admin')(app, ctx);
+require('./server/routes/push')(app, ctx); // Web Push (dormant without VAPID keys); needs swpc-alerts exports
 
 // Subsystem health background refresher (read by /api/health).
 const health = require('./server/health');

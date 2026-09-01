@@ -2,6 +2,8 @@
 
 Drop custom map layer plugins in this directory. They are **automatically loaded** by OpenHamClock and will **survive updates** (`git pull` won't touch them).
 
+Custom **dockable panels** go in the `panels/` subdirectory (`.jsx` files exporting `metadata` + `Panel`) — see [docs/PLUGINS.md](../../../docs/PLUGINS.md) for the panel plugin guide and a full working example.
+
 ## Quick Start
 
 1. Create a file here, e.g. `useMyLayer.js`

@@ -8,8 +8,8 @@ import { useState, useEffect } from 'react';
 // ─── Announcement Banner ────────────────────────────────────
 // Set to null to hide. Shown at the top of the What's New modal.
 const ANNOUNCEMENT = {
-  emoji: '🌍',
-  text: "This is the biggest visual release since the azimuthal projection landed, and it arrived as a gift: Koen (ON9PK / @KoenVdH) showed up three weeks ago with a working 3D globe and asked if we wanted it. Three review rounds later it's the flagship feature below, polished to run on everything from gaming rigs to a Pi 3. That's open source working the way it's supposed to. A wave to the rest of this cycle's contributors: Laura Batalha (@lbatalha), Michael R Wheeley (@MichaelWheeley), @9M2PJU, Anthony (@AntDiClementi), Alan Hargreaves (@alanhargreaves), and AF1E for the same-day report when CARTO pulled the rug out from under our basemaps. 73 from K0CJH.",
+  emoji: '🎁',
+  text: "Surprise! Two major releases within a week. We shipped the 3D globe, looked at the calendar, and apparently decided sleep is a suggestion — because here's 26.7.0 with a native logbook, group logging for Field Day, a full Contest Mode, offline support, and a time machine for the map. Nobody planned this. It just... happened. Consider it the September drop and its encore playing on the same night. Tips of the hat this cycle: Anthony (@AntDiClementi), chris_debian for the WCAG contrast audit this release implements, Alan Hargreaves (@alanhargreaves), Michael R Wheeley (@MichaelWheeley), and Jörg (DO1HOZ) for the countries-globe report. 73 from K0CJH — see you at the next first Tuesday, probably.",
   color: '#ffd700',
   bg: 'rgba(255, 215, 0, 0.10)',
   border: 'rgba(255, 215, 0, 0.30)',
@@ -28,6 +28,94 @@ const ANNOUNCEMENT = {
 // The jump to v26 resets the scheme to something meaningful going forward.
 
 const CHANGELOG = [
+  {
+    version: '26.7.0',
+    date: '2026-09-01',
+    heading:
+      'Yes, another major release, days after the last one. This one turns OpenHamClock from a dashboard you watch into a station you operate: a native logbook with ADIF import/export, group logging so a whole Field Day site shares one live log, a full Contest Mode with real exchanges, awards tracking from your own QSOs, and offline PWA support. The map learned to time-travel — scrub back through 24 hours of DX spots on the flat map or the 3D globe. Sixteen new dockable panels, four focus layouts, ten new themes, an accessibility pass with WCAG AA contrast on every theme, a built-in manual, and about a hundred other things below.',
+    features: [
+      {
+        icon: '📓',
+        title: 'NEW: Native Logbook',
+        desc: "A real log, no account needed. QSOs live in your browser's IndexedDB (10k+ contacts, survives reloads), with lossless ADIF import/export, dedup on import, and log-from-spot everywhere — the 📓+ on any cluster or activation row opens a pre-filled entry form, and layouts without a Logbook panel get a small pop-up instead. Rig Bridge prefills frequency and mode from your radio. Log Sync pushes contacts to Wavelog/Cloudlog and QRZ Logbook and pulls LoTW confirmations, all with your own per-browser credentials.",
+      },
+      {
+        icon: '👥',
+        title: 'NEW: Group Logging (Field Day Mode)',
+        desc: "Run several stations against one shared log. One operator presses Group (Contest layout header or Logbook panel), gets an 8-character invite code, and reads it across the tent; everyone else joins with the code and their callsign. From then on every QSO anyone logs syncs automatically into a merged log showing each contact's operator, who's online, and live cross-station DUPE flags — the contest quick-log shows a GRP DUPE badge naming the operator who already worked the call on that band. Merged ADIF export carries the OPERATOR field; other people's QSOs never enter your personal log unless you import them. Works on the hosted site or a laptop hosting an offline Field Day LAN.",
+      },
+      {
+        icon: '🏆',
+        title: 'NEW: Contest Mode',
+        desc: 'A dedicated layout built around a keyboard-first quick-log strip: type a call, get an instant DUPE/WORKED/NEW verdict plus new-entity and new-band award flags, fill the exchange, Enter logs it. Nine contests ship with real exchange definitions (CQ WW, ARRL DX, Field Day, Sweepstakes, WPX, and friends) — serials auto-increment, cty.dat autofills zones, and everything lands in the logbook with proper ADIF contest fields. A rate meter, session-scoped multiplier tracker, and session log round out the room. The contest calendar also rebuilt on WA7BNM’s structured iCal feed — no more 20-item cap or December date bugs.',
+      },
+      {
+        icon: '⏪',
+        title: 'NEW: History Playback — a Time Machine for the Map',
+        desc: 'What was 10m doing at 1800Z? The server now records the DX cluster flow into a rolling 24-hour ring, and a new History Playback layer gives the map a transport control: a timeline slider, a 5–60 minute window, and play/pause at up to 15 minutes per second. Spot paths draw as band-colored great circles, fading as they age out of the window. Works on the flat map and the 3D globe, and both scrub the same shared timeline — pause on one, switch projections, and you’re still parked at the same moment.',
+      },
+      {
+        icon: '🏅',
+        title: 'NEW: Awards + Worked-Before Everywhere',
+        desc: "DXCC, WAZ, WAS, and VUCC tracked straight from your logbook via a client-side country table — zero API calls. Spots light up with NEW ENTITY (ATNO) and NEW BAND badges, cluster and activation rows show worked-before/DUPE flags from your own log plus N3FJP/N1MM live sessions, and a Worked Grids map layer shades every square you've logged across flat, azimuthal, and globe projections.",
+      },
+      {
+        icon: '📴',
+        title: 'NEW: Offline PWA',
+        desc: 'Install OpenHamClock to your phone or desktop (Add to Home Screen) and it launches like a native app. A hand-rolled service worker keeps a versioned offline shell with your last-known data, shows an update toast when a new version ships, and stays out of the way otherwise (?nosw escape hatch included).',
+      },
+      {
+        icon: '🧩',
+        title: 'Sixteen New Dockable Panels',
+        desc: 'Satellite Passes, AMSAT Status, Sun & Moon, Space Weather Trends, Space Weather Alerts, My Signal (RBN), WSPR My Spots, POTA Activator self-spotting, Repeaters (hearham.com directory), Meteor Showers, World Clocks, Stopwatch/Countdown, Frequency Memories, Net Schedule, Callsign Lookup, DX News reader, Solar Cycle chart, Log Stats, Aircraft Nearby, and a Custom Image panel. OK, that’s twenty.',
+      },
+      {
+        icon: '🌍',
+        title: '3D Globe Glow-Up',
+        desc: "The week-old globe already leveled up: real 3D satellite models (a genuine NASA ISS model, procedural archetypes for the rest), real polar imagery with clean caps on every basemap, Leaflet-grade detail tiles streamed for wherever you're looking, a real moon at its true position showing tonight's actual phase, and overlay parity — radar, lightning, earthquakes, wildfires, aurora, zones, grids, and more all paint on the sphere. The Countries style now renders its filled countries on the globe too (Antarctica included, after a fight with the Mercator projection we won on points).",
+      },
+      {
+        icon: '🎨',
+        title: 'Ten New Themes + WCAG AA Contrast Everywhere',
+        desc: "Matrix (with the digital rain), 8-Bit (NES dialog chrome, pixel font), Steampunk (brass nameplates, rivets, and a gaslight glow), Midnight, Ember, a Star Trek LCARS theme, and four season themes — Winter, Spring, Summer, and Fall — with snow, blossom petals, fireflies, and tumbling leaves drifting over the interface. The seasons hide easter eggs that only appear on the right days of the year; that's all we're saying — though Trek fans may want to keep an eye on the 3D globe. Alongside the fun: a serious accessibility pass — every theme's text and accent colors now clear WCAG AA contrast, enforced by an automated guard test so an invisible color can never ship again. Retro's palette got real fixes (its cyan was literally identical to its background), keyboard focus rings now show on every control, and band colors auto-darken for text on light panels.",
+      },
+      {
+        icon: '🎯',
+        title: 'Four Focus Layouts + Layout Presets',
+        desc: 'Single-purpose layouts that configure the whole screen on entry: Activator (POTA self-spotting + your RBN signal), Hunter (activations + worked-before), Weather (hazard layers, no ham clutter), and Air Traffic. Plus named dockable layout presets you can rotate through as scenes, saved profiles that rotate as scenes too, a Ctrl+K command palette, and a full icon redesign replacing chrome emoji with a crisp line-icon system.',
+      },
+      {
+        icon: '🎧',
+        title: 'Click-to-Listen on Everything',
+        desc: 'The 🎧 on DX cluster rows, every activation row (POTA/SOTA/WWFF/WWBOTA/CANParks), and callsign popups opens a web SDR already tuned to the spot — nearest live KiwiSDR with a free slot, right frequency, right demodulator. Hear the pileup before you commit.',
+      },
+      {
+        icon: '🔔',
+        title: 'Alerts That Find You',
+        desc: 'Four alert feeds — watchlist hits, contest starts, satellite passes, and band openings (a new detection engine watching RBN + cluster flow) — with per-feed bells, browser notifications, and true Web Push for severe space weather that reaches you even with the browser closed (self-hosted, needs VAPID keys). Lightning proximity alerts wired in too.',
+      },
+      {
+        icon: '🚨',
+        title: 'EmComm: Event Log + After Action Reports',
+        desc: 'An event log records net check-ins and check-outs, APRS messages, new NWS alerts, shelters, and first-heard EmComm stations automatically, exporting as CSV or a print-ready After Action Report with operator callsign and operation date range. APRS telemetry dashboards and RF-heard shelter merging round it out.',
+      },
+      {
+        icon: '🍁',
+        title: 'NEW: CANParks + More Integrations',
+        desc: 'CANParks (canparks.ca) joins as a fifth activations program with POTA cross-reference chips. Also: an open REST API so any logger can push QSOs onto your map, a community panel plugin system (drop a .jsx in plugins/local/), a weather source picker (Open-Meteo default or OpenWeatherMap with your key), per-rig mode overrides in Rig Bridge (CW→CW-R, DATA→DIG — thanks Alan), a band plan overlay on the rig frequency display with license-class privilege dimming, one-click full backup/restore with profile share codes, and a 10W QRP preset.',
+      },
+      {
+        icon: '❓',
+        title: 'A Real Manual, Built In',
+        desc: 'A complete user manual now ships inside the app — Settings → Help renders it with a searchable table of contents, and every panel, layer, and settings tab grew a ? that deep-links to its section. Works offline. The docs got a full overhaul to match: quickstart guide, refreshed contributor docs, and a README cut from 1,500 lines to 290.',
+      },
+      {
+        icon: '🩺',
+        title: 'Fixes & Hardening',
+        desc: "Satellite pipeline release-day resilience (a boot-time hiccup no longer costs a two-hour recovery window, and health checks now see through a live-but-failing relay), RBN checks local spot caches before QRZ so portable operators map at their operating location (thanks Alan), the DX-World news feed survived a Cloudflare tarpit, Windows checkouts no longer break the manual's tests (thanks Michael), the 8-bit theme fits its own menus, and the contest calendar, callsign popups, aircraft overlay, and about forty other things got straightened out along the way.",
+      },
+    ],
+  },
   {
     version: '26.6.0',
     date: '2026-09-01',

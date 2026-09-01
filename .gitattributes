@@ -2,3 +2,8 @@
 # (prevents "permission denied" and "/bin/bash\r: bad interpreter" errors
 # when cloning or pulling on Windows then deploying to Linux/Pi)
 *.sh text eol=lf
+
+# Markdown stays LF everywhere: docs/MANUAL.md is parsed by the in-app help
+# renderer and its guard tests; a CRLF checkout on Windows made every heading
+# regex miss (helpTopics.test.js failures with an up-to-date manual).
+*.md text eol=lf

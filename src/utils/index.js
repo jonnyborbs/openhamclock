@@ -64,4 +64,6 @@ export {
   getBandColorForBand,
   getBandColorForFreq,
   getBandTextColor,
+  getReadableBandColorForBand,
+  getReadableBandColorForFreq,
 } from './bandColors.js';

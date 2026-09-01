@@ -52,11 +52,11 @@
   --border-color: rgba(0, 100, 200, 0.2);
   --text-primary: #1a2332;
   --text-secondary: #4a5a6a;
-  --text-muted: #7a8a9a;
-  --accent-amber: #d4940a;
-  --accent-amber-dim: rgba(212, 148, 10, 0.4);
-  --accent-green: #00aa55;
-  --accent-green-dim: rgba(0, 170, 85, 0.4);
+  --text-muted: #5f6e7d;
+  --accent-amber: #a87508;
+  --accent-amber-dim: rgba(168, 117, 8, 0.4);
+  --accent-green: #008747;
+  --accent-green-dim: rgba(0, 135, 71, 0.4);
   --accent-red: #cc3344;
   --accent-blue: #2266cc;
   --accent-cyan: #0099bb;
@@ -99,7 +99,7 @@
    THEME: RETRO (90s Windows Style)
    ============================================ */
 [data-theme='retro'] {
-  --bg-primary: #008080;
+  --bg-primary: #009090;
   --bg-secondary: #c0c0c0;
   --bg-tertiary: #dfdfdf;
   --bg-panel: #c0c0c0;
@@ -108,15 +108,15 @@
   --border-dark: #404040;
   --text-primary: #000000;
   --text-secondary: #000000;
-  --text-muted: #404040;
-  --accent-amber: #ffff00;
+  --text-muted: #171717;
+  --accent-amber: #806000;
   --accent-amber-dim: #c0c000;
-  --accent-green: #00ff00;
+  --accent-green: #004000;
   --accent-green-dim: #00c000;
-  --accent-red: #ff0000;
+  --accent-red: #700000;
   --accent-blue: #000080;
-  --accent-cyan: #008080;
-  --accent-purple: #800080;
+  --accent-cyan: #003b3b;
+  --accent-purple: #5a005a;
   --accent-white: #000000;
   --color-aprs-rf: #008000;
   --bg-row-alt: rgba(0, 0, 0, 0.08);
@@ -124,4 +124,291 @@
   --title-bar-text: #ffffff;
   --map-ocean: #000080;
   /* --scanline-opacity: 0; */
+}
+
+/* ============================================
+   THEME: MATRIX (code-rain phosphor)
+   Colder and deeper than Legacy: near-black
+   greens, lime warnings, phosphor glow via
+   main.css. Semantic hues stay identifiable.
+   ============================================ */
+[data-theme='matrix'] {
+  --bg-primary: #010401;
+  --bg-secondary: #041006;
+  --bg-tertiary: #0a1f0e;
+  --bg-panel: rgba(2, 12, 4, 0.95);
+  --border-color: rgba(0, 255, 65, 0.25);
+  --text-primary: #00ff41;
+  --text-secondary: #00cc33;
+  --text-muted: #37a457;
+  --accent-amber: #b6ff00;
+  --accent-amber-dim: rgba(182, 255, 0, 0.5);
+  --accent-green: #00ff41;
+  --accent-green-dim: rgba(0, 255, 65, 0.5);
+  --accent-red: #ff3b30;
+  --accent-blue: #4dd2ff;
+  --accent-cyan: #00ffd0;
+  --accent-purple: #a97fff;
+  --accent-white: #d8ffe0;
+  --color-aprs-rf: #00ff41;
+  --bg-row-alt: rgba(0, 255, 65, 0.05);
+  --map-ocean: #010401;
+  --scanline-opacity: 0.07;
+}
+
+/* ============================================
+   THEME: 8-BIT (console palette)
+   Deep NES navy with PICO-8-saturated accents;
+   main.css squares every corner off.
+   ============================================ */
+[data-theme='eightbit'] {
+  --bg-primary: #0f0f23;
+  --bg-secondary: #1a1a2e;
+  --bg-tertiary: #26264d;
+  --bg-panel: #16163a;
+  --border-color: rgba(122, 122, 255, 0.55);
+  --text-primary: #f8f8f8;
+  --text-secondary: #c0c0e0;
+  --text-muted: #8888aa;
+  --accent-amber: #ffcc00;
+  --accent-amber-dim: rgba(255, 204, 0, 0.5);
+  --accent-green: #00e436;
+  --accent-green-dim: rgba(0, 228, 54, 0.5);
+  --accent-red: #ff004d;
+  --accent-blue: #29adff;
+  --accent-cyan: #29e6ff;
+  --accent-purple: #b967ff;
+  --accent-white: #ffffff;
+  --color-aprs-rf: #00e436;
+  --bg-row-alt: rgba(255, 255, 255, 0.06);
+  --map-ocean: #0f0f23;
+}
+
+/* ============================================
+   THEME: STEAMPUNK (brass and parchment)
+   Oiled walnut backgrounds, polished brass,
+   patina cyan, verdigris green. Warmer and
+   brighter than v1, which read as flat brown.
+   ============================================ */
+[data-theme='steampunk'] {
+  --bg-primary: #171008;
+  --bg-secondary: #251a0f;
+  --bg-tertiary: #362718;
+  --bg-panel: rgba(32, 22, 13, 0.95);
+  --border-color: rgba(212, 160, 23, 0.45);
+  --text-primary: #f4e3c0;
+  --text-secondary: #d6ba8b;
+  --text-muted: #ab9166;
+  --accent-amber: #f0b429;
+  --accent-amber-dim: rgba(240, 180, 41, 0.5);
+  --accent-green: #9ccc6b;
+  --accent-green-dim: rgba(156, 204, 107, 0.5);
+  --accent-red: #e0596a;
+  --accent-blue: #7a9bd4;
+  --accent-cyan: #64c9b1;
+  --accent-purple: #b085c6;
+  --accent-white: #f8efdc;
+  --color-aprs-rf: #9ccc6b;
+  --bg-row-alt: rgba(240, 180, 41, 0.06);
+  --map-ocean: #141009;
+}
+
+/* ============================================
+   THEME: MIDNIGHT (deep blue / ice)
+   ============================================ */
+[data-theme='midnight'] {
+  --bg-primary: #05070f;
+  --bg-secondary: #0a1020;
+  --bg-tertiary: #12203a;
+  --bg-panel: rgba(8, 14, 28, 0.93);
+  --border-color: rgba(90, 140, 255, 0.25);
+  --text-primary: #e6eeff;
+  --text-secondary: #9fb4d8;
+  --text-muted: #6d84a8;
+  --accent-amber: #ffc966;
+  --accent-amber-dim: rgba(255, 201, 102, 0.5);
+  --accent-green: #37e6a0;
+  --accent-green-dim: rgba(55, 230, 160, 0.5);
+  --accent-red: #ff5577;
+  --accent-blue: #6699ff;
+  --accent-cyan: #55ccff;
+  --accent-purple: #9f8fff;
+  --accent-white: #ffffff;
+  --color-aprs-rf: #37e6a0;
+  --bg-row-alt: rgba(120, 160, 255, 0.05);
+  --map-ocean: #04060c;
+}
+
+/* ============================================
+   THEME: EMBER (warm shack glow)
+   Tube-amp warmth: dark browns, fire amber,
+   candle-lit text.
+   ============================================ */
+[data-theme='ember'] {
+  --bg-primary: #120a08;
+  --bg-secondary: #1c110d;
+  --bg-tertiary: #2a1a13;
+  --bg-panel: rgba(24, 13, 10, 0.93);
+  --border-color: rgba(255, 120, 60, 0.28);
+  --text-primary: #ffeee4;
+  --text-secondary: #d8ac9a;
+  --text-muted: #a67f70;
+  --accent-amber: #ffb340;
+  --accent-amber-dim: rgba(255, 179, 64, 0.5);
+  --accent-green: #59d477;
+  --accent-green-dim: rgba(89, 212, 119, 0.5);
+  --accent-red: #ff4433;
+  --accent-blue: #6f8fd9;
+  --accent-cyan: #4fc8c2;
+  --accent-purple: #c07fd9;
+  --accent-white: #fff4ea;
+  --color-aprs-rf: #59d477;
+  --bg-row-alt: rgba(255, 140, 70, 0.05);
+  --map-ocean: #0d0806;
+}
+
+/* ============================================
+   THEME: TREK (LCARS-inspired)
+   Pure black canvas with the classic golden-
+   orange / lavender / periwinkle bar palette;
+   panel chrome (elbows, pill headers, condensed
+   all-caps type) lives in main.css.
+   ============================================ */
+[data-theme='trek'] {
+  --bg-primary: #000000;
+  --bg-secondary: #0a0a0f;
+  --bg-tertiary: #16161f;
+  --bg-panel: #000000;
+  --border-color: rgba(255, 156, 0, 0.45);
+  --text-primary: #ffcc99;
+  --text-secondary: #cc99cc;
+  --text-muted: #837a93;
+  --accent-amber: #ff9c00;
+  --accent-amber-dim: rgba(255, 156, 0, 0.5);
+  --accent-green: #66cc66;
+  --accent-green-dim: rgba(102, 204, 102, 0.5);
+  --accent-red: #cc4444;
+  --accent-blue: #9999ff;
+  --accent-cyan: #99ccff;
+  --accent-purple: #cc99cc;
+  --accent-white: #ffffff;
+  --color-aprs-rf: #66cc66;
+  --bg-row-alt: rgba(255, 156, 0, 0.06);
+  --map-ocean: #000000;
+  --lcars-bar: #ff9c00;
+  --lcars-alt: #9999cc;
+}
+
+/* ============================================
+   THEME: WINTER (frost and steel)
+   Colder and grayer than Midnight's navy: steel
+   blue-gray, ice cyan, candlelight amber. Snow
+   falls via SeasonalEffects.
+   ============================================ */
+[data-theme='winter'] {
+  --bg-primary: #0d141c;
+  --bg-secondary: #16202b;
+  --bg-tertiary: #223140;
+  --bg-panel: rgba(16, 24, 33, 0.92);
+  --border-color: rgba(160, 210, 255, 0.28);
+  --text-primary: #eaf4fc;
+  --text-secondary: #b0c8dc;
+  --text-muted: #82a0b8;
+  --accent-amber: #ffd27f;
+  --accent-amber-dim: rgba(255, 210, 127, 0.5);
+  --accent-green: #7fe0c3;
+  --accent-green-dim: rgba(127, 224, 195, 0.5);
+  --accent-red: #ff7b8a;
+  --accent-blue: #7fb8ff;
+  --accent-cyan: #8ae6ff;
+  --accent-purple: #b8a4ff;
+  --accent-white: #ffffff;
+  --color-aprs-rf: #7fe0c3;
+  --bg-row-alt: rgba(160, 210, 255, 0.05);
+  --map-ocean: #0a1118;
+}
+
+/* ============================================
+   THEME: SPRING (meadow light)
+   A light theme: pale cream-green, leaf green,
+   blossom pink. Petals fall via SeasonalEffects.
+   ============================================ */
+[data-theme='spring'] {
+  --bg-primary: #f4f7ee;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e4eeda;
+  --bg-panel: rgba(255, 255, 255, 0.94);
+  --border-color: rgba(90, 150, 60, 0.3);
+  --text-primary: #24321e;
+  --text-secondary: #4a5f45;
+  --text-muted: #5c7155;
+  --accent-amber: #9c7508;
+  --accent-amber-dim: rgba(156, 117, 8, 0.4);
+  --accent-green: #3d7a24;
+  --accent-green-dim: rgba(61, 122, 36, 0.4);
+  --accent-red: #c23a5a;
+  --accent-blue: #2e6bc4;
+  --accent-cyan: #0f7f96;
+  --accent-purple: #8a4bbf;
+  --accent-white: #24321e;
+  --color-aprs-rf: #3d7a24;
+  --bg-row-alt: rgba(70, 130, 50, 0.06);
+  --map-ocean: #e4f0f6;
+}
+
+/* ============================================
+   THEME: SUMMER (sun and sand)
+   A light theme: warm sand, ocean blue, palm
+   green. Fireflies drift via SeasonalEffects.
+   ============================================ */
+[data-theme='summer'] {
+  --bg-primary: #fdf6e3;
+  --bg-secondary: #fffbf0;
+  --bg-tertiary: #f3e8c8;
+  --bg-panel: rgba(255, 251, 240, 0.94);
+  --border-color: rgba(214, 138, 0, 0.35);
+  --text-primary: #3a2f14;
+  --text-secondary: #6b5a2e;
+  --text-muted: #766335;
+  --accent-amber: #b06f00;
+  --accent-amber-dim: rgba(176, 111, 0, 0.4);
+  --accent-green: #33801f;
+  --accent-green-dim: rgba(51, 128, 31, 0.4);
+  --accent-red: #d0333f;
+  --accent-blue: #1668c9;
+  --accent-cyan: #007a8c;
+  --accent-purple: #8a3d9e;
+  --accent-white: #3a2f14;
+  --color-aprs-rf: #33801f;
+  --bg-row-alt: rgba(176, 111, 0, 0.06);
+  --map-ocean: #d8edf4;
+}
+
+/* ============================================
+   THEME: FALL (foliage)
+   Warmer and redder than Ember's tube glow:
+   mahogany, pumpkin, goldenrod, maple, olive.
+   Leaves fall via SeasonalEffects.
+   ============================================ */
+[data-theme='fall'] {
+  --bg-primary: #1d1208;
+  --bg-secondary: #2a1a0e;
+  --bg-tertiary: #3a2513;
+  --bg-panel: rgba(38, 23, 12, 0.93);
+  --border-color: rgba(230, 126, 34, 0.32);
+  --text-primary: #f7e8d0;
+  --text-secondary: #d9b894;
+  --text-muted: #ad8d68;
+  --accent-amber: #f5a623;
+  --accent-amber-dim: rgba(245, 166, 35, 0.5);
+  --accent-green: #a8b545;
+  --accent-green-dim: rgba(168, 181, 69, 0.5);
+  --accent-red: #e8503a;
+  --accent-blue: #6f9ad9;
+  --accent-cyan: #55bdb2;
+  --accent-purple: #b678c9;
+  --accent-white: #fdf3e3;
+  --color-aprs-rf: #a8b545;
+  --bg-row-alt: rgba(245, 166, 35, 0.06);
+  --map-ocean: #170e06;
 }

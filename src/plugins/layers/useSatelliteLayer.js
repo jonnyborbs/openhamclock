@@ -439,7 +439,6 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
     const globalOpacity = opacity !== undefined ? opacity : 1.0;
     const accentCyan = getComputedStyle(document.documentElement).getPropertyValue('--accent-cyan').trim();
     const accentGreen = getComputedStyle(document.documentElement).getPropertyValue('--accent-green').trim();
-    const accentAmber = getComputedStyle(document.documentElement).getPropertyValue('--accent-amber').trim();
 
     satellites.forEach((sat) => {
       const isSelected = selectedSats.includes(sat.name);
@@ -494,20 +493,6 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
             }).addTo(layerGroupRef.current);
           }
         });
-
-        if (isSelected && sat.leadTrack && sat.leadTrack.length > 0) {
-          const leadCoords = sat.leadTrack.map((p) => [p[0], p[1]]);
-          replicatePath(leadCoords).forEach((lCoords) => {
-            window.L.polyline(lCoords, {
-              color: accentAmber,
-              weight: 3,
-              opacity: 0.8 * globalOpacity,
-              dashArray: '8, 12',
-              lineCap: 'round',
-              interactive: false,
-            }).addTo(layerGroupRef.current);
-          });
-        }
       }
 
       const isSafeLatLon = (sat) => Number.isFinite(sat?.lat) && Number.isFinite(sat?.lon);

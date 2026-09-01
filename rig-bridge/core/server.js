@@ -45,6 +45,23 @@ function isValidPort(p) {
   return Number.isInteger(p) && p >= 1 && p <= 65535;
 }
 
+// Charset accepted for a rig mode name — shared by POST /mode and the
+// modeOverrides validation so both ends agree on what a mode looks like.
+const MODE_RE = /^[A-Za-z0-9-]{1,20}$/;
+
+/**
+ * isValidModeOverrides — radio.modeOverrides (issue #882) must be a plain
+ * object of mode → mode string pairs, each side matching the same charset
+ * POST /mode accepts. Capped at 50 entries. undefined (field absent) is fine.
+ */
+function isValidModeOverrides(o) {
+  if (o === undefined) return true;
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return false;
+  const entries = Object.entries(o);
+  if (entries.length > 50) return false;
+  return entries.every(([from, to]) => typeof to === 'string' && MODE_RE.test(from) && MODE_RE.test(to));
+}
+
 /** Sliding-window in-memory rate limiter. Returns a middleware factory. */
 function makeRateLimiter(maxRequests, windowMs) {
   const hits = new Map(); // IP → [timestamps]
@@ -208,7 +225,7 @@ function buildSetupHtml(version, firstRunToken = null) {
       text-transform: uppercase;
       letter-spacing: 0.3px;
     }
-    select, input[type="number"], input[type="text"] {
+    select, input[type="number"], input[type="text"], textarea {
       width: 100%;
       padding: 10px 12px;
       background: #0a0e14;
@@ -221,7 +238,8 @@ function buildSetupHtml(version, firstRunToken = null) {
       outline: none;
       transition: border-color 0.2s;
     }
-    select:focus, input:focus { border-color: #00ffcc; }
+    textarea { resize: vertical; font-family: 'SF Mono', 'Cascadia Code', Consolas, monospace; font-size: 13px; }
+    select:focus, input:focus, textarea:focus { border-color: #00ffcc; }
     .row { display: flex; gap: 12px; }
     .row > div { flex: 1; }
     .btn {
@@ -732,6 +750,15 @@ function buildSetupHtml(version, firstRunToken = null) {
               <span>Enable PTT</span>
             </div>
           </div>
+        </div>
+
+        <label>Mode Overrides (optional)</label>
+        <textarea id="modeOverrides" rows="3" spellcheck="false" placeholder="DATA-USB = DIG&#10;CW = CW-R"></textarea>
+        <div class="help-text">
+          Remap modes before they reach your rig — one <code>FROM = TO</code> pair per line.
+          Useful when your radio needs a different name than OpenHamClock sends, e.g.
+          <code>DATA-USB = DIG</code> (FT-817/818 via flrig) or <code>DATA-USB = PKTUSB</code>
+          (rigctld rigs using Hamlib PKT names). Leave empty for defaults.
         </div>
 
         <div class="btn-row">
@@ -1436,6 +1463,9 @@ function buildSetupHtml(version, firstRunToken = null) {
       document.getElementById('icomAddress').value = r.icomAddress || '0x94';
       document.getElementById('pollInterval').value = r.pollInterval || 500;
       document.getElementById('pttEnabled').checked = !!r.pttEnabled;
+      document.getElementById('modeOverrides').value = Object.entries(r.modeOverrides || {})
+        .map(function (e) { return e[0] + ' = ' + e[1]; })
+        .join('\\n');
       document.getElementById('legacyHost').value =
         r.type === 'rigctld' ? (r.rigctldHost || '127.0.0.1') : (r.flrigHost || '127.0.0.1');
       document.getElementById('legacyPort').value =
@@ -1554,6 +1584,21 @@ function buildSetupHtml(version, firstRunToken = null) {
         pollInterval: parseInt(document.getElementById('pollInterval').value),
         pttEnabled: document.getElementById('pttEnabled').checked,
       };
+
+      // Mode overrides (issue #882): parse "FROM = TO" lines into an object.
+      // Sent every save (possibly empty) so clearing the box removes overrides.
+      const modeOverrides = {};
+      const ovLines = document.getElementById('modeOverrides').value.split('\\n');
+      for (const line of ovLines) {
+        const t = line.trim();
+        if (!t) continue;
+        const m = t.match(/^([A-Za-z0-9-]{1,20})\\s*[=:]\\s*([A-Za-z0-9-]{1,20})$/);
+        if (!m) {
+          return showToast('Invalid mode override "' + t + '" — use FROM = TO (letters, digits, dashes)', 'error');
+        }
+        modeOverrides[m[1].toUpperCase()] = m[2];
+      }
+      radio.modeOverrides = modeOverrides;
 
       if (type === 'rigctld') {
         radio.rigctldHost = document.getElementById('legacyHost').value;
@@ -2154,6 +2199,13 @@ function createServer(registry, version) {
           return res.status(400).json({ success: false, error: `Invalid port value for ${field}` });
         }
       }
+      // Validate mode overrides (issue #882)
+      if (!isValidModeOverrides(newConfig.radio.modeOverrides)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid modeOverrides — use { "FROM": "TO" } pairs of mode names (letters, digits, dashes; max 50)',
+        });
+      }
       config.radio = { ...config.radio, ...newConfig.radio };
     }
     if (typeof newConfig.logging === 'boolean') {
@@ -2509,7 +2561,7 @@ function createServer(registry, version) {
   app.post('/mode', requireAuth, modeLimiter, (req, res) => {
     const { mode } = req.body;
     if (!mode) return res.status(400).json({ error: 'Missing mode' });
-    if (typeof mode !== 'string' || !/^[A-Za-z0-9-]{1,20}$/.test(mode)) {
+    if (typeof mode !== 'string' || !MODE_RE.test(mode)) {
       return res.status(400).json({ error: 'Invalid mode value' });
     }
     if (!registry.dispatch('setMode', mode)) {

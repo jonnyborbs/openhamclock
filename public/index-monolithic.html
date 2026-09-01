@@ -1519,7 +1519,9 @@
             const response = await fetch('/api/contests');
             
             if (response.ok) {
-              const contests = await response.json();
+              const payload = await response.json();
+              // API returns { contests, source, fetchedAt }; older servers a bare array
+              const contests = Array.isArray(payload) ? payload : (payload.contests || []);
               if (contests && contests.length > 0) {
                 setData(contests.slice(0, 10));
               } else {

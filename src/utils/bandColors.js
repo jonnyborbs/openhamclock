@@ -3,6 +3,8 @@
  * Local-first user customization for band colors.
  */
 
+import { ensureTextContrast, parseHex } from './contrast.js';
+
 export const BAND_COLOR_STORAGE_KEY = 'openhamclock_bandColors';
 export const BAND_COLORS_CHANGE_EVENT = 'openhamclock-band-colors-change';
 
@@ -150,6 +152,56 @@ export const getBandColorForBand = (band, palette) => {
   const colors = palette || getEffectiveBandColors();
   return colors[key] || DEFAULT_FALLBACK_COLOR;
 };
+
+// ── Readable band colors for TEXT on panels ─────────────────────────────────
+// The band palette is bright pastel, designed for chips and map paths on dark
+// panels. Used as *text* on Light/Retro's pale panels, 40m yellow and friends
+// wash out (found via #1112's staging screenshots). These variants darken a
+// failing color toward black (or lighten toward white on dark panels) just
+// enough to reach 4.5:1 against the current theme's panel background,
+// preserving the band's hue. Colors that already pass come back untouched, so
+// dark themes render exactly as before.
+
+let panelBgCache; // undefined = not measured, null = unavailable (non-hex/SSR)
+
+const currentPanelBg = () => {
+  if (panelBgCache !== undefined) return panelBgCache;
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--bg-secondary').trim();
+    panelBgCache = parseHex(v) ? v : null;
+  } catch {
+    panelBgCache = null;
+  }
+  return panelBgCache;
+};
+
+if (typeof window !== 'undefined') {
+  // applyTheme() announces theme switches; the panel background (and the
+  // adjusted colors derived from it) re-measure on the next paint.
+  window.addEventListener('openhamclock-theme-change', () => {
+    panelBgCache = undefined;
+    readableCache.clear();
+  });
+}
+
+const readableCache = new Map(); // `${color}|${bg}` → adjusted color
+
+const readableOnPanels = (color) => {
+  const bg = currentPanelBg();
+  if (!bg || !parseHex(color)) return color;
+  const key = `${color}|${bg}`;
+  let out = readableCache.get(key);
+  if (out === undefined) {
+    out = ensureTextContrast(color, bg, 4.5);
+    readableCache.set(key, out);
+  }
+  return out;
+};
+
+export const getReadableBandColorForBand = (band, palette) => readableOnPanels(getBandColorForBand(band, palette));
+
+export const getReadableBandColorForFreq = (freqMHz, palette) =>
+  readableOnPanels(getBandColorForFreq(freqMHz, palette));
 
 export const getBandColorForFreq = (freqMHz, palette) => {
   const raw = parseFloat(freqMHz);

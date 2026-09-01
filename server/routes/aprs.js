@@ -83,7 +83,9 @@ module.exports = function (app, ctx) {
   // T#seq,val1,val2,val3,val4,val5,bits — analog values + digital status
   // PARM/UNIT/EQNS messages define parameter names, units, and equations
   const telemetryDefs = new Map(); // callsign → { params, units, eqns }
-  const telemetryData = new Map(); // callsign → { values[], bits, seq, timestamp }
+  const telemetryData = new Map(); // callsign → { call, seq, values[], bits, timestamp, source, history[] }
+  const TELEMETRY_HISTORY_MAX = 60; // samples kept per station for trend charts
+  const TELEMETRY_MAX_STATIONS = 100;
 
   function parseAprsTelemetry(line) {
     try {
@@ -100,26 +102,33 @@ module.exports = function (app, ctx) {
         if (parts.length < 6) return null;
         const seq = parts[0];
         const values = parts.slice(1, 6).map((v) => parseFloat(v) || 0);
-        const bits = parts[5] ? parts[5].replace(/[^01]/g, '') : '';
+        // Digital bits are the 7th field (T#seq,a1,a2,a3,a4,a5,bits);
+        // tolerate abbreviated frames that omit it.
+        const bits = parts.length > 6 && parts[6] ? parts[6].replace(/[^01]/g, '') : '';
 
-        const def = telemetryDefs.get(callsign) || {};
+        const prev = telemetryData.get(callsign);
         const entry = {
           call: callsign,
           seq,
           values,
           bits,
           timestamp: Date.now(),
-          params: def.params || ['A1', 'A2', 'A3', 'A4', 'A5'],
-          units: def.units || ['', '', '', '', ''],
+          history: prev?.history || [],
         };
+        entry.history.push({ seq, values, bits, timestamp: entry.timestamp });
+        if (entry.history.length > TELEMETRY_HISTORY_MAX) entry.history.shift();
 
-        // Apply equations if defined: val = a*x^2 + b*x + c
-        if (def.eqns) {
-          entry.computed = values.map((v, i) => {
-            const e = def.eqns[i];
-            if (!e) return v;
-            return e[0] * v * v + e[1] * v + e[2];
-          });
+        // Bound the number of tracked stations (evict oldest)
+        if (!prev && telemetryData.size >= TELEMETRY_MAX_STATIONS) {
+          let oldestKey = null;
+          let oldestTime = Infinity;
+          for (const [k, v] of telemetryData) {
+            if (v.timestamp < oldestTime) {
+              oldestTime = v.timestamp;
+              oldestKey = k;
+            }
+          }
+          if (oldestKey) telemetryData.delete(oldestKey);
         }
 
         telemetryData.set(callsign, entry);
@@ -382,9 +391,7 @@ module.exports = function (app, ctx) {
           // Try parsing as telemetry
           const telem = parseAprsTelemetry(trimmed);
           if (telem && telem.type === 'data') {
-            logDebug(
-              `[APRS] Telemetry from ${telem.call}: ${telem.params.map((p, i) => `${p}=${telem.computed?.[i] ?? telem.values[i]}`).join(', ')}`,
-            );
+            logDebug(`[APRS] Telemetry from ${telem.call}: seq ${telem.seq} [${telem.values.join(', ')}]`);
           }
 
           // Try parsing as a message (addressed message or bulletin)
@@ -504,17 +511,36 @@ module.exports = function (app, ctx) {
     });
   });
 
-  // REST endpoint: GET /api/aprs/shelters — shelter reports extracted from APRS
+  // Find a heard position for a reporting station (exact SSID first, then base call)
+  function findStationPosition(from) {
+    const exact = aprsStations.get(from);
+    if (exact && exact.lat != null && exact.lon != null) return exact;
+    const base = from.split('-')[0];
+    for (const [, st] of aprsStations) {
+      if (st.call === base && st.lat != null && st.lon != null) return st;
+    }
+    return null;
+  }
+
+  // REST endpoint: GET /api/aprs/shelters — shelter reports extracted from APRS.
+  // Each report is enriched with the sender's last-heard position (when known)
+  // so the EmComm UI can plot RF-sourced shelters alongside FEMA data.
   app.get('/api/aprs/shelters', (req, res) => {
     const shelterReports = aprsMessages
       .filter((m) => m.isShelterReport)
-      .map((m) => ({
-        from: m.from,
-        text: m.cleanText || m.text,
-        tokens: m.tokens,
-        timestamp: m.timestamp,
-        type: m.type,
-      }));
+      .map((m) => {
+        const pos = findStationPosition(m.from);
+        return {
+          from: m.from,
+          text: m.cleanText || m.text,
+          tokens: m.tokens,
+          timestamp: m.timestamp,
+          type: m.type,
+          lat: pos ? pos.lat : null,
+          lon: pos ? pos.lon : null,
+          source: m.source === 'local-tnc' ? 'rf' : 'aprs-is',
+        };
+      });
     res.json({
       count: shelterReports.length,
       shelters: shelterReports,
@@ -572,17 +598,50 @@ module.exports = function (app, ctx) {
     res.json({ ok: true });
   });
 
+  // Apply channel equations (val = a*x^2 + b*x + c) to a raw sample
+  function applyTelemetryEqns(values, eqns) {
+    if (!eqns) return null;
+    return values.map((v, i) => {
+      const e = eqns[i];
+      if (!e) return v;
+      return e[0] * v * v + e[1] * v + e[2];
+    });
+  }
+
+  // Build the API view of a telemetry entry, resolving PARM/UNIT/EQNS at read
+  // time so definitions that arrive after data frames still label old samples.
+  function telemetryView(entry) {
+    const def = telemetryDefs.get(entry.call) || {};
+    const computed = applyTelemetryEqns(entry.values, def.eqns);
+    return {
+      call: entry.call,
+      seq: entry.seq,
+      values: entry.values,
+      bits: entry.bits,
+      timestamp: entry.timestamp,
+      source: entry.source || 'aprs-is',
+      params: def.params || ['A1', 'A2', 'A3', 'A4', 'A5'],
+      units: def.units || ['', '', '', '', ''],
+      ...(computed ? { computed } : {}),
+      history: (entry.history || []).map((h) => {
+        const hc = applyTelemetryEqns(h.values, def.eqns);
+        return { seq: h.seq, values: h.values, bits: h.bits, timestamp: h.timestamp, ...(hc ? { computed: hc } : {}) };
+      }),
+    };
+  }
+
   // REST endpoint: GET /api/aprs/telemetry — telemetry data from all stations
   app.get('/api/aprs/telemetry', (req, res) => {
     const callsign = req.query.callsign;
     if (callsign) {
       const data = telemetryData.get(callsign.toUpperCase());
-      return res.json(data || { error: 'No telemetry for this callsign' });
+      return res.json(data ? telemetryView(data) : { error: 'No telemetry for this callsign' });
     }
     const all = [];
     for (const [, entry] of telemetryData) {
-      all.push(entry);
+      all.push(telemetryView(entry));
     }
+    all.sort((a, b) => b.timestamp - a.timestamp);
     res.json({ count: all.length, telemetry: all });
   });
 
@@ -671,6 +730,15 @@ module.exports = function (app, ctx) {
       const rawLine = `${pkt.source}>${pkt.destination || 'APRS'}:${pkt.info}`;
       const station = parseAprsPacket(rawLine);
       if (!station) {
+        // Try as telemetry (data frames + PARM/UNIT/EQNS definitions)
+        const telem = parseAprsTelemetry(rawLine);
+        if (telem) {
+          if (telem.type === 'data') {
+            const entry = telemetryData.get(telem.call);
+            if (entry) entry.source = 'local-tnc';
+          }
+          continue;
+        }
         // Try as message
         const msg = parseAprsMessage(rawLine);
         if (msg) {

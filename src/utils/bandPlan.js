@@ -85,3 +85,77 @@ export const mapModeToRig = (mode, freq) => {
   // Unknown modes: pass through so the rig can decide
   return m;
 };
+
+// ── Band plan display helpers (BandPlanBar) ─────────────────────────────────
+
+/**
+ * Group the flat bandplan.json ranges into contiguous amateur bands.
+ * Built once at module load. Each band: { name, min, max, segments } (kHz).
+ * The band name is derived from the first segment's desc ("160m CW" → "160m").
+ */
+const buildBands = () => {
+  const sorted = [...bandPlan].sort((a, b) => a.min - b.min);
+  const bands = [];
+  for (const seg of sorted) {
+    const cur = bands[bands.length - 1];
+    if (cur && seg.min <= cur.max) {
+      // Contiguous with (or overlapping) the current band — extend it
+      cur.max = Math.max(cur.max, seg.max);
+      cur.segments.push(seg);
+    } else {
+      bands.push({
+        name: (seg.desc || '').split(' ')[0] || '',
+        min: seg.min,
+        max: seg.max,
+        segments: [seg],
+      });
+    }
+  }
+  return bands;
+};
+
+const BANDS = buildBands();
+
+/**
+ * Find the amateur band containing a frequency.
+ * @param {number} hz - Frequency in Hz
+ * @returns {{name: string, min: number, max: number, segments: Array}|null}
+ *          Band with min/max in kHz, or null when out of any known band.
+ */
+export const getBandForFreq = (hz) => {
+  if (!hz || !Number.isFinite(hz)) return null;
+  const khz = hz / 1000;
+  return BANDS.find((b) => khz >= b.min && khz <= b.max) || null;
+};
+
+/**
+ * Position of a frequency within a band, as a percentage (0–100).
+ * @param {number} hz - Frequency in Hz
+ * @param {{min: number, max: number}} band - Band from getBandForFreq (kHz)
+ * @returns {number|null} - Clamped 0–100, or null when inputs are invalid
+ */
+export const getMarkerPosition = (hz, band) => {
+  if (!hz || !band || band.max <= band.min) return null;
+  const khz = hz / 1000;
+  const pct = ((khz - band.min) / (band.max - band.min)) * 100;
+  return Math.max(0, Math.min(100, pct));
+};
+
+/**
+ * Map a bandplan.json mode to a display class for segment coloring.
+ * @param {string} mode - 'CW', 'DATA', 'USB', 'LSB', 'FM', 'AM'
+ * @returns {string} - 'cw' | 'data' | 'phone' | 'fm'
+ */
+export const getSegmentClass = (mode) => {
+  switch ((mode || '').toUpperCase()) {
+    case 'CW':
+      return 'cw';
+    case 'DATA':
+      return 'data';
+    case 'FM':
+      return 'fm';
+    default:
+      // USB / LSB / AM and anything else voice-shaped
+      return 'phone';
+  }
+};

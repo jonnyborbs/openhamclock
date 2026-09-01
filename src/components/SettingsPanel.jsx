@@ -9,6 +9,7 @@ import { useTranslation, Trans } from 'react-i18next';
 import { LANGUAGES } from '../lang/i18n.js';
 import {
   getProfiles,
+  getProfileEntries,
   getActiveProfile,
   saveProfile,
   loadProfile,
@@ -17,16 +18,42 @@ import {
   exportProfile,
   exportCurrentState,
   importProfile,
+  exportProfileShareCode,
+  importProfileFromShareCode,
 } from '../utils/profiles.js';
+import { buildBackup, restoreBackup, backupFilename, markBackupDone, getLastBackupAt } from '../utils/backup.js';
 import { useTheme } from '../theme/useTheme';
 import ThemeSelector from './ThemeSelector';
 import CustomThemeEditor from './CustomThemeEditor';
 import { emojiToIso2 } from '../utils/countryFlags';
 import { getAlertSettings, saveAlertSettings, playTone, TONE_PRESETS, ALERT_FEEDS } from '../utils/audioAlerts';
+import { getNotificationPermission, requestNotificationPermission } from '../utils/notifications';
+import {
+  isPushSupported,
+  getServerPushStatus,
+  getPushSubscription,
+  subscribeToPush,
+  unsubscribeFromPush,
+  sendTestPush,
+} from '../utils/push';
 import { setRelaySessionId, setRelayConfigured, clearRelaySession } from '../utils/relaySession';
 import { getCallbookCredentials, setCallbookCredentials } from '../utils/callbookAuth.js';
 import { getCartoApiKey, CARTO_KEY_STORAGE } from '../utils/config.js';
+import { listPresets } from '../store/layoutStore.js';
+import LogSyncSettings from './LogSyncSettings.jsx';
 import { CALLBOOKS, getCallbook } from '../utils/callbook.js';
+import { HELP_EVENT, settingsTabHelpTopic, layerHelpTopic } from '../utils/helpTopics.js';
+import { SETTINGS_TAB_ICONS } from './Icons.jsx';
+
+// Line icon shown before each settings tab label (chrome icon redesign):
+// 20px, inherits the tab's text color via currentColor.
+const SettingsTabIcon = ({ tab }) => {
+  const Cmp = SETTINGS_TAB_ICONS[tab];
+  return Cmp ? <Cmp size={20} style={{ verticalAlign: '-5px', marginRight: '6px' }} /> : null;
+};
+import HelpTab from './HelpTab.jsx';
+import HelpLink from './HelpLink.jsx';
+import WeatherSourceCard from './WeatherSourceCard.jsx';
 
 export const SettingsPanel = ({
   isOpen,
@@ -56,6 +83,7 @@ export const SettingsPanel = ({
   const [lon, setLon] = useState(config?.location?.lon ?? 0);
   const [stationAlt, setStationAlt] = useState(config?.location?.stationAlt ?? 100);
   const [minElev, setMinElev] = useState(config?.satellite?.minElev ?? 5.0);
+  const [satTrackDuration, setSatTrackDuration] = useState(config?.satellite?.trackDurationMins ?? 45);
   const [layout, setLayout] = useState(config?.layout || 'modern');
   const [mouseZoom, setMouseZoom] = useState(config?.mouseZoom || 50);
   const [timezone, setTimezone] = useState(config?.timezone || '');
@@ -70,12 +98,16 @@ export const SettingsPanel = ({
   const [displaySchedule, setDisplaySchedule] = useState(
     config?.displaySchedule || { enabled: false, sleepTime: '23:00', wakeTime: '07:00', keepSignalActive: true },
   );
+  const [sceneRotation, setSceneRotation] = useState(
+    config?.sceneRotation || { enabled: false, intervalSec: 60, layouts: [] },
+  );
   const [distUnits, setDistUnits] = useState(config?.allUnits?.dist || config?.units || 'imperial');
   const [tempUnits, setTempUnits] = useState(config?.allUnits?.temp || config?.units || 'imperial');
   const [pressUnits, setPressUnits] = useState(config?.allUnits?.press || config?.units || 'imperial');
   const [showWhatsNew, setShowWhatsNew] = useState(config.showWhatsNew); // set in config.js
   const [propMode, setPropMode] = useState(config?.propagation?.mode || 'SSB');
   const [propPower, setPropPower] = useState(config?.propagation?.power || 100);
+  const [licenseClass, setLicenseClass] = useState(config?.licenseClass || 'other');
   const [rigEnabled, setRigEnabled] = useState(config?.rigControl?.enabled || false);
   const [rigHost, setRigHost] = useState(config?.rigControl?.host || 'http://localhost');
   const [rigPort, setRigPort] = useState(normalizeRigPort(config?.rigControl?.port));
@@ -208,6 +240,7 @@ export const SettingsPanel = ({
     'community',
     'alerts',
     'rig-bridge',
+    'help',
   ];
   const settingsTabRefs = useRef({});
   const [ctrlPressed, setCtrlPressed] = useState(false);
@@ -219,6 +252,23 @@ export const SettingsPanel = ({
     }
   }, [isOpen, defaultTab]);
 
+  // Help deep links (HelpLink buttons anywhere in the app): App.jsx opens
+  // the modal, we switch to the Help tab and remember the manual anchor
+  // so HelpTab can scroll to it once the manual has loaded.
+  const [helpAnchor, setHelpAnchor] = useState(null);
+  useEffect(() => {
+    const onOpenHelp = (e) => {
+      setActiveTab('help');
+      setHelpAnchor(e.detail?.anchor || null);
+    };
+    window.addEventListener(HELP_EVENT, onOpenHelp);
+    return () => window.removeEventListener(HELP_EVENT, onOpenHelp);
+  }, []);
+  // Don't re-scroll to a stale anchor next time the Help tab opens
+  useEffect(() => {
+    if (!isOpen) setHelpAnchor(null);
+  }, [isOpen]);
+
   // Profile management state
   const [profiles, setProfilesList] = useState({});
   const [activeProfileName, setActiveProfileName] = useState(null);
@@ -227,6 +277,12 @@ export const SettingsPanel = ({
   const [renameValue, setRenameValue] = useState('');
   const [profileMessage, setProfileMessage] = useState(null);
   const fileInputRef = useRef(null);
+
+  // Full backup / restore + profile share codes
+  const backupInputRef = useRef(null);
+  const [lastBackupAt, setLastBackupAt] = useState(null);
+  const [shareCodeInput, setShareCodeInput] = useState('');
+  const [shareCodeFallback, setShareCodeFallback] = useState(null); // {name, code} when clipboard is unavailable
 
   // QRZ API state
   const [qrzUsername, setQrzUsername] = useState(() => getCallbookCredentials().qrzUsername || '');
@@ -253,6 +309,92 @@ export const SettingsPanel = ({
   const refreshProfiles = () => {
     setProfilesList(getProfiles());
     setActiveProfileName(getActiveProfile());
+    setLastBackupAt(getLastBackupAt());
+  };
+
+  const flashProfileMessage = (type, text) => {
+    setProfileMessage({ type, text });
+    setTimeout(() => setProfileMessage(null), 5000);
+  };
+
+  // ── Full backup / restore ─────────────────────────────────────────────────
+  const handleExportBackup = async () => {
+    try {
+      persistCurrentSettings();
+      const bundle = await buildBackup();
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = backupFilename();
+      a.click();
+      URL.revokeObjectURL(url);
+      markBackupDone();
+      setLastBackupAt(getLastBackupAt());
+      flashProfileMessage('success', t('station.settings.profiles.backup.exported', { count: bundle.logbook.length }));
+    } catch (err) {
+      flashProfileMessage('error', String(err?.message || err));
+    }
+  };
+
+  const handleRestoreBackupFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      let bundle;
+      try {
+        bundle = JSON.parse(ev.target.result);
+      } catch {
+        flashProfileMessage('error', t('station.settings.profiles.backup.invalid'));
+        return;
+      }
+      const qsoCount = Array.isArray(bundle?.logbook) ? bundle.logbook.length : 0;
+      const created = bundle?.created_at ? new Date(bundle.created_at).toLocaleString() : '?';
+      const ok = window.confirm(t('station.settings.profiles.backup.confirm', { date: created, count: qsoCount }));
+      if (!ok) return;
+      try {
+        const result = await restoreBackup(bundle, { merge: true });
+        window.alert(
+          t('station.settings.profiles.backup.done', {
+            settings: result.settingsRestored,
+            imported: result.imported,
+            skipped: result.skipped,
+          }),
+        );
+        window.location.reload();
+      } catch {
+        flashProfileMessage('error', t('station.settings.profiles.backup.invalid'));
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // ── Profile share codes ───────────────────────────────────────────────────
+  const handleCopyShareCode = async (name) => {
+    setShareCodeFallback(null);
+    const code = await exportProfileShareCode(name);
+    if (!code) {
+      flashProfileMessage('error', t('station.settings.profiles.share.invalid'));
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(code);
+      flashProfileMessage('success', t('station.settings.profiles.share.copied', { name }));
+    } catch {
+      // Clipboard blocked (permissions, http) — show the code for manual copy
+      setShareCodeFallback({ name, code });
+    }
+  };
+
+  const handleImportShareCode = async () => {
+    const imported = await importProfileFromShareCode(shareCodeInput);
+    if (imported) {
+      refreshProfiles();
+      setShareCodeInput('');
+      flashProfileMessage('success', t('station.settings.profiles.share.imported', { name: imported }));
+    } else {
+      flashProfileMessage('error', t('station.settings.profiles.share.invalid'));
+    }
   };
 
   const toggleUnitType = (t) => {
@@ -276,7 +418,9 @@ export const SettingsPanel = ({
       setLon(config.location?.lon ?? 0);
       setStationAlt(config.location?.stationAlt ?? 100);
       setMinElev(config.satellite?.minElev ?? 5.0);
+      setSatTrackDuration(config.satellite?.trackDurationMins ?? 45);
       setLayout(config.layout || 'modern');
+      setSceneRotation(config.sceneRotation || { enabled: false, intervalSec: 60, layouts: [] });
       setMouseZoom(config.mouseZoom || 50);
       setTimezone(config.timezone || '');
       setDxClusterSource(config.dxClusterSource || 'dxspider-proxy');
@@ -290,6 +434,7 @@ export const SettingsPanel = ({
       setPressUnits(config.allUnits?.press || config.units || 'imperial');
       setPropMode(config.propagation?.mode || 'SSB');
       setPropPower(config.propagation?.power || 100);
+      setLicenseClass(config.licenseClass || 'other');
       setRigEnabled(config.rigControl?.enabled || false);
       setRigHost(config.rigControl?.host || 'http://localhost');
       setRigPort(normalizeRigPort(config.rigControl?.port));
@@ -536,7 +681,10 @@ export const SettingsPanel = ({
         lon: parseFloat(lon) || 0,
         stationAlt: isNaN(parseInt(stationAlt)) ? 100 : parseInt(stationAlt),
       },
-      satellite: { minElev: isNaN(parseFloat(minElev)) ? 5.0 : parseFloat(minElev) },
+      satellite: {
+        minElev: isNaN(parseFloat(minElev)) ? 5.0 : parseFloat(minElev),
+        trackDurationMins: isNaN(parseInt(satTrackDuration)) ? 45 : parseInt(satTrackDuration),
+      },
       theme,
       customTheme,
       layout,
@@ -549,9 +697,11 @@ export const SettingsPanel = ({
       preventSleep,
       sharePresence,
       displaySchedule,
+      sceneRotation,
       // units,
       allUnits: { dist: distUnits, temp: tempUnits, press: pressUnits },
       propagation: { mode: propMode, power: parseFloat(propPower) || 100 },
+      licenseClass,
       wsjtxRelayMulticast: { enabled: wsjtxMulticastEnabled, address: wsjtxMulticastAddress },
       rigControl: {
         enabled: rigEnabled,
@@ -646,6 +796,21 @@ export const SettingsPanel = ({
     compact: t('station.settings.layout.compact.describe'),
     dockable: t('station.settings.layout.dockable.describe'),
     emcomm: t('station.settings.layout.emcomm.describe'),
+    contest: t('station.settings.layout.contest.describe'),
+    activator: t('station.settings.layout.activator.describe', {
+      defaultValue:
+        'In the field: self-spotting, activations, RBN checks, and nearby repeaters — park/summit overlays on.',
+    }),
+    hunter: t('station.settings.layout.hunter.describe', {
+      defaultValue:
+        'Chasing activators: cluster, all activation programs, and greyline — spot overlays and DX paths on.',
+    }),
+    weather: t('station.settings.layout.weather.describe', {
+      defaultValue: 'Radar, lightning, hazards, and aurora on the map, with terrestrial and space weather panels.',
+    }),
+    airtraffic: t('station.settings.layout.airtraffic.describe', {
+      defaultValue: 'Live aircraft and ATC sectors over a big map, plus world clocks.',
+    }),
   };
 
   const unitString = (t) => {
@@ -735,7 +900,8 @@ export const SettingsPanel = ({
               fontFamily: 'var(--font-mono)',
             }}
           >
-            📻 {t('station.settings.tab.title.station')}
+            <SettingsTabIcon tab="station" />
+            {t('station.settings.tab.title.station')}
           </button>
 
           <button
@@ -759,7 +925,8 @@ export const SettingsPanel = ({
               fontFamily: 'var(--font-mono)',
             }}
           >
-            🔌 {t('station.settings.tab.title.integrations')}
+            <SettingsTabIcon tab="integrations" />
+            {t('station.settings.tab.title.integrations')}
           </button>
 
           <button
@@ -783,7 +950,8 @@ export const SettingsPanel = ({
               fontFamily: 'var(--font-mono)',
             }}
           >
-            🎨 {t('station.settings.tab.title.display')}
+            <SettingsTabIcon tab="display" />
+            {t('station.settings.tab.title.display')}
           </button>
 
           <button
@@ -807,7 +975,8 @@ export const SettingsPanel = ({
               fontFamily: 'var(--font-mono)',
             }}
           >
-            🗺️ {t('station.settings.tab.title.mapLayers')}
+            <SettingsTabIcon tab="layers" />
+            {t('station.settings.tab.title.mapLayers')}
           </button>
 
           <button
@@ -831,7 +1000,8 @@ export const SettingsPanel = ({
               fontFamily: 'var(--font-mono)',
             }}
           >
-            🛰️ {t('station.settings.tab.title.satellites')}
+            <SettingsTabIcon tab="satellites" />
+            {t('station.settings.tab.title.satellites')}
           </button>
 
           <button
@@ -858,7 +1028,8 @@ export const SettingsPanel = ({
               fontFamily: 'var(--font-mono)',
             }}
           >
-            👤 {t('station.settings.tab.title.profiles')}
+            <SettingsTabIcon tab="profiles" />
+            {t('station.settings.tab.title.profiles')}
           </button>
 
           <button
@@ -882,7 +1053,8 @@ export const SettingsPanel = ({
               fontFamily: 'var(--font-mono)',
             }}
           >
-            🌐 {t('station.settings.tab.title.community')}
+            <SettingsTabIcon tab="community" />
+            {t('station.settings.tab.title.community')}
           </button>
 
           <button
@@ -906,7 +1078,8 @@ export const SettingsPanel = ({
               fontFamily: 'var(--font-mono)',
             }}
           >
-            🔔 {t('station.settings.tab.title.alerts')}
+            <SettingsTabIcon tab="alerts" />
+            {t('station.settings.tab.title.alerts')}
           </button>
 
           <button
@@ -930,9 +1103,45 @@ export const SettingsPanel = ({
               fontFamily: 'var(--font-mono)',
             }}
           >
-            📻 {t('station.settings.tab.title.rig-bridge')}
+            <SettingsTabIcon tab="rig-bridge" />
+            {t('station.settings.tab.title.rig-bridge')}
+          </button>
+
+          <button
+            role="tab"
+            id="tab-settings-help"
+            aria-selected={activeTab === 'help'}
+            aria-controls="panel-settings-help"
+            tabIndex={activeTab === 'help' ? 0 : -1}
+            ref={(el) => (settingsTabRefs.current['help'] = el)}
+            onClick={() => setActiveTab('help')}
+            style={{
+              flex: 1,
+              padding: '10px',
+              background: activeTab === 'help' ? 'var(--accent-amber)' : 'transparent',
+              border: 'none',
+              borderRadius: '6px 6px 0 0',
+              color: activeTab === 'help' ? '#000' : 'var(--text-secondary)',
+              fontSize: '13px',
+              cursor: 'pointer',
+              fontWeight: activeTab === 'help' ? '700' : '400',
+              fontFamily: 'var(--font-mono)',
+            }}
+          >
+            <SettingsTabIcon tab="help" />
+            {t('station.settings.tab.title.help')}
           </button>
         </div>
+
+        {/* Per-tab help link — jumps to the manual section for the open tab */}
+        {activeTab !== 'help' && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
+            <HelpLink
+              topic={settingsTabHelpTopic(activeTab)}
+              label={t(`station.settings.tab.title.${activeTab === 'layers' ? 'mapLayers' : activeTab}`)}
+            />
+          </div>
+        )}
 
         {/* Station Settings Tab */}
         <div
@@ -1428,7 +1637,10 @@ export const SettingsPanel = ({
 
                   {rigEnabled && (
                     <>
-                      {/* Download Rig Listener */}
+                      {/* The legacy Rig Listener download used to live here — it served a
+                          deprecated script whose status page has no API token, which sent
+                          users hunting for one (discussion #1141). Point at Rig Bridge,
+                          whose installer + Setup UI carry the whole token flow. */}
                       <div
                         style={{
                           background: 'rgba(99,102,241,0.08)',
@@ -1446,63 +1658,26 @@ export const SettingsPanel = ({
                             lineHeight: 1.4,
                           }}
                         >
-                          📻 Download the Rig Listener for your computer. Double-click to run — it connects your radio
-                          to OpenHamClock via USB.
+                          📻 Radio connections are handled by <strong>Rig Bridge</strong> — USB CAT, flrig, rigctld,
+                          TCI, SmartSDR and more, with a guided installer. Its Setup UI (http://localhost:5555) shows
+                          the API token to paste back here. The old Rig Listener is deprecated.
                         </div>
-                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                          <a
-                            href="/api/rig/download/windows"
-                            style={{
-                              padding: '5px 12px',
-                              borderRadius: '4px',
-                              fontSize: '11px',
-                              fontWeight: '600',
-                              background: 'rgba(99,102,241,0.15)',
-                              border: '1px solid rgba(99,102,241,0.3)',
-                              color: '#818cf8',
-                              textDecoration: 'none',
-                              cursor: 'pointer',
-                            }}
-                          >
-                            ⊞ Windows
-                          </a>
-                          <a
-                            href="/api/rig/download/mac"
-                            style={{
-                              padding: '5px 12px',
-                              borderRadius: '4px',
-                              fontSize: '11px',
-                              fontWeight: '600',
-                              background: 'rgba(99,102,241,0.15)',
-                              border: '1px solid rgba(99,102,241,0.3)',
-                              color: '#818cf8',
-                              textDecoration: 'none',
-                              cursor: 'pointer',
-                            }}
-                          >
-                            {' '}
-                            Mac
-                          </a>
-                          <a
-                            href="/api/rig/download/linux"
-                            style={{
-                              padding: '5px 12px',
-                              borderRadius: '4px',
-                              fontSize: '11px',
-                              fontWeight: '600',
-                              background: 'rgba(99,102,241,0.15)',
-                              border: '1px solid rgba(99,102,241,0.3)',
-                              color: '#818cf8',
-                              textDecoration: 'none',
-                              cursor: 'pointer',
-                            }}
-                          >
-                            🐧 Linux
-                          </a>
-                        </div>
-                        <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '6px', opacity: 0.7 }}>
-                          Supports Yaesu, Kenwood, Elecraft, and Icom radios. No extra software needed.
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('rig-bridge')}
+                          style={{
+                            padding: '5px 12px',
+                            borderRadius: '4px',
+                            fontSize: '11px',
+                            fontWeight: '600',
+                            background: 'rgba(99,102,241,0.15)',
+                            border: '1px solid rgba(99,102,241,0.3)',
+                            color: '#818cf8',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Open the Rig Bridge tab →
+                        </button>
                       </div>
 
                       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px' }}>
@@ -1844,13 +2019,14 @@ export const SettingsPanel = ({
                   <div
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: 'repeat(4, 1fr)',
+                      gridTemplateColumns: 'repeat(5, 1fr)',
                       gap: '4px',
                       alignItems: 'center',
                     }}
                   >
                     {[
                       { w: 5, label: '5W', tip: 'QRP' },
+                      { w: 10, label: '10W', tip: 'QRP+' },
                       { w: 25, label: '25W', tip: 'Low' },
                       { w: 100, label: '100W', tip: 'Std' },
                       { w: 1500, label: '1.5kW', tip: 'Max' },
@@ -1877,7 +2053,7 @@ export const SettingsPanel = ({
                     ))}
                   </div>
                   {/* Non-preset value (set from Propagation panel's Custom… input) — show, but read-only here */}
-                  {![5, 25, 100, 1500].includes(propPower) && (
+                  {![5, 10, 25, 100, 1500].includes(propPower) && (
                     <div
                       style={{
                         marginTop: '4px',
@@ -1911,6 +2087,47 @@ export const SettingsPanel = ({
                                 : 'significant disadvantage — only strong openings'
                     }`;
                   })()}
+                </div>
+              </div>
+
+              {/* License Class (US privileges on the band plan bar + tune warnings) */}
+              <div style={{ marginBottom: '20px' }}>
+                <label
+                  htmlFor="license-class-select"
+                  style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    color: 'var(--text-muted)',
+                    fontSize: '11px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '1px',
+                  }}
+                >
+                  🪪 {t('station.settings.licenseClass.title')}
+                </label>
+                <select
+                  id="license-class-select"
+                  value={licenseClass}
+                  onChange={(e) => setLicenseClass(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    background: 'var(--bg-tertiary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '6px',
+                    color: 'var(--accent-green)',
+                    fontSize: '14px',
+                    fontFamily: 'var(--font-mono)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <option value="other">{t('station.settings.licenseClass.other')}</option>
+                  <option value="technician">{t('station.settings.licenseClass.technician')}</option>
+                  <option value="general">{t('station.settings.licenseClass.general')}</option>
+                  <option value="extra">{t('station.settings.licenseClass.extra')}</option>
+                </select>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                  {t('station.settings.licenseClass.hint')}
                 </div>
               </div>
 
@@ -2706,6 +2923,10 @@ export const SettingsPanel = ({
                   </button>
                 </div>
               </div>
+
+              {/* Logbook Sync (Wavelog/Cloudlog, QRZ Logbook, LoTW) — per-user
+                  credentials, browser-local, works on hosted instances too */}
+              <LogSyncSettings />
 
               {/* Local-only group */}
               <div
@@ -4011,7 +4232,19 @@ export const SettingsPanel = ({
                   {t('station.settings.layout')}
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-                  {['modern', 'classic', 'tablet', 'compact', 'dockable', 'emcomm'].map((l) => (
+                  {[
+                    'modern',
+                    'classic',
+                    'tablet',
+                    'compact',
+                    'dockable',
+                    'emcomm',
+                    'contest',
+                    'activator',
+                    'hunter',
+                    'weather',
+                    'airtraffic',
+                  ].map((l) => (
                     <button
                       key={l}
                       onClick={() => setLayout(l)}
@@ -4026,18 +4259,19 @@ export const SettingsPanel = ({
                         fontWeight: layout === l ? '600' : '400',
                       }}
                     >
-                      {l === 'modern'
-                        ? '🖥️'
-                        : l === 'classic'
-                          ? '📺'
-                          : l === 'tablet'
-                            ? '📱'
-                            : l === 'compact'
-                              ? '📊'
-                              : l === 'emcomm'
-                                ? '📍'
-                                : '⊞'}{' '}
-                      {l === 'dockable' ? t('station.settings.layout.dockable') : t('station.settings.layout.' + l)}
+                      {{
+                        modern: '🖥️',
+                        classic: '📺',
+                        tablet: '📱',
+                        compact: '📊',
+                        emcomm: '📍',
+                        contest: '🏆',
+                        activator: '▲',
+                        hunter: '🎯',
+                        weather: '🌩️',
+                        airtraffic: '✈️',
+                      }[l] || '⊞'}{' '}
+                      {t('station.settings.layout.' + l)}
                     </button>
                   ))}
                 </div>
@@ -4072,6 +4306,155 @@ export const SettingsPanel = ({
                     {t('station.settings.layout.reset.button')}
                   </button>
                 )}
+              </div>
+
+              {/* Scene rotation (kiosk mode) */}
+              <div style={{ marginBottom: '24px' }}>
+                <label
+                  style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    color: 'var(--text-muted)',
+                    fontSize: '11px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '1px',
+                  }}
+                >
+                  {t('station.settings.sceneRotation.title', { defaultValue: 'Scene Rotation' })}
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                  <select
+                    value={sceneRotation.enabled ? String(sceneRotation.intervalSec || 60) : 'off'}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === 'off') {
+                        setSceneRotation({ ...sceneRotation, enabled: false });
+                      } else {
+                        setSceneRotation({ ...sceneRotation, enabled: true, intervalSec: parseInt(v, 10) });
+                      }
+                    }}
+                    aria-label={t('station.settings.sceneRotation.interval', { defaultValue: 'Rotation interval' })}
+                    style={{
+                      padding: '8px 10px',
+                      background: 'var(--bg-tertiary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '6px',
+                      color: 'var(--text-primary)',
+                      fontSize: '13px',
+                    }}
+                  >
+                    <option value="off">{t('station.settings.sceneRotation.off', { defaultValue: 'Off' })}</option>
+                    <option value="30">
+                      {t('station.settings.sceneRotation.every30s', { defaultValue: 'Every 30 seconds' })}
+                    </option>
+                    <option value="60">
+                      {t('station.settings.sceneRotation.every1m', { defaultValue: 'Every minute' })}
+                    </option>
+                    <option value="120">
+                      {t('station.settings.sceneRotation.every2m', { defaultValue: 'Every 2 minutes' })}
+                    </option>
+                    <option value="300">
+                      {t('station.settings.sceneRotation.every5m', { defaultValue: 'Every 5 minutes' })}
+                    </option>
+                    <option value="600">
+                      {t('station.settings.sceneRotation.every10m', { defaultValue: 'Every 10 minutes' })}
+                    </option>
+                  </select>
+                </div>
+                {sceneRotation.enabled && (
+                  <div
+                    style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', marginBottom: '8px' }}
+                  >
+                    {(() => {
+                      // Named dockable layout presets rotate as `dockable#<id>`
+                      // scenes; a plain 'dockable' scene keeps whatever preset
+                      // is active. Preset entries are only offered once the
+                      // user has created a custom preset. Saved config
+                      // profiles rotate as `profile#<id>` scenes (a profile
+                      // switch restores its snapshot and reloads the page).
+                      const presets = listPresets();
+                      const presetIds = presets.length > 1 ? presets.map((p) => `dockable#${p.id}`) : [];
+                      const profileEntries = getProfileEntries().filter((p) => p.id);
+                      const profileIds = profileEntries.map((p) => `profile#${p.id}`);
+                      return [
+                        'modern',
+                        'classic',
+                        'tablet',
+                        'compact',
+                        'dockable',
+                        ...presetIds,
+                        'emcomm',
+                        'contest',
+                        'activator',
+                        'hunter',
+                        'weather',
+                        'airtraffic',
+                        ...profileIds,
+                      ].map((l) => {
+                        const presetName = l.startsWith('dockable#')
+                          ? presets.find((p) => `dockable#${p.id}` === l)?.name
+                          : null;
+                        const profileName = l.startsWith('profile#')
+                          ? profileEntries.find((p) => `profile#${p.id}` === l)?.name
+                          : null;
+                        const label = presetName
+                          ? `${t('station.settings.layout.dockable')} — ${presetName}`
+                          : profileName
+                            ? `${t('station.settings.sceneRotation.profile', { defaultValue: 'Profile' })} — ${profileName}`
+                            : t('station.settings.layout.' + l);
+                        const selected = (sceneRotation.layouts || []).includes(l);
+                        return (
+                          <label
+                            key={l}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              cursor: 'pointer',
+                              fontSize: '12px',
+                              color: 'var(--text-primary)',
+                              padding: '6px 8px',
+                              background: selected ? 'var(--bg-tertiary)' : 'transparent',
+                              border: `1px solid ${selected ? 'var(--accent-amber)' : 'var(--border-color)'}`,
+                              borderRadius: '6px',
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={(e) => {
+                                const current = sceneRotation.layouts || [];
+                                const layouts = e.target.checked ? [...current, l] : current.filter((id) => id !== l);
+                                setSceneRotation({ ...sceneRotation, layouts });
+                              }}
+                              style={{ accentColor: 'var(--accent-amber)' }}
+                            />
+                            {label}
+                          </label>
+                        );
+                      });
+                    })()}
+                  </div>
+                )}
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  {sceneRotation.enabled && (sceneRotation.layouts || []).length < 2
+                    ? t('station.settings.sceneRotation.needTwo', {
+                        defaultValue: 'Pick at least two layouts to rotate through.',
+                      })
+                    : t('station.settings.sceneRotation.describe', {
+                        defaultValue:
+                          'Kiosk mode: automatically cycle through the selected layouts. Rotation pauses while you interact with the screen (60 s grace) and whenever a dialog is open.',
+                      })}
+                  {sceneRotation.enabled && getProfileEntries().length > 0 && (
+                    <>
+                      {' '}
+                      {t('station.settings.sceneRotation.profileNote', {
+                        defaultValue:
+                          'Profile scenes restore that saved profile (keeping these rotation settings) and reload the page; they only rotate in browsers where the profile exists.',
+                      })}
+                    </>
+                  )}
+                </div>
               </div>
 
               {/* Theme */}
@@ -4188,6 +4571,7 @@ export const SettingsPanel = ({
                     icon: '📍',
                     title: 'DE/DX Markers',
                     description: 'Show or hide your DE and DX position markers on the map',
+                    helpTopic: 'de-dx',
                   },
                   {
                     id: 'dx-target-panel',
@@ -4196,6 +4580,7 @@ export const SettingsPanel = ({
                     icon: '🎯',
                     title: 'DX Target Panel',
                     description: 'Show or hide the DX target info panel (grid, bearing, sun times)',
+                    helpTopic: 'de-dx',
                   },
                   {
                     id: 'dx-news-ticker',
@@ -4204,6 +4589,7 @@ export const SettingsPanel = ({
                     icon: '📰',
                     title: 'DX News Ticker',
                     description: 'Scrolling DX news headlines on the map',
+                    helpTopic: 'spots-activity',
                   },
                 ];
                 return (() => {
@@ -4244,30 +4630,35 @@ export const SettingsPanel = ({
                         marginBottom: '12px',
                       }}
                     >
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={item.checked}
-                          onChange={item.onChange}
-                          style={{ width: '18px', height: '18px', cursor: 'pointer' }}
-                        />
-                        <span style={{ fontSize: '18px' }}>{item.icon}</span>
-                        <div>
-                          <div
-                            style={{
-                              color: item.checked ? 'var(--accent-amber)' : 'var(--text-primary)',
-                              fontSize: '14px',
-                              fontWeight: '600',
-                              fontFamily: 'var(--font-mono)',
-                            }}
-                          >
-                            {item.title}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <label
+                          style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', flex: 1 }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={item.checked}
+                            onChange={item.onChange}
+                            style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                          />
+                          <span style={{ fontSize: '18px' }}>{item.icon}</span>
+                          <div>
+                            <div
+                              style={{
+                                color: item.checked ? 'var(--accent-amber)' : 'var(--text-primary)',
+                                fontSize: '14px',
+                                fontWeight: '600',
+                                fontFamily: 'var(--font-mono)',
+                              }}
+                            >
+                              {item.title}
+                            </div>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                              {item.description}
+                            </div>
                           </div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                            {item.description}
-                          </div>
-                        </div>
-                      </label>
+                        </label>
+                        <HelpLink topic={item.helpTopic || 'map-layers'} label={item.title} />
+                      </div>
                     </div>
                   );
 
@@ -4318,6 +4709,10 @@ export const SettingsPanel = ({
                             )}
                           </div>
                         </label>
+                        <HelpLink
+                          topic={layerHelpTopic(layer.id)}
+                          label={layer.name.startsWith('plugins.') ? t(layer.name) : layer.name}
+                        />
                       </div>
 
                       {layer.enabled && (
@@ -4342,6 +4737,39 @@ export const SettingsPanel = ({
                             onChange={(e) => handleOpacityChange(layer.id, parseFloat(e.target.value) / 100)}
                             style={{ width: '100%', cursor: 'pointer' }}
                           />
+                          {layer.id === 'aircraft' && (
+                            <div style={{ marginTop: '12px' }}>
+                              <label
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  fontSize: '11px',
+                                  color: 'var(--text-muted)',
+                                  marginBottom: '6px',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.5px',
+                                }}
+                              >
+                                <span>{t('station.settings.layers.leadTime')}</span>
+                                <span style={{ color: 'var(--accent-amber)' }}>
+                                  {(layer.config?.leadTimeMins ?? 0) > 0
+                                    ? `${layer.config?.leadTimeMins ?? 0} min`
+                                    : t('station.settings.layers.leadTimeOff')}
+                                </span>
+                              </label>
+                              <input
+                                type="range"
+                                min="0"
+                                max="120"
+                                step="5"
+                                value={layer.config?.leadTimeMins ?? 0}
+                                onChange={(e) =>
+                                  handleUpdateLayerConfig(layer.id, { leadTimeMins: parseInt(e.target.value, 10) })
+                                }
+                                style={{ width: '100%', cursor: 'pointer' }}
+                              />
+                            </div>
+                          )}
                           {ctrlPressed &&
                             ['lightning', 'wspr', 'rbn', 'grayline', 'n3fjp_logged_qsos', 'voacap-heatmap'].includes(
                               layer.id,
@@ -4604,28 +5032,33 @@ export const SettingsPanel = ({
                             </div>
                           </div>
 
-                          {/* Lead Time Slider WIP
-						<div style={{ marginTop: '8px' }}>
-						  <label style={{
-							display: 'flex',
-							justifyContent: 'space-between',
-							fontSize: '10px',
-							color: 'var(--text-muted)',
-							textTransform: 'uppercase'
-						  }}>
-							<span>Track Prediction (Lead Time)</span>
-							<span style={{ color: 'var(--accent-amber)' }}>{layer.config?.leadTimeMins || 45} min</span>
-						  </label>
-						  <input
-							type="range"
-							min="15"
-							max="120"
-							step="5"
-							value={layer.config?.leadTimeMins || 45}
-							onChange={(e) => handleUpdateLayerConfig(layer.id, { leadTimeMins: parseInt(e.target.value) })}
-							style={{ width: '100%', cursor: 'pointer' }}
-						  />
-						</div> */}
+                          {/* Track Duration Slider */}
+                          <div>
+                            <label
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                fontSize: '10px',
+                                color: 'var(--text-muted)',
+                                marginBottom: '6px',
+                                textTransform: 'uppercase',
+                              }}
+                            >
+                              <span>{t('station.settings.satellites.trackDuration')}</span>
+                              <span style={{ color: 'var(--accent-amber)' }}>
+                                ±{satTrackDuration} {t('station.settings.satellites.minutesAbbreviation')}
+                              </span>
+                            </label>
+                            <input
+                              type="range"
+                              min="15"
+                              max="120"
+                              step="15"
+                              value={satTrackDuration}
+                              onChange={(e) => setSatTrackDuration(parseInt(e.target.value, 10))}
+                              style={{ width: '100%', cursor: 'pointer' }}
+                            />
+                          </div>
 
                           {/* Opacity Slider */}
                           <div>
@@ -5228,6 +5661,23 @@ export const SettingsPanel = ({
                                 >
                                   ⤓
                                 </button>
+                                {/* Copy share code */}
+                                <button
+                                  onClick={() => handleCopyShareCode(name)}
+                                  title={t('station.settings.profiles.share.copy')}
+                                  aria-label={t('station.settings.profiles.share.copy')}
+                                  style={{
+                                    padding: '5px 8px',
+                                    background: 'var(--bg-primary)',
+                                    border: '1px solid var(--border-color)',
+                                    borderRadius: '4px',
+                                    color: 'var(--text-muted)',
+                                    fontSize: '11px',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  🔗
+                                </button>
                                 {/* Delete */}
                                 <button
                                   onClick={() => {
@@ -5261,66 +5711,100 @@ export const SettingsPanel = ({
                 )}
               </div>
 
-              {/* Open-Meteo API Key (optional) */}
+              {/* Clipboard-blocked fallback: show the share code for manual copy */}
+              {shareCodeFallback && (
+                <div
+                  style={{
+                    padding: '10px 12px',
+                    background: 'var(--bg-tertiary)',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-color)',
+                  }}
+                >
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '6px' }}>
+                    {t('station.settings.profiles.share.copyFailed', { name: shareCodeFallback.name })}
+                  </div>
+                  <textarea
+                    readOnly
+                    value={shareCodeFallback.code}
+                    onFocus={(e) => e.target.select()}
+                    rows={3}
+                    aria-label={t('station.settings.profiles.share.copy')}
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      padding: '6px 8px',
+                      background: 'var(--bg-primary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '4px',
+                      color: 'var(--text-primary)',
+                      fontSize: '10px',
+                      fontFamily: 'var(--font-mono)',
+                      resize: 'vertical',
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Import a profile from a share code */}
               <div
                 style={{
                   padding: '12px',
                   background: 'var(--bg-tertiary)',
                   borderRadius: '8px',
                   border: '1px solid var(--border-color)',
-                  marginBottom: '12px',
                 }}
               >
                 <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--accent-amber)', marginBottom: '8px' }}>
-                  🌡️ Open-Meteo API Key{' '}
-                  <span style={{ color: 'var(--text-muted)', fontWeight: '400', fontSize: '11px' }}>(optional)</span>
+                  🔗 {t('station.settings.profiles.share.title')}
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px', lineHeight: 1.4 }}>
-                  Weather data is provided by Open-Meteo's free API. For higher rate limits or commercial use, enter
-                  your API key from{' '}
-                  <a
-                    href="https://open-meteo.com/en/pricing"
-                    target="_blank"
-                    rel="noopener"
-                    style={{ color: 'var(--accent-blue)' }}
-                  >
-                    open-meteo.com
-                  </a>
-                  . Leave blank for the free tier.
+                  {t('station.settings.profiles.share.describe')}
                 </div>
-                <input
-                  type="text"
-                  placeholder="Free tier (no key needed)"
-                  defaultValue={(() => {
-                    try {
-                      return localStorage.getItem('ohc_openmeteo_apikey') || '';
-                    } catch {
-                      return '';
-                    }
-                  })()}
-                  onChange={(e) => {
-                    try {
-                      const val = e.target.value.trim();
-                      if (val) {
-                        localStorage.setItem('ohc_openmeteo_apikey', val);
-                      } else {
-                        localStorage.removeItem('ohc_openmeteo_apikey');
-                      }
-                    } catch {}
-                  }}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    background: 'var(--bg-primary)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: '4px',
-                    color: 'var(--text-primary)',
-                    fontSize: '12px',
-                    fontFamily: 'var(--font-mono)',
-                    boxSizing: 'border-box',
-                  }}
-                />
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
+                  <textarea
+                    value={shareCodeInput}
+                    onChange={(e) => setShareCodeInput(e.target.value)}
+                    placeholder={t('station.settings.profiles.share.placeholder')}
+                    aria-label={t('station.settings.profiles.share.title')}
+                    rows={2}
+                    style={{
+                      flex: 1,
+                      padding: '8px 10px',
+                      background: 'var(--bg-primary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '4px',
+                      color: 'var(--text-primary)',
+                      fontSize: '11px',
+                      fontFamily: 'var(--font-mono)',
+                      resize: 'vertical',
+                      minWidth: 0,
+                    }}
+                  />
+                  <button
+                    onClick={handleImportShareCode}
+                    disabled={!shareCodeInput.trim()}
+                    style={{
+                      padding: '8px 14px',
+                      background: shareCodeInput.trim()
+                        ? 'linear-gradient(135deg, #00ff88 0%, #00ddff 100%)'
+                        : 'var(--bg-primary)',
+                      border: shareCodeInput.trim() ? 'none' : '1px solid var(--border-color)',
+                      borderRadius: '4px',
+                      color: shareCodeInput.trim() ? '#000' : 'var(--text-muted)',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      cursor: shareCodeInput.trim() ? 'pointer' : 'default',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {t('station.settings.profiles.share.import')}
+                  </button>
+                </div>
               </div>
+
+              {/* Weather source + API keys (discussion #474) */}
+              <WeatherSourceCard />
 
               {/* Import / Export section */}
               <div
@@ -5408,6 +5892,72 @@ export const SettingsPanel = ({
                 <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '8px' }}>
                   Share profile files between devices or operators. Exported files contain all settings, layout
                   preferences, map layers, and filter configurations.
+                </div>
+              </div>
+
+              {/* Full backup / restore (settings + profiles + logbook) */}
+              <div
+                style={{
+                  padding: '12px',
+                  background: 'var(--bg-tertiary)',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                }}
+              >
+                <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--accent-amber)', marginBottom: '8px' }}>
+                  🗄️ {t('station.settings.profiles.backup.title')}
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px', lineHeight: 1.4 }}>
+                  {t('station.settings.profiles.backup.describe')}
+                </div>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <input
+                    ref={backupInputRef}
+                    type="file"
+                    accept=".json"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      handleRestoreBackupFile(e.target.files?.[0]);
+                      e.target.value = '';
+                    }}
+                  />
+                  <button
+                    onClick={handleExportBackup}
+                    style={{
+                      padding: '8px 14px',
+                      background: 'linear-gradient(135deg, #00ff88 0%, #00ddff 100%)',
+                      border: 'none',
+                      borderRadius: '4px',
+                      color: '#000',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      fontWeight: '700',
+                    }}
+                  >
+                    ⤓ {t('station.settings.profiles.backup.export')}
+                  </button>
+                  <button
+                    onClick={() => backupInputRef.current?.click()}
+                    style={{
+                      padding: '8px 14px',
+                      background: 'var(--bg-primary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: '4px',
+                      color: 'var(--text-secondary)',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      fontWeight: '600',
+                    }}
+                  >
+                    ⤒ {t('station.settings.profiles.backup.restore')}
+                  </button>
+                </div>
+                <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '8px' }}>
+                  {lastBackupAt
+                    ? t('station.settings.profiles.backup.last', {
+                        date: new Date(lastBackupAt).toLocaleString(),
+                      })
+                    : t('station.settings.profiles.backup.never')}
                 </div>
               </div>
             </div>
@@ -5691,6 +6241,20 @@ export const SettingsPanel = ({
                     'Oukagen',
                     'ftl',
                     'phether',
+                    'frankenstein91',
+                    'stearnsy33',
+                    'williamscody',
+                    '9M2PJU',
+                    'AntDiClementi',
+                    'chrisdebian',
+                    'KoenVdH',
+                    'w9fyi',
+                    'caballe',
+                    'saschabuehrle',
+                    'DigitalFeonix',
+                    'praxiscode',
+                    'AnthonyOHC',
+                    'vk3arr',
                   ].map((name) => (
                     <a
                       key={name}
@@ -6358,6 +6922,11 @@ export const SettingsPanel = ({
           )}
         </div>
 
+        {/* Help Tab */}
+        <div role="tabpanel" id="panel-settings-help" aria-labelledby="tab-settings-help" hidden={activeTab !== 'help'}>
+          {activeTab === 'help' && <HelpTab anchor={helpAnchor} />}
+        </div>
+
         {/* Buttons */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '24px' }}>
           <button
@@ -6401,19 +6970,229 @@ export const SettingsPanel = ({
 
 export default SettingsPanel;
 
+/**
+ * Push (closed-browser) — Space Weather card in the Alerts tab.
+ *
+ * True Web Push: the server broadcasts severe (scale >= 2) NOAA space
+ * weather alerts to subscribed browsers even when OpenHamClock is closed.
+ * Shows a dormant state when the server has no VAPID keys configured
+ * (self-hosters: see docs/MANUAL.md and .env.example).
+ */
+function WebPushCard({ notifPermission }) {
+  const { t } = useTranslation();
+  const supported = isPushSupported();
+  const [serverConfigured, setServerConfigured] = useState(null); // null = checking
+  const [subscribed, setSubscribed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [testState, setTestState] = useState(null); // null | 'sending' | 'sent' | 'failed'
+
+  useEffect(() => {
+    if (!supported) {
+      setServerConfigured(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const [status, sub] = await Promise.all([getServerPushStatus(), getPushSubscription()]);
+      if (cancelled) return;
+      setServerConfigured(status.configured);
+      setSubscribed(!!sub);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supported]);
+
+  const available = supported && serverConfigured === true && notifPermission !== 'denied';
+
+  const toggle = async () => {
+    if (busy || !available) return;
+    setBusy(true);
+    setTestState(null);
+    try {
+      if (subscribed) {
+        const res = await unsubscribeFromPush();
+        if (res.ok) setSubscribed(false);
+      } else {
+        const res = await subscribeToPush();
+        if (res.ok) setSubscribed(true);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendTest = async () => {
+    if (busy || testState === 'sending') return;
+    setTestState('sending');
+    const res = await sendTestPush();
+    setTestState(res.ok ? 'sent' : 'failed');
+  };
+
+  return (
+    <div
+      style={{
+        background: 'var(--bg-tertiary)',
+        border: `1px solid ${subscribed ? 'var(--accent-amber)' : 'var(--border-color)'}`,
+        borderRadius: '8px',
+        padding: '14px',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ color: 'var(--text-primary)', fontSize: '13px', fontWeight: 600 }}>
+          {t('station.settings.alerts.push.title')}
+        </span>
+        <button
+          onClick={toggle}
+          disabled={!available || busy}
+          style={{
+            background: subscribed ? 'var(--accent-amber)' : 'var(--bg-secondary)',
+            color: subscribed ? '#000' : 'var(--text-muted)',
+            border: `1px solid ${subscribed ? 'var(--accent-amber)' : 'var(--border-color)'}`,
+            borderRadius: '4px',
+            padding: '4px 12px',
+            fontSize: '11px',
+            fontWeight: 600,
+            cursor: !available || busy ? 'not-allowed' : 'pointer',
+            opacity: !available || busy ? 0.5 : 1,
+            fontFamily: 'var(--font-mono)',
+          }}
+        >
+          {busy ? '…' : subscribed ? 'ON' : 'OFF'}
+        </button>
+      </div>
+      <div style={{ color: 'var(--text-muted)', fontSize: '11px', lineHeight: '1.5', marginTop: '6px' }}>
+        {t('station.settings.alerts.push.description')}
+      </div>
+      {!supported && (
+        <div style={{ color: 'var(--text-muted)', fontSize: '11px', lineHeight: '1.5', marginTop: '6px' }}>
+          {t('station.settings.alerts.push.unsupported')}
+        </div>
+      )}
+      {supported && serverConfigured === false && (
+        <div style={{ color: 'var(--text-muted)', fontSize: '11px', lineHeight: '1.5', marginTop: '6px' }}>
+          {t('station.settings.alerts.push.serverDormant')}
+        </div>
+      )}
+      {supported && serverConfigured && notifPermission === 'denied' && (
+        <div style={{ color: 'var(--accent-red, #ef4444)', fontSize: '11px', lineHeight: '1.5', marginTop: '6px' }}>
+          {t('station.settings.alerts.notify.denied')}
+        </div>
+      )}
+      {subscribed && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px' }}>
+          <button
+            onClick={sendTest}
+            disabled={testState === 'sending'}
+            style={{
+              background: 'var(--bg-secondary)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '4px',
+              padding: '4px 12px',
+              fontSize: '11px',
+              cursor: testState === 'sending' ? 'wait' : 'pointer',
+              fontFamily: 'var(--font-mono)',
+            }}
+          >
+            {t('station.settings.alerts.push.sendTest')}
+          </button>
+          {testState === 'sent' && (
+            <span style={{ color: 'var(--accent-green, #22c55e)', fontSize: '11px' }}>
+              {t('station.settings.alerts.push.testSent')}
+            </span>
+          )}
+          {testState === 'failed' && (
+            <span style={{ color: 'var(--accent-red, #ef4444)', fontSize: '11px' }}>
+              {t('station.settings.alerts.push.testFailed')}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Audio Alerts settings tab */
 function AudioAlertsTab() {
+  const { t } = useTranslation();
   const [alertSettings, setAlertSettingsState] = useState(() => getAlertSettings());
+  const [notifPermission, setNotifPermission] = useState(() => getNotificationPermission());
   const updateSettings = (newSettings) => {
     setAlertSettingsState(newSettings);
     saveAlertSettings(newSettings);
   };
+
+  const notificationsOn = !!alertSettings.notifications && notifPermission === 'granted';
+  const toggleNotifications = async () => {
+    if (alertSettings.notifications) {
+      updateSettings({ ...alertSettings, notifications: false });
+      return;
+    }
+    // Permission request must happen inside this click (user gesture).
+    const perm = await requestNotificationPermission();
+    setNotifPermission(perm);
+    if (perm === 'granted') {
+      updateSettings({ ...alertSettings, notifications: true });
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
       <div style={{ color: 'var(--text-muted)', fontSize: '12px', lineHeight: '1.5' }}>
         Play audio tones when new items appear in data feeds. Each feed can have its own tone. Alerts are suppressed on
         initial page load and when returning to a background tab.
       </div>
+
+      {/* Browser notifications master switch */}
+      <div
+        style={{
+          background: 'var(--bg-tertiary)',
+          border: `1px solid ${notificationsOn ? 'var(--accent-amber)' : 'var(--border-color)'}`,
+          borderRadius: '8px',
+          padding: '14px',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ color: 'var(--text-primary)', fontSize: '13px', fontWeight: 600 }}>
+            {t('station.settings.alerts.notify.title')}
+          </span>
+          <button
+            onClick={toggleNotifications}
+            disabled={notifPermission === 'unsupported' || notifPermission === 'denied'}
+            style={{
+              background: notificationsOn ? 'var(--accent-amber)' : 'var(--bg-secondary)',
+              color: notificationsOn ? '#000' : 'var(--text-muted)',
+              border: `1px solid ${notificationsOn ? 'var(--accent-amber)' : 'var(--border-color)'}`,
+              borderRadius: '4px',
+              padding: '4px 12px',
+              fontSize: '11px',
+              fontWeight: 600,
+              cursor: notifPermission === 'unsupported' || notifPermission === 'denied' ? 'not-allowed' : 'pointer',
+              opacity: notifPermission === 'unsupported' || notifPermission === 'denied' ? 0.5 : 1,
+              fontFamily: 'var(--font-mono)',
+            }}
+          >
+            {notificationsOn ? 'ON' : 'OFF'}
+          </button>
+        </div>
+        <div style={{ color: 'var(--text-muted)', fontSize: '11px', lineHeight: '1.5', marginTop: '6px' }}>
+          {t('station.settings.alerts.notify.description')}
+        </div>
+        {notifPermission === 'denied' && (
+          <div style={{ color: 'var(--accent-red, #ef4444)', fontSize: '11px', lineHeight: '1.5', marginTop: '6px' }}>
+            {t('station.settings.alerts.notify.denied')}
+          </div>
+        )}
+        {notifPermission === 'unsupported' && (
+          <div style={{ color: 'var(--text-muted)', fontSize: '11px', lineHeight: '1.5', marginTop: '6px' }}>
+            {t('station.settings.alerts.notify.unsupported')}
+          </div>
+        )}
+      </div>
+
+      {/* Web Push — closed-browser space weather alerts */}
+      <WebPushCard notifPermission={notifPermission} />
 
       {/* Volume */}
       <div
@@ -6526,6 +7305,29 @@ function AudioAlertsTab() {
                   }}
                 >
                   🔊
+                </button>
+                <button
+                  onClick={() =>
+                    updateSettings({
+                      ...alertSettings,
+                      [feedId]: { ...feedConf, notify: !feedConf.notify },
+                    })
+                  }
+                  title={t('station.settings.alerts.notify.feedToggle')}
+                  aria-label={t('station.settings.alerts.notify.feedToggle')}
+                  aria-pressed={!!feedConf.notify}
+                  style={{
+                    background: feedConf.notify ? 'var(--accent-amber)' : 'var(--bg-secondary)',
+                    border: `1px solid ${feedConf.notify ? 'var(--accent-amber)' : 'var(--border-color)'}`,
+                    borderRadius: '4px',
+                    padding: '5px 10px',
+                    color: feedConf.notify ? '#000' : 'var(--text-primary)',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    opacity: notificationsOn ? 1 : 0.5,
+                  }}
+                >
+                  🔔
                 </button>
               </div>
             )}

@@ -11,6 +11,7 @@ const {
   getBandFromKHz,
   haversineDistance,
 } = require('../utils/grid');
+const { findClusterSpotLocation } = require('../utils/spotLocation');
 
 module.exports = function (app, ctx) {
   const {
@@ -76,6 +77,51 @@ module.exports = function (app, ctx) {
     if (freqKHz >= 50000 && freqKHz < 54000) return '6m';
     if (freqKHz >= 70000 && freqKHz < 70500) return '4m';
     return 'Other';
+  }
+
+  // ── Issue #1095: consult spot/cluster caches BEFORE the QRZ/HamQTH chain ──
+  // DX cluster spots frequently carry the *operating* location (a grid pulled
+  // from a POTA/WWFF/SOTA comment, or an authoritative DXpedition entity),
+  // while QRZ/HamQTH return the operator's HOME QTH. For a portable op like
+  // VK2IO/P at a park, the cluster spot is right and QRZ is wrong.
+  const CALLSIGN_LOOKUP_CACHE_TTL = 24 * 60 * 60 * 1000; // mirrors callsign.js CALLSIGN_CACHE_TTL
+
+  /**
+   * Search the DX cluster path cache (ctx.dxSpotPathsCacheByKey, exported by
+   * routes/dxcluster.js — read-only here) for a recent spot of `call` with a
+   * precise (grid/DXpedition-sourced) location. Same-band spots preferred.
+   * Pure search lives in utils/spotLocation.js (tested there).
+   */
+  function lookupClusterSpotLocation(call, band) {
+    return findClusterSpotLocation(ctx.dxSpotPathsCacheByKey, call, {
+      band,
+      extractBaseCallsign,
+    });
+  }
+
+  /**
+   * Synchronous check of the shared 24 h QRZ/HamQTH lookup cache
+   * (ctx.callsignLookupCache, populated by /api/callsign) — saves the
+   * localhost HTTP round-trip when the callsign was already looked up.
+   */
+  function getCachedCallsignLookup(call) {
+    if (!callsignLookupCache) return null;
+    const upper = (call || '').toUpperCase().trim();
+    const base = extractBaseCallsign ? extractBaseCallsign(upper) : upper;
+    for (const key of upper === base ? [upper] : [upper, base]) {
+      const cached = callsignLookupCache.get(key);
+      if (
+        cached &&
+        Date.now() - cached.timestamp < CALLSIGN_LOOKUP_CACHE_TTL &&
+        typeof cached.data?.lat === 'number' &&
+        typeof cached.data?.lon === 'number' &&
+        Math.abs(cached.data.lat) <= 90 &&
+        Math.abs(cached.data.lon) <= 180
+      ) {
+        return cached.data;
+      }
+    }
+    return null;
   }
 
   /**
@@ -384,10 +430,32 @@ module.exports = function (app, ctx) {
   }
 
   // Helper: enrich a spot with DX station location data (for spotter mode)
+  // Location source order (#1095):
+  //   1. DX cluster spot cache (grid/DXpedition-sourced, ≤1h old, same-band preferred)
+  //   2. RBN's own callsignLocationCache (per-process, permanent)
+  //   3. Shared 24h QRZ/HamQTH lookup cache (synchronous, no HTTP)
+  //   4. /api/callsign HTTP chain (QRZ → HamQTH → prefix estimate)
   async function enrichSpotWithDXLocation(spot) {
     const dxCall = (spot.dx || '').toUpperCase();
     if (!dxCall) return spot;
 
+    // 1. Cluster spot cache FIRST — a fresh cluster spot with a real grid
+    // reflects where the station is operating right now, which beats any
+    // cached home-QTH lookup. Not written to callsignLocationCache: the
+    // cluster cache expires on its own, a permanent cache entry wouldn't.
+    const clusterLoc = lookupClusterSpotLocation(dxCall, spot.band);
+    if (clusterLoc) {
+      return {
+        ...spot,
+        dxLat: clusterLoc.lat,
+        dxLon: clusterLoc.lon,
+        dxGrid: clusterLoc.grid,
+        dxCountry: clusterLoc.country,
+        dxLocSource: clusterLoc.source,
+      };
+    }
+
+    // 2. RBN's own location cache
     if (callsignLocationCache.has(dxCall)) {
       const location = callsignLocationCache.get(dxCall);
       if (location._failed) {
@@ -407,6 +475,27 @@ module.exports = function (app, ctx) {
       }
     }
 
+    // 3. Shared 24h QRZ/HamQTH lookup cache — synchronous, skips the HTTP hop
+    const sharedCached = getCachedCallsignLookup(dxCall);
+    if (sharedCached) {
+      const grid = sharedCached.grid || latLonToMaidenhead({ lat: sharedCached.lat, lon: sharedCached.lon });
+      cacheCallsignLocation(dxCall, {
+        callsign: dxCall,
+        grid,
+        lat: sharedCached.lat,
+        lon: sharedCached.lon,
+        country: sharedCached.country,
+      });
+      return {
+        ...spot,
+        dxLat: sharedCached.lat,
+        dxLon: sharedCached.lon,
+        dxGrid: grid,
+        dxCountry: sharedCached.country,
+      };
+    }
+
+    // 4. QRZ/HamQTH chain via /api/callsign
     try {
       const response = await fetch(`http://localhost:${PORT}/api/callsign/${encodeURIComponent(dxCall)}`);
       if (response.ok) {
@@ -614,10 +703,9 @@ module.exports = function (app, ctx) {
     const now = Date.now();
     const cutoff = now - minutes * 60 * 1000;
 
-    // Filter spots for this callsign
-    const userSpots = rbnSpots
-      .filter((spot) => spot.timestampMs > cutoff && spot.dx.toUpperCase() === callsign)
-      .slice(-limit);
+    // Filter spots for this callsign (indexed by DX call — the old flat
+    // rbnSpots buffer no longer exists)
+    const userSpots = (rbnSpotsByDX.get(callsign) || []).filter((spot) => spot.timestampMs > cutoff).slice(-limit);
 
     res.json(userSpots);
   });

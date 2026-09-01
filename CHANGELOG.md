@@ -1,8 +1,12 @@
 # Changelog
 
-All notable changes to OpenHamClock will be documented in this file.
+> **⚠️ This file is frozen at v15.6.5 (March 2026).** The maintained changelog
+> is the in-app **What's New** (`src/components/WhatsNew.jsx`), shown on first
+> load of each release and mirrored in GitHub release notes:
+> <https://github.com/accius/openhamclock/releases>. Releases now ship
+> **monthly on the first Tuesday**.
 
-> **📅 Schedule Change:** Starting with v15.5.10, OpenHamClock moves to a weekly release cycle. Updates will ship on **Tuesday nights (EST)** — one release per week for better testing and stability.
+All notable changes to OpenHamClock up to v15.6.5 are documented below.
 
 ## [15.6.5] - 2026-03-09
 

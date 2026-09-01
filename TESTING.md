@@ -1,12 +1,8 @@
 # Unit Testing
 
-This guide explains how to run unit tests for this project
+This guide explains how to run and write unit tests for OpenHamClock. Tests use [Vitest](https://vitest.dev/) with a jsdom environment.
 
-Note that this document, the initial setup and configuration of testing,
-and the initial set of tests for utils/dxClusterFilters.js was created
-with the help of the AI agent "Claude Code" at <https://claude.ai>
-
-- Rich Freedman, N2EHL 2026-02-07
+The initial testing setup and the first test suite (for `src/utils/dxClusterFilters.js`) were contributed by Rich Freedman, N2EHL, with the help of Claude Code.
 
 ## Running Tests
 
@@ -36,25 +32,32 @@ npm run test:coverage
 
 ## Test File Structure
 
+Tests are colocated with the code they cover — `foo.js` gets a `foo.test.js` next to it:
+
 ```text
 openhamclock/
 ├── src/
 │   ├── utils/
 │   │   ├── dxClusterFilters.js      # Source file
-│   │   └── dxClusterFilters.test.js # Test file
+│   │   ├── dxClusterFilters.test.js # Its tests, right next to it
+│   │   ├── workedBefore.js
+│   │   ├── workedBefore.test.js
+│   │   └── ...
 │   └── test/
-│       └── setup.js                  # Test setup/configuration
+│       └── setup.js                  # Shared test setup/configuration
 ├── vitest.config.js                  # Vitest configuration
-└── package.json                      # Updated with test scripts
+└── package.json                      # Test scripts
 ```
 
-## Writing Additional Tests
+Server-side code follows the same pattern (e.g. `server/routes/dxNewsRoute.test.js`).
 
-To add more tests, follow this pattern:
+## Writing Tests
+
+Follow this pattern:
 
 ```javascript
 import { describe, it, expect } from 'vitest';
-import { applyDXFilters } from '../utils/dxClusterFilters.js';
+import { applyDXFilters } from './dxClusterFilters.js';
 
 describe('Feature Name', () => {
   it('should do something specific', () => {
@@ -73,28 +76,22 @@ describe('Feature Name', () => {
 });
 ```
 
-## CI/CD Integration
+Guidelines:
 
-Add this to your CI pipeline:
+- Prefer testing pure utility functions (`src/utils/`) — they need no mocking.
+- New utility modules should ship with tests; PRs that change filtering, parsing, or geo math are expected to update the corresponding tests.
+- Use `.js` extensions in import paths.
 
-```yaml
-# Example GitHub Actions workflow
-- name: Run tests
-  run: npm run test:run
+## CI Integration
 
-- name: Generate coverage
-  run: npm run test:coverage
-
-- name: Upload coverage
-  uses: codecov/codecov-action@v3
-```
+CI (`.github/workflows/ci.yml`) already runs the full suite on every push and pull request via `npx vitest run`, alongside the Prettier format check (`npm run format:check`) and the translation key-order check (`npm run lang:check`). A PR with failing tests will not pass CI.
 
 ## Troubleshooting
 
 ### Tests not running?
 
-1. Make sure all dependencies are installed: `npm install`
-2. Check that Node.js version is 18+ : `node --version`
+1. Make sure all dependencies are installed: `npm ci`
+2. Check that Node.js is v20.19 or later: `node --version`
 
 ### Import errors?
 
@@ -103,15 +100,7 @@ Add this to your CI pipeline:
 
 ### Coverage not generating?
 
-- Make sure `@vitest/coverage-v8` is installed
-- Run: `npm install --save-dev @vitest/coverage-v8`
-
-## Next Steps
-
-1. Add tests for other utility files (`callsign.js`, etc.)
-2. Add integration tests for React components
-3. Set up pre-commit hooks to run tests automatically
-4. Configure coverage thresholds in `vitest.config.js`
+- Make sure dependencies are installed (`@vitest/coverage-v8` is a devDependency): `npm ci`
 
 ## Resources
 

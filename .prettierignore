@@ -27,6 +27,7 @@ package-lock.json
 # Data files
 *.csv
 *.dat
+*.geojson
 
 # Test fixtures (captured external pages — must not be reformatted)
 **/__fixtures__/

@@ -7,15 +7,27 @@
   },
   {
     "min": 1840,
+    "max": 1850,
+    "mode": "DATA",
+    "desc": "160m Data"
+  },
+  {
+    "min": 1850,
     "max": 2000,
     "mode": "LSB",
     "desc": "160m SSB"
   },
   {
     "min": 3500,
-    "max": 3600,
+    "max": 3570,
     "mode": "CW",
     "desc": "80m CW"
+  },
+  {
+    "min": 3570,
+    "max": 3600,
+    "mode": "DATA",
+    "desc": "80m Data"
   },
   {
     "min": 3600,
@@ -37,6 +49,12 @@
   },
   {
     "min": 7040,
+    "max": 7125,
+    "mode": "DATA",
+    "desc": "40m Data"
+  },
+  {
+    "min": 7125,
     "max": 7300,
     "mode": "LSB",
     "desc": "40m SSB"
@@ -73,9 +91,15 @@
   },
   {
     "min": 18068,
-    "max": 18110,
+    "max": 18095,
     "mode": "CW",
     "desc": "17m CW"
+  },
+  {
+    "min": 18095,
+    "max": 18110,
+    "mode": "DATA",
+    "desc": "17m Data"
   },
   {
     "min": 18110,
@@ -91,6 +115,12 @@
   },
   {
     "min": 21070,
+    "max": 21110,
+    "mode": "DATA",
+    "desc": "15m Data"
+  },
+  {
+    "min": 21110,
     "max": 21450,
     "mode": "USB",
     "desc": "15m SSB"
@@ -103,6 +133,12 @@
   },
   {
     "min": 24915,
+    "max": 24930,
+    "mode": "DATA",
+    "desc": "12m Data"
+  },
+  {
+    "min": 24930,
     "max": 24990,
     "mode": "USB",
     "desc": "12m SSB"
@@ -115,9 +151,15 @@
   },
   {
     "min": 28070,
+    "max": 28120,
+    "mode": "DATA",
+    "desc": "10m Data"
+  },
+  {
+    "min": 28120,
     "max": 29000,
     "mode": "USB",
-    "desc": "10m SSB/Data"
+    "desc": "10m SSB"
   },
   {
     "min": 29000,

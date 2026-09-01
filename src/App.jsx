@@ -9,11 +9,15 @@ import { SettingsPanel, DXFilterManager, PSKFilterManager, KeybindingsPanel } fr
 import SidebarMenu from './components/SidebarMenu.jsx';
 
 import DockableLayout from './layouts/DockableLayout.jsx';
+import MatrixRain from './components/MatrixRain.jsx';
+import SeasonalEffects from './components/SeasonalEffects.jsx';
 import ClassicLayout from './layouts/ClassicLayout.jsx';
 import ModernLayout from './layouts/ModernLayout.jsx';
 import EmcommLayout from './layouts/EmcommLayout.jsx';
+import ContestLayout from './layouts/ContestLayout.jsx';
+import FocusLayout, { FOCUS_LAYOUT_IDS } from './layouts/FocusLayout.jsx';
 
-import { resetLayout } from './store/layoutStore.js';
+import { resetActiveLayout } from './store/layoutStore.js';
 import { RigProvider } from './contexts/RigContext.jsx';
 import { CallsignPopupProvider } from './components/CallsignPopupManager.jsx';
 
@@ -25,6 +29,7 @@ import {
   useWWFFSpots,
   useSOTASpots,
   useWWBOTASpots,
+  useCANParksSpots,
   useContests,
   useWeather,
   useWeatherAlerts,
@@ -39,6 +44,8 @@ import {
   useMeshCom,
   useEmcommData,
   useIBP,
+  useSWPCAlerts,
+  useBandOpenings,
 } from './hooks';
 
 import useAppConfig from './hooks/app/useAppConfig';
@@ -56,13 +63,20 @@ import useVersionCheck from './hooks/app/useVersionCheck';
 import usePresence from './hooks/app/usePresence';
 import useAudioAlerts from './hooks/app/useAudioAlerts';
 import { useSatelliteAnnouncements } from './hooks/app/useSatelliteAnnouncements';
+import useSceneRotation from './hooks/app/useSceneRotation';
 import WhatsNew from './components/WhatsNew.jsx';
+import CommandPalette from './components/CommandPalette.jsx';
+import { LogQsoPopupController } from './components/LogQsoPopup.jsx';
 import { initCtyLookup } from './utils/ctyLookup.js';
 import { getAllLayers } from './plugins/layerRegistry.js';
 import ActivateFilterManager from './components/ActivateFilterManager.jsx';
 import { useLightningAnnouncements } from './hooks/app/useLightningAnnouncements';
+import { HELP_EVENT } from './utils/helpTopics.js';
 import { useDXSpotAnnouncements } from './hooks/app/useDXSpotAnnouncements';
 import { useWeatherAlertAnnouncements } from './hooks/app/useWeatherAlertAnnouncements';
+import { extractBaseCall } from './components/CallsignLink.jsx';
+import { getBandFromFreq, detectMode, normalizeFrequencyToMHz } from './utils/callsign';
+import { getContestReminders, contestReminderId, CONTEST_REMINDERS_EVENT } from './utils/contestReminders.js';
 
 // Load DXCC entity database on app startup (non-blocking)
 initCtyLookup();
@@ -78,10 +92,12 @@ const App = () => {
   const [showDXFilters, setShowDXFilters] = useState(false);
   const [showPSKFilters, setShowPSKFilters] = useState(false);
   const [showKeybindings, setShowKeybindings] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showPotaFilters, setShowPotaFilters] = useState(false);
   const [showSotaFilters, setShowSotaFilters] = useState(false);
   const [showWwffFilters, setShowWwffFilters] = useState(false);
   const [showWwbotaFilters, setShowWwbotaFilters] = useState(false);
+  const [showCanparksFilters, setShowCanparksFilters] = useState(false);
   const [layoutResetKey, setLayoutResetKey] = useState(0);
   const [, setBandColorChangeVersion] = useState(0);
   const [updateInProgress, setUpdateInProgress] = useState(false);
@@ -92,6 +108,17 @@ const App = () => {
     };
     window.addEventListener('openhamclock-band-colors-change', onBandColorsChange);
     return () => window.removeEventListener('openhamclock-band-colors-change', onBandColorsChange);
+  }, []);
+
+  // HelpLink buttons anywhere in the app dispatch this event to open
+  // Settings → Help (SettingsPanel handles tab switch + anchor scroll).
+  useEffect(() => {
+    const onOpenHelp = () => {
+      setSettingsDefaultTab('help');
+      setShowSettings(true);
+    };
+    window.addEventListener(HELP_EVENT, onOpenHelp);
+    return () => window.removeEventListener(HELP_EVENT, onOpenHelp);
   }, []);
 
   useEffect(() => {
@@ -164,19 +191,22 @@ const App = () => {
 
   useEffect(() => {
     const handleKey = (e) => {
-      if (
-        e.ctrlKey ||
-        e.metaKey ||
-        e.altKey ||
-        showSettings ||
-        showDXFilters ||
-        showPSKFilters ||
-        showKeybindings ||
-        document.activeElement?.tagName === 'INPUT' ||
-        document.activeElement?.tagName === 'TEXTAREA' ||
-        document.activeElement?.tagName === 'SELECT'
-      )
+      const tag = document.activeElement?.tagName;
+      const inFormField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+      const modalOpen = showSettings || showDXFilters || showPSKFilters || showKeybindings || showCommandPalette;
+
+      // Ctrl/Cmd+K — command palette. Checked before the modifier early-return
+      // below, with the same input-focus/modal suppression as the letter
+      // shortcuts. While open, the palette handles its own keys (incl. Esc
+      // and Cmd/Ctrl+K to close).
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        if (inFormField || modalOpen) return;
+        setShowCommandPalette(true);
+        e.preventDefault();
         return;
+      }
+
+      if (e.ctrlKey || e.metaKey || e.altKey || modalOpen || inFormField) return;
 
       if (e.key === '?') {
         setShowKeybindings((v) => !v);
@@ -200,10 +230,10 @@ const App = () => {
 
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [showSettings, showDXFilters, showPSKFilters, showKeybindings, layerShortcuts]);
+  }, [showSettings, showDXFilters, showPSKFilters, showKeybindings, showCommandPalette, layerShortcuts]);
 
   const handleResetLayout = useCallback(() => {
-    resetLayout();
+    resetActiveLayout();
     setLayoutResetKey((prev) => prev + 1);
   }, []);
 
@@ -256,6 +286,8 @@ const App = () => {
     toggleSOTALabels,
     toggleWWBOTA,
     toggleWWBOTALabels,
+    toggleCANParks,
+    toggleCANParksLabels,
     toggleSatellites,
     togglePSKReporter,
     togglePSKPaths,
@@ -281,6 +313,8 @@ const App = () => {
     setWwffFilters,
     wwbotaFilters,
     setWwbotaFilters,
+    canparksFilters,
+    setCanparksFilters,
   } = useFilters();
 
   const { isFullscreen, handleFullscreenToggle } = useFullscreen();
@@ -288,6 +322,23 @@ const App = () => {
   const { wakeLockStatus } = useScreenWakeLock(config, displaySleeping);
   const scale = useResponsiveScale();
   const isLocalInstall = useLocalInstall(serverLocal);
+
+  // Kiosk scene rotation (Settings → Display → Scene rotation). Paused while
+  // any app-level modal is open — these existing flags are the cheap signal
+  // for "a modal owns the screen" (user interaction is handled inside the
+  // hook with a 60 s idle grace).
+  const anyModalOpen =
+    showSettings ||
+    showDXFilters ||
+    showPSKFilters ||
+    showKeybindings ||
+    showCommandPalette ||
+    showPotaFilters ||
+    showSotaFilters ||
+    showWwffFilters ||
+    showWwbotaFilters ||
+    showCanparksFilters;
+  const sceneRotation = useSceneRotation(config, handleSaveConfig, { paused: anyModalOpen });
 
   // Responsive breakpoint for sidebar/header behavior
   const [breakpoint, setBreakpoint] = useState(() => {
@@ -312,19 +363,17 @@ const App = () => {
   const wwffSpots = useWWFFSpots();
   const sotaSpots = useSOTASpots();
   const wwbotaSpots = useWWBOTASpots();
+  const canparksSpots = useCANParksSpots();
   const dxClusterData = useDXClusterData(dxFilters, config);
   const dxpeditions = useDXpeditions();
   const contests = useContests();
-  // Audio alerts for new items in data feeds
-  useAudioAlerts({
-    pota: potaSpots.data,
-    sota: sotaSpots.data,
-    wwff: wwffSpots.data,
-    wwbota: wwbotaSpots.data,
-    dxcluster: dxClusterData.spots,
-    dxpeditions: dxpeditions.data?.dxpeditions,
-    contests: contests.data,
-  });
+  const swpcAlerts = useSWPCAlerts();
+  const bandOpenings = useBandOpenings();
+  // Audio alert only for significant space weather (R2/S2/G2 or higher)
+  const severeSwpcAlerts = useMemo(
+    () => (swpcAlerts.data || []).filter((a) => (a.scale?.level ?? 0) >= 2),
+    [swpcAlerts.data],
+  );
 
   const { announcement: lightningAnnouncement } = useLightningAnnouncements();
   const { announcement: dxSpotAnnouncement } = useDXSpotAnnouncements(dxClusterData.spots);
@@ -335,6 +384,109 @@ const App = () => {
   const { satelliteFilters, setSatelliteFilters } = filterState;
   const satellites = useSatellites(config.location, config.satellite, satelliteFilters);
   const { riseAnnouncement, setAnnouncement: satelliteSetAnnouncement } = useSatelliteAnnouncements(satellites.data);
+
+  // ── Alert-feed item sources (Settings → Alerts) ──
+
+  // Watchlist hits: matched against the RAW cluster accumulator, before any
+  // panel filters, so a watched call alerts even when the DX panel is
+  // filtered elsewhere. Base-call matching (5Z4/OZ6ABL hits "OZ6ABL"), and
+  // watchlist entries keep their prefix semantics ("3Y" hits any 3Y call).
+  const watchlistHits = useMemo(() => {
+    const list = dxFilters?.watchlist;
+    if (!list?.length) return [];
+    const entries = list.map((w) => String(w).toUpperCase()).filter(Boolean);
+    const hits = [];
+    const seen = new Set();
+    for (const item of dxClusterData.rawSpots || []) {
+      const full = String(item.dxCall || '').toUpperCase();
+      if (!full) continue;
+      const base = extractBaseCall(full);
+      if (!entries.some((w) => full.startsWith(w) || base.startsWith(w))) continue;
+      const band = getBandFromFreq(item.freq);
+      const dedupeKey = `${full}-${band}`;
+      if (seen.has(dedupeKey)) continue; // rawSpots is newest-first — keep the newest per call+band
+      seen.add(dedupeKey);
+      const freqMHz = normalizeFrequencyToMHz(item.freq);
+      hits.push({
+        call: full,
+        freq: freqMHz != null ? String(freqMHz) : String(item.freq ?? ''),
+        band,
+        mode: item.mode || detectMode(item.comment, item.freq) || '',
+      });
+    }
+    return hits;
+  }, [dxClusterData.rawSpots, dxFilters?.watchlist]);
+
+  // Contest-start reminders: strictly opt-in per contest via the 🔔 buttons
+  // in ContestPanel — with no reminders set, this feed never alerts. The
+  // minute tick re-evaluates the 15-minute window between contest polls.
+  const [contestReminders, setContestReminders] = useState(() => getContestReminders());
+  useEffect(() => {
+    const sync = () => setContestReminders(getContestReminders());
+    window.addEventListener(CONTEST_REMINDERS_EVENT, sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener(CONTEST_REMINDERS_EVENT, sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+  const [contestAlertTick, setContestAlertTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setContestAlertTick((v) => v + 1), 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+  const contestStartAlerts = useMemo(() => {
+    if (!contestReminders.length) return [];
+    const now = Date.now();
+    return (contests.data || []).filter((c) => {
+      if (!contestReminders.includes(contestReminderId(c))) return false;
+      const start = Date.parse(c.start || '');
+      if (!Number.isFinite(start)) return false;
+      const untilStart = start - now;
+      return untilStart > 0 && untilStart <= 15 * 60 * 1000;
+    });
+    // contestAlertTick re-runs the window check once a minute
+  }, [contests.data, contestReminders, contestAlertTick]);
+
+  // Satellite passes: tracked satellites whose next pass begins within
+  // 5 minutes. satellites.data recomputes every 5 s, so this stays fresh.
+  const satPassAlerts = useMemo(() => {
+    const now = Date.now();
+    const upcoming = [];
+    for (const sat of satellites.data || []) {
+      const starts = sat.nextPassStartTimes || [];
+      for (let i = 0; i < starts.length; i++) {
+        const aos = new Date(starts[i]).getTime();
+        if (!Number.isFinite(aos)) continue;
+        const untilAos = aos - now;
+        if (untilAos > 0 && untilAos <= 5 * 60 * 1000) {
+          upcoming.push({
+            name: sat.name,
+            aos,
+            maxElevation: sat.nextPassMaxElevations?.[i] ?? null,
+          });
+        }
+      }
+    }
+    return upcoming;
+  }, [satellites.data]);
+
+  // Audio alerts for new items in data feeds
+  useAudioAlerts({
+    pota: potaSpots.data,
+    sota: sotaSpots.data,
+    wwff: wwffSpots.data,
+    wwbota: wwbotaSpots.data,
+    canparks: canparksSpots.data,
+    dxcluster: dxClusterData.spots,
+    watchlist: watchlistHits,
+    dxpeditions: dxpeditions.data?.dxpeditions,
+    contests: contests.data,
+    'contest-start': contestStartAlerts,
+    'sat-pass': satPassAlerts,
+    'band-openings': bandOpenings.alertItems,
+    swpc: severeSwpcAlerts,
+  });
   const localWeather = useWeather(config.location, config.allUnits);
   const dxWeather = useWeather(dxLocation, config.allUnits);
   const localAlerts = useWeatherAlerts(config.location);
@@ -491,6 +643,10 @@ const App = () => {
     return ActivateFilter(wwbotaSpots, wwbotaFilters);
   }, [wwbotaSpots.data, wwbotaFilters]);
 
+  const filteredCanparksSpots = useMemo(() => {
+    return ActivateFilter(canparksSpots, canparksFilters);
+  }, [canparksSpots.data, canparksFilters]);
+
   const wsjtxMapSpots = useMemo(() => {
     // Apply same age filter as panel (stored in localStorage)
     let ageMinutes = 30;
@@ -551,6 +707,7 @@ const App = () => {
     setShowSotaFilters,
     setShowWwffFilters,
     setShowWwbotaFilters,
+    setShowCanparksFilters,
     handleUpdateClick,
     updateInProgress,
     isLocalInstall,
@@ -582,9 +739,12 @@ const App = () => {
     filteredSotaSpots,
     wwbotaSpots,
     filteredWwbotaSpots,
+    canparksSpots,
+    filteredCanparksSpots,
     mySpots,
     dxpeditions,
     contests,
+    swpcAlerts,
     satellites,
     pskReporter,
     wsjtx,
@@ -608,6 +768,8 @@ const App = () => {
     setWwffFilters,
     wwbotaFilters,
     setWwbotaFilters,
+    canparksFilters,
+    setCanparksFilters,
     mapLayers,
     toggleDeDxMarkers,
     toggleDXPaths,
@@ -620,6 +782,8 @@ const App = () => {
     toggleSOTALabels,
     toggleWWBOTA,
     toggleWWBOTALabels,
+    toggleCANParks,
+    toggleCANParksLabels,
     toggleSatellites,
     togglePSKReporter,
     togglePSKPaths,
@@ -645,7 +809,7 @@ const App = () => {
     return savedMode === 'hidden'
       ? 0
       : savedMode === 'pinned'
-        ? SidebarMenu.EXPANDED_WIDTH
+        ? SidebarMenu.expandedWidth()
         : SidebarMenu.COLLAPSED_WIDTH;
   });
 
@@ -653,11 +817,21 @@ const App = () => {
     const onModeChange = (e) => {
       const m = e.detail?.mode;
       if (m === 'hidden') setSidebarWidth(0);
-      else if (m === 'pinned') setSidebarWidth(SidebarMenu.EXPANDED_WIDTH);
+      else if (m === 'pinned') setSidebarWidth(SidebarMenu.expandedWidth());
       else setSidebarWidth(SidebarMenu.COLLAPSED_WIDTH);
     };
+    // The pinned width is theme-dependent (8-bit pixel font needs more room),
+    // so a theme switch re-measures it too.
+    const onThemeChange = () => {
+      const m = localStorage.getItem('openhamclock_sidebarMode') || 'icons';
+      if (m === 'pinned') setSidebarWidth(SidebarMenu.expandedWidth());
+    };
     window.addEventListener('sidebar-mode-change', onModeChange);
-    return () => window.removeEventListener('sidebar-mode-change', onModeChange);
+    window.addEventListener('openhamclock-theme-change', onThemeChange);
+    return () => {
+      window.removeEventListener('sidebar-mode-change', onModeChange);
+      window.removeEventListener('openhamclock-theme-change', onThemeChange);
+    };
   }, []);
 
   useEffect(() => {
@@ -699,6 +873,14 @@ const App = () => {
         transition: 'padding-left 0.2s ease',
       }}
     >
+      {/* Matrix theme: digital rain behind the whole UI (skipped on lowMem) */}
+      {config.theme === 'matrix' && !config.lowMemoryMode && <MatrixRain />}
+
+      {/* Season themes: snow / petals / fireflies / leaves (skipped on lowMem) */}
+      {['winter', 'spring', 'summer', 'fall'].includes(config.theme) && !config.lowMemoryMode && (
+        <SeasonalEffects season={config.theme} />
+      )}
+
       {/* Display Schedule — black overlay when in sleep window */}
       {displaySleeping && (
         <div
@@ -733,10 +915,14 @@ const App = () => {
         onResetLayout={handleResetLayout}
       />
 
-      <CallsignPopupProvider>
+      <CallsignPopupProvider deLocation={config.location}>
         <RigProvider rigConfig={config.rigControl || { enabled: false, host: 'http://localhost', port: 5555 }}>
           {config.layout === 'emcomm' ? (
             <EmcommLayout {...layoutProps} />
+          ) : config.layout === 'contest' ? (
+            <ContestLayout {...layoutProps} />
+          ) : FOCUS_LAYOUT_IDS.includes(config.layout) ? (
+            <FocusLayout {...layoutProps} focus={config.layout} />
           ) : config.layout === 'dockable' ? (
             <DockableLayout
               key={layoutResetKey}
@@ -749,6 +935,10 @@ const App = () => {
           ) : (
             <ModernLayout {...layoutProps} />
           )}
+          {/* App-level "log from spot" modal — opens only when no LogbookPanel
+              is mounted (and never in the contest layout). Inside RigProvider
+              so the form's rig prefill works. */}
+          <LogQsoPopupController layout={config.layout} userCallsign={config.callsign} myGrid={deGrid} />
         </RigProvider>
       </CallsignPopupProvider>
 
@@ -821,7 +1011,70 @@ const App = () => {
         isOpen={showWwbotaFilters}
         onClose={() => setShowWwbotaFilters(false)}
       />
+      <ActivateFilterManager
+        name="CANParks"
+        filters={canparksFilters}
+        onFilterChange={setCanparksFilters}
+        isOpen={showCanparksFilters}
+        onClose={() => setShowCanparksFilters(false)}
+      />
+      <CommandPalette
+        isOpen={showCommandPalette}
+        onClose={() => setShowCommandPalette(false)}
+        config={config}
+        onSaveConfig={handleSaveConfig}
+        onOpenSettings={(tabId) => {
+          setSettingsDefaultTab(tabId || null);
+          setShowSettings(true);
+        }}
+        onToggleFullscreen={handleFullscreenToggle}
+        isLocalInstall={isLocalInstall}
+      />
       <WhatsNew showWhatsNew={config.showWhatsNew} />
+      {/* Scene rotation indicator — unobtrusive dot while rotating, with the
+          new layout's name flashed briefly on each switch. */}
+      {sceneRotation.active && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'fixed',
+            bottom: '10px',
+            right: '10px',
+            zIndex: 9500,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            pointerEvents: 'none',
+          }}
+        >
+          {sceneRotation.flash && (
+            <span
+              style={{
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--accent-cyan)',
+                borderRadius: '4px',
+                color: 'var(--accent-cyan)',
+                fontSize: '11px',
+                fontFamily: 'var(--font-mono)',
+                padding: '2px 8px',
+              }}
+            >
+              {t('station.settings.layout.' + sceneRotation.flash.layout, sceneRotation.flash.layout) +
+                (sceneRotation.flash.presetName ? ' — ' + sceneRotation.flash.presetName : '')}
+            </span>
+          )}
+          <span
+            style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: 'var(--accent-cyan)',
+              opacity: 0.55,
+              boxShadow: '0 0 6px var(--accent-cyan)',
+            }}
+          />
+        </div>
+      )}
       {/* Assertive: satellite rising above horizon is time-critical for a ham operator */}
       <div className="visually-hidden" aria-live="assertive" aria-atomic="true" data-testid="satellite-rise-announcer">
         {riseAnnouncement}

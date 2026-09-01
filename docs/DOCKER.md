@@ -5,7 +5,7 @@
 Docker compose is the recommended way to deploy:
 
 ```bash
-git clone https://github.com/OpenHamClock/openhamclock.git
+git clone https://github.com/accius/openhamclock.git
 cd openhamclock
 docker compose up -d
 ```

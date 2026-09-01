@@ -1,6 +1,7 @@
 import i18n from '../../lang/i18n';
 
 import { useState, useEffect, useRef } from 'react';
+import { auroraCmap } from '../../utils/globeOverlays.js';
 
 // NOAA OVATION Aurora Forecast - JSON grid data
 // Endpoint: /api/noaa/aurora (proxied from services.swpc.noaa.gov/json/ovation_aurora_latest.json)
@@ -18,47 +19,8 @@ export const metadata = {
   version: '2.0.0',
 };
 
-// Aurora color ramp: transparent → green → yellow → red
-// Matches NOAA's official aurora visualization
-function auroraCmap(probability) {
-  if (probability < 4) return null; // Skip very low values
-
-  // Normalize 4-100 to 0-1
-  const t = Math.min((probability - 4) / 80, 1);
-
-  let r, g, b, a;
-  if (t < 0.25) {
-    // Dark green to green
-    const s = t / 0.25;
-    r = 0;
-    g = Math.round(80 + s * 175);
-    b = Math.round(40 * (1 - s));
-    a = 0.3 + s * 0.3;
-  } else if (t < 0.5) {
-    // Green to yellow-green
-    const s = (t - 0.25) / 0.25;
-    r = Math.round(s * 200);
-    g = 255;
-    b = 0;
-    a = 0.6 + s * 0.15;
-  } else if (t < 0.75) {
-    // Yellow to orange
-    const s = (t - 0.5) / 0.25;
-    r = 255;
-    g = Math.round(255 - s * 120);
-    b = 0;
-    a = 0.75 + s * 0.1;
-  } else {
-    // Orange to red
-    const s = (t - 0.75) / 0.25;
-    r = 255;
-    g = Math.round(135 - s * 135);
-    b = Math.round(s * 30);
-    a = 0.85 + s * 0.15;
-  }
-
-  return { r, g, b, a };
-}
+// Color ramp (auroraCmap) lives in utils/globeOverlays.js, shared with the
+// 3D globe's aurora painter so both projections use NOAA's identical scale.
 
 function buildAuroraCanvas(coordinates) {
   // Create a 360×181 canvas (1° resolution)

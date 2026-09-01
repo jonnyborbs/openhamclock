@@ -65,6 +65,7 @@ class PluginRegistry {
       'aprs-tnc',
       'meshcom-udp',
       'winlink-gateway',
+      'winlink-express-csv',
       'rotator',
       'cloud-relay',
     ]) {
@@ -214,12 +215,38 @@ class PluginRegistry {
   }
 
   /**
+   * Apply the user's per-rig mode overrides (config.radio.modeOverrides,
+   * issue #882) to an incoming mode string. Keys are matched
+   * case-insensitively; the first matching entry wins. Returns the mapped
+   * mode, or the original mode unchanged when no override applies (or none
+   * are configured — backward-compatible default).
+   */
+  applyModeOverride(mode) {
+    const overrides = this._config.radio && this._config.radio.modeOverrides;
+    if (!overrides || typeof overrides !== 'object' || typeof mode !== 'string') return mode;
+    const wanted = mode.toUpperCase();
+    for (const [from, to] of Object.entries(overrides)) {
+      if (typeof to === 'string' && to && String(from).toUpperCase() === wanted) {
+        console.log(`[Registry] Mode override: ${mode} → ${to}`);
+        return to;
+      }
+    }
+    return mode;
+  }
+
+  /**
    * Dispatch a rig command to the active plugin instance.
    * Returns false if no active rig plugin or method not supported.
+   * setMode commands pass through applyModeOverride() first, so every rig
+   * plugin (USB, rigctld, flrig, TCI, SmartSDR, mock, ...) benefits without
+   * plugin-specific code.
    */
   dispatch(method, ...args) {
     if (!this._instance) return false;
     if (typeof this._instance[method] !== 'function') return false;
+    if (method === 'setMode') {
+      args[0] = this.applyModeOverride(args[0]);
+    }
     this._instance[method](...args);
     return true;
   }

@@ -4,11 +4,23 @@
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { WorldMap } from '../components';
-import { calculateDistance, formatDistance, maidenheadToLatLon } from '../utils/geo.js';
+import { WorldMap, APRSTelemetryPanel } from '../components';
+import { useAPRSTelemetry } from '../hooks/useAPRSTelemetry.js';
+import { calculateDistance, formatDistance, maidenheadToLatLon, latLonToMaidenhead } from '../utils/geo.js';
 import { esc } from '../utils/escapeHtml.js';
 import { apiFetch } from '../utils/apiFetch.js';
+import { mergeShelters } from '../utils/emcommShelters.js';
 import { winlinkModeLabel, winlinkModeColor } from '../utils/winlinkModes.js';
+import {
+  recordEvent,
+  getEvents,
+  clearEvents,
+  subscribeEvents,
+  eventsToCSV,
+  buildPrintHtml,
+  diffAdded,
+  EVENT_TYPE_META,
+} from '../utils/emcommEventLog.js';
 
 // APRS symbol codes for emergency-related stations
 const EMCOMM_SYMBOLS = new Set([
@@ -114,6 +126,20 @@ const SHELTER_STATUS_COLORS = {
   FULL: '#f59e0b',
 };
 
+const FIELD_REPORTS_DOCS_URL =
+  'https://github.com/accius/openhamclock/blob/main/rig-bridge/README.md#winlink-express-csv-ingest-beta';
+
+const EVENT_BTN_STYLE = {
+  background: '#1a1f2e',
+  border: '1px solid #2a3040',
+  borderRadius: '3px',
+  color: '#ccc',
+  fontSize: '10px',
+  padding: '3px 10px',
+  cursor: 'pointer',
+  fontFamily: 'var(--font-mono)',
+};
+
 export default function EmcommLayout(props) {
   const {
     config,
@@ -148,11 +174,24 @@ export default function EmcommLayout(props) {
   const [aprsSource, setAprsSource] = useState('all');
   // Net operations
   const [netRoster, setNetRoster] = useState([]);
+  // RF-heard APRS shelter reports (kept alongside FEMA data — still works
+  // via local TNC when internet infrastructure is down)
+  const [aprsShelterReports, setAprsShelterReports] = useState([]);
+  // APRS telemetry (sensor dashboards)
+  const { telemetry } = useAPRSTelemetry({ enabled: true });
   const [messageTarget, setMessageTarget] = useState(null); // callsign to message
   const [messageText, setMessageText] = useState('');
   // Nearby Winlink gateways
   const [winlinkRows, setWinlinkRows] = useState([]);
   const [winlinkServerHasKey, setWinlinkServerHasKey] = useState(true);
+  // Field reports — Winlink Express forms ingested via rig-bridge CSV plugin
+  const [fieldReports, setFieldReports] = useState([]);
+  // Event log — session record for After Action Review
+  const [eventLog, setEventLog] = useState(() => getEvents());
+  // Previous-snapshot key sets for event-log diffing (null = no snapshot yet)
+  const evtPrevRef = useRef({ roster: null, alerts: null, shelters: null, stations: null, fieldReports: null });
+  // High-water mark for received-APRS-message polling (only log traffic from this session on)
+  const msgSinceRef = useRef(Date.now());
   const mapInstanceRef = useRef(null);
   const overlayLayersRef = useRef([]);
 
@@ -207,6 +246,66 @@ export default function EmcommLayout(props) {
     return () => clearInterval(timer);
   }, []);
 
+  // Poll APRS shelter reports (RF-heard shelter status messages)
+  useEffect(() => {
+    const fetchAprsShelters = async () => {
+      try {
+        const res = await apiFetch('/api/aprs/shelters', { cache: 'no-store' });
+        if (res?.ok) {
+          const data = await res.json();
+          setAprsShelterReports(Array.isArray(data.shelters) ? data.shelters : []);
+        }
+      } catch (e) {}
+    };
+    fetchAprsShelters();
+    const timer = setInterval(fetchAprsShelters, 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Poll field reports (Winlink Express forms via rig-bridge CSV plugin)
+  useEffect(() => {
+    const fetchReports = async () => {
+      try {
+        const res = await apiFetch('/api/emcomm/field-reports', { cache: 'no-store' });
+        if (res?.ok) {
+          const data = await res.json();
+          setFieldReports(Array.isArray(data.reports) ? data.reports : []);
+        }
+      } catch (e) {}
+    };
+    fetchReports();
+    const timer = setInterval(fetchReports, 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Event log: live subscription to the shared session log
+  useEffect(() => subscribeEvents(setEventLog), []);
+
+  // Event log: record APRS messages received during this session
+  useEffect(() => {
+    const fetchMessages = async () => {
+      try {
+        const res = await apiFetch(`/api/aprs/messages?since=${msgSinceRef.current}`, { cache: 'no-store' });
+        if (!res?.ok) return;
+        const data = await res.json();
+        const msgs = Array.isArray(data.messages) ? data.messages : [];
+        for (const m of msgs) {
+          if (m.timestamp > msgSinceRef.current) msgSinceRef.current = m.timestamp;
+          recordEvent('aprs_msg_rx', {
+            callsign: m.from,
+            summary: `${m.type === 'bulletin' ? 'Bulletin' : 'Message'} to ${m.to}`,
+            details: m.text || '',
+            ts: m.timestamp,
+            dedupeKey: `${m.from}-${m.to}-${m.timestamp}`,
+          });
+        }
+      } catch (e) {}
+    };
+    fetchMessages();
+    const timer = setInterval(fetchMessages, 30000);
+    return () => clearInterval(timer);
+  }, []);
+
   const { alerts = [], shelters = [], disasters = [], loading } = emcommData || {};
   const allAprsStations = aprsData?.stations || [];
 
@@ -222,16 +321,99 @@ export default function EmcommLayout(props) {
     return aprsStations.filter((s) => s.symbol && EMCOMM_SYMBOLS.has(s.symbol));
   }, [aprsStations]);
 
+  // FEMA shelters + RF-heard APRS shelter reports, source-tagged and deduped
+  // only when positions are trivially identical
+  const mergedShelters = useMemo(() => mergeShelters(shelters, aprsShelterReports), [shelters, aprsShelterReports]);
+
+  // ── Event log recording — diff-and-append on each data flow update ────────
+  // Net roster: check-ins (new calls) and check-outs (calls that disappeared)
+  useEffect(() => {
+    const { added, removed, keys } = diffAdded(evtPrevRef.current.roster, netRoster, (op) => op.call);
+    for (const op of added) {
+      recordEvent('net_checkin', {
+        callsign: op.call,
+        summary: `Checked into ${op.netName}`,
+        details: op.status && op.status !== 'Checked in' ? op.status : '',
+        ts: op.checkinTime,
+        dedupeKey: `${op.call}-${op.checkinTime}`,
+      });
+    }
+    for (const call of removed) {
+      recordEvent('net_checkout', { callsign: call, summary: 'Checked out of net' });
+    }
+    evtPrevRef.current.roster = keys;
+  }, [netRoster]);
+
+  // NWS alerts: new alert IDs
+  useEffect(() => {
+    const { added, keys } = diffAdded(evtPrevRef.current.alerts, alerts, (a) => a.id);
+    for (const a of added) {
+      recordEvent('nws_alert', {
+        summary: `${a.severity || 'Unknown'}: ${a.event || 'Alert'}`,
+        details: a.headline || '',
+        dedupeKey: a.id,
+      });
+    }
+    evtPrevRef.current.alerts = keys;
+  }, [alerts]);
+
+  // APRS shelter reports: new reports (keyed by sender + report timestamp)
+  useEffect(() => {
+    const { added, keys } = diffAdded(
+      evtPrevRef.current.shelters,
+      aprsShelterReports,
+      (s) => `${s.from}-${s.timestamp}`,
+    );
+    for (const s of added) {
+      recordEvent('shelter_report', {
+        callsign: s.from,
+        summary: 'Shelter report received',
+        details: s.text || '',
+        ts: s.timestamp,
+        dedupeKey: `${s.from}-${s.timestamp}`,
+      });
+    }
+    evtPrevRef.current.shelters = keys;
+  }, [aprsShelterReports]);
+
+  // EmComm APRS stations: first-heard (once per station per log lifetime)
+  useEffect(() => {
+    const { added, keys } = diffAdded(evtPrevRef.current.stations, emcommStations, (s) => s.ssid || s.call);
+    for (const s of added) {
+      recordEvent('station_heard', {
+        callsign: s.ssid || s.call,
+        summary: `${SYMBOL_LABELS[s.symbol] || 'EmComm'} station heard${s.source === 'local-tnc' ? ' via RF' : ''}`,
+        dedupeKey: s.ssid || s.call,
+      });
+    }
+    evtPrevRef.current.stations = keys;
+  }, [emcommStations]);
+
+  // Field reports: new report IDs (row hashes from the CSV ingest)
+  useEffect(() => {
+    const { added, keys } = diffAdded(evtPrevRef.current.fieldReports, fieldReports, (r) => r.id);
+    for (const r of added) {
+      recordEvent('field_report', {
+        callsign: r.callsign,
+        summary: r.formType ? `Field report: ${r.formType}` : 'Field report received',
+        details: r.text || '',
+        ts: r.timestamp,
+        dedupeKey: r.id,
+      });
+    }
+    evtPrevRef.current.fieldReports = keys;
+  }, [fieldReports]);
+
   // Calculate distance from DE for shelters
   const sheltersWithDistance = useMemo(() => {
-    if (config.location?.lat == null || config.location?.lon == null) return shelters;
-    return shelters
+    if (config.location?.lat == null || config.location?.lon == null) return mergedShelters;
+    return mergedShelters
       .map((s) => ({
         ...s,
         distance: s.lat && s.lon ? calculateDistance(config.location.lat, config.location.lon, s.lat, s.lon) : null,
       }))
       .sort((a, b) => (a.distance || Infinity) - (b.distance || Infinity));
-  }, [shelters, config.location]);
+  }, [mergedShelters, config.location]);
 
   // Calculate distance for emcomm APRS stations
   const emcommStationsWithDistance = useMemo(() => {
@@ -363,22 +545,36 @@ export default function EmcommLayout(props) {
       }
     });
 
-    // Shelter markers
-    shelters.forEach((shelter) => {
+    // Shelter markers — FEMA (solid) and APRS-reported (dashed ring) sources
+    mergedShelters.forEach((shelter) => {
       if (shelter.lat == null || shelter.lon == null) return;
+      const isAprs = shelter.source !== 'fema';
       const color = SHELTER_STATUS_COLORS[shelter.status] || '#6b7280';
       const marker = L.circleMarker([shelter.lat, shelter.lon], {
         radius: 8,
         color,
         fillColor: color,
-        fillOpacity: 0.6,
+        fillOpacity: isAprs ? 0.35 : 0.6,
         weight: 2,
+        ...(isAprs ? { dashArray: '3,3' } : {}),
       });
-      const pop = `<b>${esc(shelter.name || 'Shelter')}</b><br>
-        ${esc(shelter.address || '')}, ${esc(shelter.city || '')}<br>
-        Status: ${esc(shelter.status || 'Unknown')}<br>
-        Capacity: ${shelter.currentPopulation || 0}/${shelter.evacuationCapacity || '?'}
-        ${shelter.wheelchairAccessible ? ' ♿' : ''}${shelter.petFriendly ? ' 🐾' : ''}`;
+      let pop;
+      if (isAprs) {
+        const srcLabel = shelter.source === 'aprs-rf' ? 'APRS RF' : 'APRS';
+        pop = `<b>🏥 ${esc(shelter.from)}</b> <span style="color:#22c55e;font-size:9px;font-weight:700">${srcLabel}</span><br>
+          ${esc(shelter.text || '')}<br>
+          Status: ${esc(shelter.status || 'Unknown')}
+          ${shelter.evacuationCapacity ? `<br>Capacity: ${shelter.currentPopulation || 0}/${shelter.evacuationCapacity}` : ''}`;
+      } else {
+        pop = `<b>${esc(shelter.name || 'Shelter')}</b> <span style="color:#888;font-size:9px;font-weight:700">FEMA</span><br>
+          ${esc(shelter.address || '')}, ${esc(shelter.city || '')}<br>
+          Status: ${esc(shelter.status || 'Unknown')}<br>
+          Capacity: ${shelter.currentPopulation || 0}/${shelter.evacuationCapacity || '?'}
+          ${shelter.wheelchairAccessible ? ' ♿' : ''}${shelter.petFriendly ? ' 🐾' : ''}`;
+        if (shelter.aprsReport) {
+          pop += `<br><span style="color:#22c55e;font-size:10px">📡 ${esc(shelter.aprsReport.from)}: ${esc(shelter.aprsReport.text || '')}</span>`;
+        }
+      }
       marker.bindPopup(pop);
       marker.addTo(map);
       overlayLayersRef.current.push(marker);
@@ -464,6 +660,29 @@ export default function EmcommLayout(props) {
       overlayLayersRef.current.push(marker);
     });
 
+    // Field report markers (Winlink Express forms via rig-bridge) — clipboard icon
+    fieldReports.forEach((r) => {
+      if (r.lat == null || r.lon == null) return;
+      const marker = L.marker([r.lat, r.lon], {
+        icon: L.divIcon({
+          className: '',
+          html: '<div style="font-size:16px;line-height:16px;filter:drop-shadow(0 0 2px #000)">📋</div>',
+          iconSize: [18, 18],
+          iconAnchor: [9, 9],
+        }),
+      });
+      const when = r.timestamp ? new Date(r.timestamp).toISOString().replace('T', ' ').substring(0, 16) + 'Z' : '';
+      marker.bindPopup(
+        `<b style="color:#f472b6">📋 ${esc(r.callsign || 'Unknown')}</b> ` +
+          `<span style="color:#888;font-size:9px;font-weight:700">WINLINK</span><br>` +
+          `${esc(r.formType || 'Field Report')}<br>` +
+          (r.text ? `<span style="color:#aaa">${esc(r.text.substring(0, 200))}</span><br>` : '') +
+          `<span style="color:#888;font-size:10px">${when}</span>`,
+      );
+      marker.addTo(map);
+      overlayLayersRef.current.push(marker);
+    });
+
     return () => {
       overlayLayersRef.current.forEach((layer) => {
         try {
@@ -474,13 +693,69 @@ export default function EmcommLayout(props) {
       });
       overlayLayersRef.current = [];
     };
-  }, [config.location, alerts, shelters, emcommStationsWithDistance, winlinkGateways]);
+  }, [config.location, alerts, mergedShelters, emcommStationsWithDistance, winlinkGateways, fieldReports]);
 
   // Click shelter to pan map
   const panToShelter = useCallback((shelter) => {
     const map = mapInstanceRef.current;
     if (map && shelter.lat && shelter.lon) {
       map.setView([shelter.lat, shelter.lon], 10, { animate: true });
+    }
+  }, []);
+
+  // Send an APRS message to the current target (shared by Enter key + button)
+  // and record it in the event log.
+  const sendAprsMessage = useCallback(() => {
+    const text = messageText.trim();
+    if (!text || !messageTarget) return;
+    fetch('/api/aprs/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: messageTarget, message: text }),
+    }).catch(() => {});
+    recordEvent('aprs_msg_sent', {
+      callsign: config.callsign || 'N0CALL',
+      summary: `Message to ${messageTarget}`,
+      details: text,
+    });
+    setMessageText('');
+    setMessageTarget(null);
+  }, [messageText, messageTarget, config.callsign]);
+
+  // ── Event log export handlers ─────────────────────────────────────────────
+  const exportEventLogCsv = useCallback(() => {
+    const csv = eventsToCSV(getEvents());
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `emcomm-event-log-${new Date().toISOString().substring(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const printEventLog = useCallback(() => {
+    const loc = config.location;
+    const grid = loc?.lat != null && loc?.lon != null ? latLonToMaidenhead({ lat: loc.lat, lon: loc.lon }) : '';
+    const html = buildPrintHtml({
+      events: getEvents(),
+      callsign: config.callsign,
+      location: loc,
+      grid,
+    });
+    const win = window.open('', '_blank', 'width=900,height=700');
+    if (!win) return;
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    win.print();
+  }, [config.callsign, config.location]);
+
+  const clearEventLog = useCallback(() => {
+    if (window.confirm('Clear the entire EmComm event log? This cannot be undone.')) {
+      clearEvents();
     }
   }, []);
 
@@ -580,6 +855,7 @@ export default function EmcommLayout(props) {
             potaSpots={[]}
             sotaSpots={[]}
             wwbotaSpots={[]}
+            canparksSpots={[]}
             mySpots={[]}
             dxPaths={[]}
             dxFilters={dxFilters}
@@ -594,6 +870,7 @@ export default function EmcommLayout(props) {
             showPOTA={false}
             showSOTA={false}
             showWWBOTA={false}
+            showCANParks={false}
             showSatellites={false}
             showPSKReporter={false}
             showPSKPaths={false}
@@ -712,44 +989,81 @@ export default function EmcommLayout(props) {
             {sheltersWithDistance.length === 0 ? (
               <EmptyState text="No open shelters nearby" />
             ) : (
-              sheltersWithDistance.map((s) => (
-                <div
-                  key={s.id}
-                  style={{
-                    padding: '4px 8px',
-                    cursor: 'pointer',
-                    marginBottom: '3px',
-                    borderRadius: '3px',
-                  }}
-                  onClick={() => panToShelter(s)}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = '#1a1a1a')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ color: '#ddd', fontSize: '12px', fontWeight: 500 }}>
-                      {s.name || 'Unnamed Shelter'}
-                    </span>
-                    <span
+              sheltersWithDistance.map((s) => {
+                const isAprs = s.source !== 'fema';
+                return (
+                  <div
+                    key={s.id}
+                    style={{
+                      padding: '4px 8px',
+                      cursor: s.lat != null ? 'pointer' : 'default',
+                      marginBottom: '3px',
+                      borderRadius: '3px',
+                      borderLeft: isAprs ? '2px solid #22c55e' : '2px solid transparent',
+                    }}
+                    onClick={() => panToShelter(s)}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = '#1a1a1a')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span
+                        style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0, overflow: 'hidden' }}
+                      >
+                        <span
+                          style={{
+                            color: '#ddd',
+                            fontSize: '12px',
+                            fontWeight: 500,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {s.name || 'Unnamed Shelter'}
+                        </span>
+                        <SourceBadge source={s.source} />
+                      </span>
+                      <span
+                        style={{
+                          color: SHELTER_STATUS_COLORS[s.status] || '#888',
+                          fontSize: '10px',
+                          fontWeight: 600,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {s.status || '?'}
+                      </span>
+                    </div>
+                    {isAprs && s.text && (
+                      <div style={{ color: '#aaa', fontSize: '10px', marginTop: '2px' }}>{s.text}</div>
+                    )}
+                    {isAprs && s.tokens && s.tokens.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginTop: '3px' }}>
+                        {s.tokens.map((tk, i) => (
+                          <TokenPill key={`${tk.key}-${i}`} token={tk} />
+                        ))}
+                      </div>
+                    )}
+                    <div
                       style={{
-                        color: SHELTER_STATUS_COLORS[s.status] || '#888',
-                        fontSize: '10px',
-                        fontWeight: 600,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginTop: '2px',
                       }}
                     >
-                      {s.status || '?'}
-                    </span>
+                      <span style={{ color: '#888', fontSize: '10px' }}>
+                        {s.distance != null ? formatDistance(s.distance, config.allUnits?.dist || 'imperial') : ''}{' '}
+                        {s.wheelchairAccessible ? '♿' : ''} {s.petFriendly ? '🐾' : ''}
+                        {isAprs && s.timestamp
+                          ? `${Math.max(0, Math.floor((Date.now() - s.timestamp) / 60000))}m ago`
+                          : ''}
+                      </span>
+                      <CapacityBar current={s.currentPopulation} max={s.evacuationCapacity} />
+                    </div>
                   </div>
-                  <div
-                    style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}
-                  >
-                    <span style={{ color: '#888', fontSize: '10px' }}>
-                      {s.distance != null ? formatDistance(s.distance, config.allUnits?.dist || 'imperial') : ''}{' '}
-                      {s.wheelchairAccessible ? '♿' : ''} {s.petFriendly ? '🐾' : ''}
-                    </span>
-                    <CapacityBar current={s.currentPopulation} max={s.evacuationCapacity} />
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </PanelSection>
 
@@ -832,6 +1146,11 @@ export default function EmcommLayout(props) {
             )}
           </PanelSection>
 
+          {/* APRS Telemetry Panel — sensor dashboards from telemetry-beaconing stations */}
+          <PanelSection title="APRS Telemetry" count={telemetry.length} color="#10b981">
+            <APRSTelemetryPanel telemetry={telemetry} variant="emcomm" />
+          </PanelSection>
+
           {/* Winlink Gateways Panel */}
           <PanelSection title="Nearby Winlink Gateways" count={winlinkGateways.length} color="#3b82f6">
             {!winlinkServerHasKey ? (
@@ -900,6 +1219,56 @@ export default function EmcommLayout(props) {
             )}
           </PanelSection>
 
+          {/* Field Reports Panel — Winlink Express forms via rig-bridge CSV ingest */}
+          <PanelSection title="Field Reports" count={fieldReports.length} color="#f472b6">
+            {fieldReports.length === 0 ? (
+              <div style={{ padding: '12px 8px', color: '#555', fontSize: '11px', lineHeight: 1.5 }}>
+                No field reports received. Run the <span style={{ color: '#888' }}>winlink-express-csv</span> rig-bridge
+                plugin to ingest Winlink Express form exports (Field Situation Reports, Damage Assessments) from your
+                EOC.{' '}
+                <a href={FIELD_REPORTS_DOCS_URL} target="_blank" rel="noreferrer" style={{ color: '#f472b6' }}>
+                  Setup guide
+                </a>
+              </div>
+            ) : (
+              fieldReports.map((r) => (
+                <div
+                  key={r.id}
+                  style={{
+                    padding: '5px 8px',
+                    fontSize: '11px',
+                    marginBottom: '3px',
+                    borderLeft: '2px solid #f472b6',
+                    background: '#0d1117',
+                    borderRadius: '4px',
+                    cursor: r.lat != null && r.lon != null ? 'pointer' : 'default',
+                  }}
+                  onClick={() => panToShelter(r)}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ color: '#f472b6', fontWeight: 600 }}>{r.callsign || 'Unknown'}</span>
+                      <span style={{ color: '#888', marginLeft: '6px', fontSize: '10px' }}>
+                        {r.formType || 'Field Report'}
+                      </span>
+                    </div>
+                    <span style={{ color: '#888', fontSize: '10px', flexShrink: 0 }}>
+                      {r.age < 1 ? 'now' : r.age < 60 ? `${r.age}m ago` : `${Math.floor(r.age / 60)}h ago`}
+                    </span>
+                  </div>
+                  {r.text && (
+                    <div style={{ color: '#aaa', fontSize: '10px', marginTop: '2px' }}>
+                      {r.text.length > 120 ? `${r.text.substring(0, 120)}…` : r.text}
+                    </div>
+                  )}
+                  <div style={{ color: '#666', fontSize: '9px', marginTop: '2px' }}>
+                    {r.lat != null && r.lon != null ? `📋 ${r.lat.toFixed(3)}, ${r.lon.toFixed(3)}` : 'No position'}
+                  </div>
+                </div>
+              ))
+            )}
+          </PanelSection>
+
           {/* Net Operations Panel */}
           <PanelSection title="Net Roster" count={netRoster.length} color="#a855f7">
             {netRoster.length === 0 ? (
@@ -958,6 +1327,81 @@ export default function EmcommLayout(props) {
             )}
           </PanelSection>
 
+          {/* Event Log Panel — session record for After Action Review */}
+          <PanelSection title="Event Log" count={eventLog.length} color="#eab308">
+            <div style={{ display: 'flex', gap: '6px', padding: '4px 8px 6px', alignItems: 'center' }}>
+              <button
+                onClick={exportEventLogCsv}
+                disabled={eventLog.length === 0}
+                style={{ ...EVENT_BTN_STYLE, opacity: eventLog.length === 0 ? 0.4 : 1 }}
+                title="Download the full event log as CSV"
+              >
+                CSV
+              </button>
+              <button
+                onClick={printEventLog}
+                disabled={eventLog.length === 0}
+                style={{ ...EVENT_BTN_STYLE, opacity: eventLog.length === 0 ? 0.4 : 1 }}
+                title="Open a print-friendly After Action Report (print to PDF from the dialog)"
+              >
+                Print / PDF
+              </button>
+              <button
+                onClick={clearEventLog}
+                disabled={eventLog.length === 0}
+                style={{
+                  ...EVENT_BTN_STYLE,
+                  marginLeft: 'auto',
+                  color: '#ef4444',
+                  border: '1px solid #ef444455',
+                  opacity: eventLog.length === 0 ? 0.4 : 1,
+                }}
+                title="Clear the event log"
+              >
+                Clear
+              </button>
+            </div>
+            {eventLog.length === 0 ? (
+              <EmptyState text="No events yet — check-ins, alerts, messages, and reports are logged automatically for After Action Review." />
+            ) : (
+              eventLog
+                .slice(-50)
+                .reverse()
+                .map((ev) => (
+                  <div
+                    key={ev.id}
+                    style={{
+                      padding: '3px 8px',
+                      fontSize: '10px',
+                      display: 'flex',
+                      gap: '6px',
+                      alignItems: 'baseline',
+                    }}
+                  >
+                    <span style={{ color: '#666', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+                      {new Date(ev.ts).toISOString().substring(11, 16)}z
+                    </span>
+                    <span
+                      style={{
+                        color: EVENT_TYPE_META[ev.type]?.color || '#888',
+                        fontWeight: 600,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {EVENT_TYPE_META[ev.type]?.label || ev.type}
+                    </span>
+                    <span
+                      style={{ color: '#aaa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={ev.details || ev.summary}
+                    >
+                      {ev.callsign ? <span style={{ color: '#ddd' }}>{ev.callsign} — </span> : null}
+                      {ev.summary}
+                    </span>
+                  </div>
+                ))
+            )}
+          </PanelSection>
+
           {/* Message Compose */}
           {messageTarget && (
             <div
@@ -1000,28 +1444,11 @@ export default function EmcommLayout(props) {
                     fontSize: '12px',
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && messageText.trim()) {
-                      fetch('/api/aprs/message', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ to: messageTarget, message: messageText.trim() }),
-                      }).catch(() => {});
-                      setMessageText('');
-                      setMessageTarget(null);
-                    }
+                    if (e.key === 'Enter') sendAprsMessage();
                   }}
                 />
                 <button
-                  onClick={() => {
-                    if (!messageText.trim()) return;
-                    fetch('/api/aprs/message', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ to: messageTarget, message: messageText.trim() }),
-                    }).catch(() => {});
-                    setMessageText('');
-                    setMessageTarget(null);
-                  }}
+                  onClick={sendAprsMessage}
                   style={{
                     padding: '6px 12px',
                     background: '#22d3ee',
@@ -1044,6 +1471,29 @@ export default function EmcommLayout(props) {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Shelter data source badge — FEMA vs APRS (RF-heard) */
+function SourceBadge({ source }) {
+  const label = source === 'fema' ? 'FEMA' : source === 'aprs-rf' ? 'APRS RF' : 'APRS';
+  const color = source === 'fema' ? '#888' : '#22c55e';
+  return (
+    <span
+      title={source === 'fema' ? 'FEMA National Shelter System' : 'Shelter report heard via APRS'}
+      style={{
+        fontSize: '8px',
+        fontWeight: 700,
+        padding: '0 4px',
+        borderRadius: '2px',
+        border: `1px solid ${color}66`,
+        color,
+        flexShrink: 0,
+        letterSpacing: '0.5px',
+      }}
+    >
+      {label}
+    </span>
   );
 }
 

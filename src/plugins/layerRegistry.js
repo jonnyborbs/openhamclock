@@ -7,6 +7,7 @@
  */
 
 import * as N3FJPLoggedQSOsPlugin from './layers/useN3FJPLoggedQSOs.js';
+import * as QsoApiLayerPlugin from './layers/useQsoApiLayer.js';
 import * as WXRadarPlugin from './layers/useWXRadar.js';
 import * as OWMCloudsPlugin from './layers/useOWMClouds.js';
 import * as CityLightsPlugin from './layers/useCityLights.js';
@@ -31,6 +32,11 @@ import * as WinlinkGatewaysPlugin from './layers/useWinlinkGateways.js';
 import * as AircraftPlugin from './layers/useAircraft.js';
 import * as ATCSectorsPlugin from './layers/useATCSectors.js';
 import * as PSKReporterBandActivityPlugin from './layers/usePSKReporterBandActivity.js';
+import * as MaidenheadGridPlugin from './layers/useMaidenheadGrid.js';
+import * as WorkedGridsPlugin from './layers/useWorkedGrids.js';
+import * as DRAPPlugin from './layers/useDRAP.js';
+import * as ZonesPlugin from './layers/useZones.js';
+import * as HistoryPlaybackPlugin from './layers/useHistoryPlayback.js';
 
 // Auto-discover local/custom plugins (gitignored — survive updates)
 const localPluginModules = import.meta.glob('./local/*.js', { eager: true });
@@ -65,6 +71,7 @@ const layerPlugins = [
   RBNPlugin,
   ContestQsosPlugin,
   N3FJPLoggedQSOsPlugin,
+  QsoApiLayerPlugin,
   GreatCirclePlugin,
   VOACAPHeatmapPlugin,
   MUFMapPlugin,
@@ -75,6 +82,11 @@ const layerPlugins = [
   AircraftPlugin,
   ATCSectorsPlugin,
   PSKReporterBandActivityPlugin,
+  MaidenheadGridPlugin,
+  WorkedGridsPlugin,
+  DRAPPlugin,
+  ZonesPlugin,
+  HistoryPlaybackPlugin,
   ...localPlugins,
 ];
 
@@ -108,6 +120,12 @@ const PINNED_SHORTCUTS = {
   aircraft: 'x',
   'atc-sectors': 'z',
   'psk-band-activity': 'b',
+  // Alphabet is nearly exhausted — pin the stragglers so auto-assignment
+  // doesn't hand them arbitrary leftover letters.
+  maidenhead: 'h', // maidenHead grid
+  drap: 'j',
+  zones: 'y',
+  // 'worked-grids' and 'qso-api' have no shortcut — all 26 letters are pinned above.
 };
 
 export function getAllLayers() {
@@ -123,6 +141,7 @@ export function getAllLayers() {
       defaultEnabled: plugin.metadata.defaultEnabled || false,
       defaultOpacity: plugin.metadata.defaultOpacity || 0.6,
       category: plugin.metadata.category || 'overlay',
+      config: plugin.metadata.config || undefined,
       localOnly: plugin.metadata.localOnly || false,
       shortcut: PINNED_SHORTCUTS[plugin.metadata.id] || null,
       hook: plugin.useLayer,

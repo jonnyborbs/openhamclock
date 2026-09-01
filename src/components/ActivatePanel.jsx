@@ -2,10 +2,16 @@
  * ActivatePanel Component
  * Displays <whatever> on the Air activations with ON/OFF toggle
  */
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import { getListenUrl, loadNearbyReceivers } from '../utils/webSdr.js';
 import CallsignLink from './CallsignLink.jsx';
 import { useCallsignPopup } from './CallsignPopupManager.jsx';
 import { IconSearch, IconRefresh, IconMap, IconTag } from './Icons.jsx';
+import { useWorkedBefore } from '../hooks/useWorkedBefore.js';
+import { useAwards } from '../hooks/useAwards.js';
+import { spotBadge } from '../utils/awards.js';
+import { requestLogQso } from '../services/logbookStore.js';
 
 export const ActivatePanel = ({
   mapDefs,
@@ -23,8 +29,40 @@ export const ActivatePanel = ({
   filters,
   onOpenFilters,
   filteredData,
+  emptyText,
 }) => {
+  const { t } = useTranslation();
   const { showPopup } = useCallsignPopup();
+
+  // Warm the nearby web-SDR receiver cache so the 🎧 links can be computed
+  // synchronously at render time (same pattern as DXClusterPanel). DE
+  // location isn't a prop here, so read it from the stored config; without
+  // one, getListenUrl falls back to the static regional receiver list.
+  const [, setSdrDirectoryTick] = useState(0);
+  useEffect(() => {
+    let de = null;
+    try {
+      de = JSON.parse(localStorage.getItem('openhamclock_config') || '{}').location;
+    } catch {}
+    if (de?.lat == null || de?.lon == null) return undefined;
+    let cancelled = false;
+    loadNearbyReceivers(de.lat, de.lon).then((list) => {
+      if (!cancelled && list) setSdrDirectoryTick((n) => n + 1);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Worked-before flag from live logged QSOs (N3FJP + N1MM/DXLog). Call-level
+  // only here — activation hunters mostly care whether the activator is
+  // already in the log at all. Returns null for everyone when no QSO source
+  // has data, so the badge never renders outside a logging session.
+  const { getStatus: getWorkedStatus } = useWorkedBefore();
+  // Award status from the native logbook: 'new' = the activator's DXCC entity
+  // is not in the log at all (ATNO), 'new-band' = entity worked but not on
+  // the spot's band. Null for everyone until the logbook has QSOs.
+  const { getSpotStatus: getAwardStatus } = useAwards();
   const staleMinutes = lastUpdated ? Math.floor((Date.now() - lastUpdated) / 60000) : null;
   const isStale = staleMinutes !== null && staleMinutes >= 5;
   const checkedTime = lastChecked ? new Date(lastChecked).toISOString().substr(11, 5) + 'z' : '';
@@ -228,6 +266,7 @@ export const ActivatePanel = ({
               <span role="columnheader">Reference</span>
               <span role="columnheader">Frequency</span>
               <span role="columnheader">Time</span>
+              <span role="columnheader">Log</span>
             </div>
             {spots.map((spot, i) => (
               <div
@@ -241,7 +280,7 @@ export const ActivatePanel = ({
                   role="row"
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '62px 72px 58px 1fr',
+                    gridTemplateColumns: '62px 72px 58px 1fr auto',
                     gap: '4px',
                     cursor: 'pointer',
                   }}
@@ -267,7 +306,91 @@ export const ActivatePanel = ({
                       fontWeight="600"
                       onPopup={showPopup}
                       location={spot.grid ? { grid: spot.grid } : undefined}
+                      spot={
+                        parseFloat(spot.freq) > 0
+                          ? { freq: parseFloat(spot.freq) * 1000, mode: spot.mode || null }
+                          : undefined
+                      }
                     />
+                    {(() => {
+                      // One badge per row — precedence: new > new-band > worked.
+                      // Worked-before is call-level here (activation hunters
+                      // mostly care whether the activator is in the log at all).
+                      const badge = spotBadge(
+                        getAwardStatus(spot.call, parseFloat(spot.freq)),
+                        getWorkedStatus(spot.call),
+                      );
+                      if (badge === 'new') {
+                        const label = t('activations.badge.newTooltip', {
+                          defaultValue: 'New one — this DXCC entity is not in your logbook (ATNO)',
+                        });
+                        return (
+                          <span
+                            title={label}
+                            aria-label={label}
+                            style={{
+                              marginLeft: '3px',
+                              padding: '0 3px',
+                              fontSize: '8px',
+                              fontWeight: '700',
+                              letterSpacing: '0.5px',
+                              color: '#ff4444',
+                              background: 'rgba(255, 68, 68, 0.15)',
+                              border: '1px solid rgba(255, 68, 68, 0.6)',
+                              borderRadius: '2px',
+                              verticalAlign: 'middle',
+                            }}
+                          >
+                            {t('activations.badge.new', { defaultValue: 'NEW' })}
+                          </span>
+                        );
+                      }
+                      if (badge === 'new-band') {
+                        const label = t('activations.badge.newBandTooltip', {
+                          defaultValue: 'Entity worked before, but not on this band — new band slot',
+                        });
+                        return (
+                          <span
+                            title={label}
+                            aria-label={label}
+                            style={{
+                              marginLeft: '3px',
+                              padding: '0 3px',
+                              fontSize: '8px',
+                              fontWeight: '700',
+                              letterSpacing: '0.5px',
+                              color: '#ff8844',
+                              background: 'rgba(255, 136, 68, 0.12)',
+                              border: '1px solid rgba(255, 136, 68, 0.5)',
+                              borderRadius: '2px',
+                              verticalAlign: 'middle',
+                            }}
+                          >
+                            {t('activations.badge.newBand', { defaultValue: 'BAND' })}
+                          </span>
+                        );
+                      }
+                      if (badge) {
+                        const label = t('activations.badge.workedTooltip', {
+                          defaultValue: 'In your log — worked this station before',
+                        });
+                        return (
+                          <span
+                            title={label}
+                            aria-label={label}
+                            style={{
+                              marginLeft: '3px',
+                              fontSize: '9px',
+                              color: 'var(--text-muted)',
+                              opacity: 0.75,
+                            }}
+                          >
+                            ✓
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
                   </span>
                   <span
                     role="cell"
@@ -297,12 +420,115 @@ export const ActivatePanel = ({
                   <span role="cell" style={{ color: 'var(--text-muted)', textAlign: 'right', fontSize: '9px' }}>
                     {spot.time}
                   </span>
+                  <span role="cell" style={{ textAlign: 'right' }}>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const freqVal = parseFloat(spot.freq);
+                        requestLogQso({
+                          call: spot.call,
+                          freq: Number.isFinite(freqVal) && freqVal > 0 ? freqVal : undefined,
+                          mode: spot.mode || undefined,
+                          gridsquare: spot.grid || undefined,
+                          comment: spot.ref ? `${spot.ref}${spot.name ? ` ${spot.name}` : ''}` : undefined,
+                        });
+                      }}
+                      title={t('logbook.logFromSpotTooltip', {
+                        defaultValue: 'Log a QSO with {{call}} in your logbook',
+                        call: spot.call,
+                      })}
+                      aria-label={t('logbook.logFromSpotTooltip', {
+                        defaultValue: 'Log a QSO with {{call}} in your logbook',
+                        call: spot.call,
+                      })}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: 0,
+                        fontSize: '10px',
+                        cursor: 'pointer',
+                        opacity: 0.55,
+                        lineHeight: 1,
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.opacity = '1';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.opacity = '0.55';
+                      }}
+                    >
+                      📓+
+                    </button>
+                    {(() => {
+                      // Web SDR "listen" link — hear the activator without a rig.
+                      const freqVal = parseFloat(spot.freq); // MHz
+                      const listen =
+                        Number.isFinite(freqVal) && freqVal > 0 ? getListenUrl(freqVal * 1000, spot.mode) : null;
+                      if (!listen) return null;
+                      return (
+                        <a
+                          href={listen.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          title={t('dxClusterPanel.listenTooltip', {
+                            defaultValue: 'Listen on a web SDR ({{receiver}})',
+                            receiver: listen.name,
+                          })}
+                          aria-label={t('dxClusterPanel.listenTooltip', {
+                            defaultValue: 'Listen on a web SDR ({{receiver}})',
+                            receiver: listen.name,
+                          })}
+                          style={{
+                            marginLeft: '4px',
+                            fontSize: '10px',
+                            textDecoration: 'none',
+                            opacity: 0.55,
+                            transition: 'opacity 0.15s',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.opacity = '1';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.opacity = '0.55';
+                          }}
+                        >
+                          🎧
+                        </a>
+                      );
+                    })()}
+                  </span>
                 </div>
-                {spot.comments?.length > 0 && (
+                {(spot.comments?.length > 0 || spot.potaRef) && (
                   <div
                     style={{ textAlign: 'center', fontStyle: 'italic', color: 'var(--text-muted)', fontSize: '11px' }}
                   >
                     {spot.comments}
+                    {/* Cross-program reference chip (e.g. CANParks parks that are
+                        also POTA parks) — informational only, no dedup logic. */}
+                    {spot.potaRef && (
+                      <span
+                        title={t('activations.potaCrossRefTooltip', {
+                          defaultValue: 'This park is also POTA reference {{ref}}',
+                          ref: spot.potaRef,
+                        })}
+                        style={{
+                          marginLeft: spot.comments?.length > 0 ? '6px' : 0,
+                          padding: '0 4px',
+                          fontStyle: 'normal',
+                          fontSize: '9px',
+                          color: 'var(--text-muted)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '3px',
+                          opacity: 0.8,
+                          whiteSpace: 'nowrap',
+                          verticalAlign: 'middle',
+                        }}
+                      >
+                        POTA {spot.potaRef}
+                      </span>
+                    )}
                   </div>
                 )}
               </div>
@@ -310,7 +536,7 @@ export const ActivatePanel = ({
           </div>
         ) : (
           <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '10px', fontSize: '11px' }}>
-            No spots
+            {emptyText || 'No spots'}
           </div>
         )}
       </div>

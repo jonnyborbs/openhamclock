@@ -25,6 +25,8 @@ import {
 import { createTerminator } from '../utils/terminator.js';
 import { getAprsSymbolIcon } from '../utils/aprs-symbols.js';
 import { getAllLayers } from '../plugins/layerRegistry.js';
+import { GLOBE_OVERLAY_LAYER_IDS } from '../utils/globeOverlays.js';
+import { countryColor, fetchCountriesGeojson } from '../utils/countriesBasemap.js';
 import PluginLayer from './PluginLayer.jsx';
 import AzimuthalMap from './AzimuthalMap.jsx';
 // three.js is ~600 kB — load it only when the operator actually opens 3D mode.
@@ -51,6 +53,7 @@ import { use630mBandEnabled } from '../hooks/use630mBandEnabled.js';
 // DX cluster data, POTA/SOTA spots, and WSJT-X decodes come from external sources
 // and could contain malicious HTML/script tags in callsigns, comments, or park names.
 import { esc } from '../utils/escapeHtml.js';
+import { LiEye, LiEyeOff, LiLock, LiUnlock, LiPlus, LiMinus, LiRotate } from './Icons.jsx';
 
 // Lightweight error boundary for the non-Leaflet projections (azimuthal canvas,
 // 3D globe) — falls back to Mercator instead of crashing the entire dashboard.
@@ -102,6 +105,7 @@ import { mapDefs as POTADefs } from './POTAPanel.jsx';
 import { mapDefs as SOTADefs } from './SOTAPanel.jsx';
 import { mapDefs as WWBOTADefs } from './WWBOTAPanel.jsx';
 import { mapDefs as WWFFDefs } from './WWFFPanel.jsx';
+import { mapDefs as CANParksDefs } from './CANParksPanel.jsx';
 
 const POPUP_AUTO_CLOSE_MS = 20_000;
 
@@ -116,6 +120,7 @@ export const WorldMap = ({
   wwffSpots,
   sotaSpots,
   wwbotaSpots,
+  canparksSpots,
   dxPaths,
   dxFilters,
   mapBandFilter,
@@ -135,6 +140,8 @@ export const WorldMap = ({
   showSOTALabels = true,
   showWWBOTA,
   showWWBOTALabels = true,
+  showCANParks,
+  showCANParksLabels = true,
   showPSKReporter,
   showPSKPaths = true,
   showMutualReception = true,
@@ -176,6 +183,7 @@ export const WorldMap = ({
   const wwffMarkersRef = useRef([]);
   const sotaMarkersRef = useRef([]);
   const wwbotaMarkersRef = useRef([]);
+  const canparksMarkersRef = useRef([]);
   const dxPathsLinesRef = useRef([]);
   const dxPathsMarkersRef = useRef([]);
   const pskMarkersRef = useRef([]);
@@ -631,14 +639,35 @@ export const WorldMap = ({
       filterDXPaths(dxPaths, dxFilters).filter((p) => String(p?.dxCall || '').trim()),
     [dxPaths, dxFilters],
   );
-  // Enabled plugin layers the globe cannot draw (everything Leaflet-bound
-  // except satellites, which 3D renders natively). Used for a visible note so
-  // toggling e.g. Lightning in Settings does not look like a silent no-op.
+  // Enabled plugin layers the globe cannot draw: everything Leaflet-bound
+  // except satellites (3D renders them natively) and the globe-capable
+  // overlay subset (Maidenhead/zones/D-RAP/aurora — painted onto the globe's
+  // overlay shell, unless low-memory mode disabled that shell). Used for a
+  // visible note so toggling e.g. Lightning in Settings does not look like a
+  // silent no-op.
   const suppressed2DLayers = useMemo(() => {
     if (mapProjection !== 'globe3d') return [];
     return getAllLayers().filter(
-      (l) => l.id !== 'satellites' && (pluginLayerStates[l.id]?.enabled ?? l.defaultEnabled),
+      (l) =>
+        l.id !== 'satellites' &&
+        !(!lowMemoryMode && GLOBE_OVERLAY_LAYER_IDS.includes(l.id)) &&
+        (pluginLayerStates[l.id]?.enabled ?? l.defaultEnabled),
     );
+  }, [mapProjection, pluginLayerStates, lowMemoryMode]);
+  // Enabled/opacity for the layers the globe draws itself — same states the
+  // Leaflet path uses, narrowed so unrelated layer churn doesn't repaint the
+  // globe's overlay canvas.
+  const globeOverlayStates = useMemo(() => {
+    if (mapProjection !== 'globe3d') return null;
+    const out = {};
+    getAllLayers().forEach((l) => {
+      if (!GLOBE_OVERLAY_LAYER_IDS.includes(l.id)) return;
+      out[l.id] = {
+        enabled: pluginLayerStates[l.id]?.enabled ?? l.defaultEnabled,
+        opacity: pluginLayerStates[l.id]?.opacity ?? l.defaultOpacity,
+      };
+    });
+    return out;
   }, [mapProjection, pluginLayerStates]);
   // Set when a crash or chunk-load failure forces the session back to
   // Mercator: the switch must not overwrite the user's saved projection.
@@ -662,20 +691,27 @@ export const WorldMap = ({
 
   useEffect(() => {
     if (!mapRotationConfig.enabled) return;
-    // Every style change makes the globe refetch its full tile set (up to 256
-    // tiles at retina zoom), and overlapping bursts get us throttled by the
-    // tile providers — throttled tiles are permanent holes in the texture.
-    // Rotation resumes when the user returns to a Leaflet projection.
-    if (isGlobe3D) return;
+    // On the globe each tick rebuilds the full sphere texture — the same cost
+    // as picking that style from the dropdown by hand, and Globe3D aborts the
+    // previous build's tile fetches when the style changes, so ticks never
+    // stack up. Styles the globe cannot build (MODIS — its GIBS URL is
+    // generated dynamically by the 2D projections, so its MAP_STYLES url is
+    // empty and Globe3D would silently fall back to 'dark') are skipped in 3D,
+    // matching the dropdown disabling MODIS there.
+    const eligibleIds = isGlobe3D ? availableBaseMapIds.filter((id) => MAP_STYLES[id]?.url) : availableBaseMapIds;
 
-    const selected = (mapRotationConfig.selectedIds || []).filter((id) => availableBaseMapIds.includes(id));
+    const selected = (mapRotationConfig.selectedIds || []).filter((id) => eligibleIds.includes(id));
     if (selected.length < 2) return;
 
-    const seconds = Math.max(5, Number(mapRotationConfig.intervalSeconds) || 60);
+    // The globe's floor matches the menu's smallest interval: a full-sphere
+    // rebuild can take several seconds on slow links, and sub-15 s cycling
+    // (only reachable via hand-edited localStorage) risks tile-provider
+    // throttling, which leaves permanent holes in the texture.
+    const seconds = Math.max(isGlobe3D ? 15 : 5, Number(mapRotationConfig.intervalSeconds) || 60);
 
     const timer = setInterval(() => {
       setMapStyle((current) => {
-        const selectedNow = (mapRotationConfig.selectedIds || []).filter((id) => availableBaseMapIds.includes(id));
+        const selectedNow = (mapRotationConfig.selectedIds || []).filter((id) => eligibleIds.includes(id));
         if (selectedNow.length < 2) return current;
 
         const currentIndex = selectedNow.indexOf(current);
@@ -805,6 +841,10 @@ export const WorldMap = ({
       return false;
     }
   });
+  // Shared by the flat map's eye button and the globe's (Globe3D renders its
+  // own copy at the top of its control column, since the Leaflet dock below
+  // does not exist in 3D). Both drive the same state + persisted key.
+  const toggleMapUiHidden = useCallback(() => setMapUiHidden((prev) => !prev), []);
 
   // Legend visibility toggle (persisted)
   const [showLegend, setShowLegend] = useState(() => {
@@ -1286,44 +1326,9 @@ export const WorldMap = ({
     // Only add overlay for countries style
     if (!MAP_STYLES[mapStyle]?.countriesOverlay) return;
 
-    // Bright distinct colors for countries (designed for maximum contrast between neighbors)
-    const COLORS = [
-      '#e6194b',
-      '#3cb44b',
-      '#4363d8',
-      '#f58231',
-      '#911eb4',
-      '#42d4f4',
-      '#f032e6',
-      '#bfef45',
-      '#fabed4',
-      '#469990',
-      '#dcbeff',
-      '#9A6324',
-      '#800000',
-      '#aaffc3',
-      '#808000',
-      '#000075',
-      '#e6beff',
-      '#ff6961',
-      '#77dd77',
-      '#fdfd96',
-      '#84b6f4',
-      '#fdcae1',
-      '#c1e1c1',
-      '#b39eb5',
-      '#ffb347',
-    ];
-
-    // Simple string hash for consistent color assignment
-    const hashColor = (str) => {
-      let hash = 0;
-      for (let i = 0; i < str.length; i++) {
-        hash = (hash << 5) - hash + str.charCodeAt(i);
-        hash |= 0;
-      }
-      return COLORS[Math.abs(hash) % COLORS.length];
-    };
+    // Palette + hash live in utils/countriesBasemap.js, shared with the 3D
+    // globe's texture builder so both projections color countries identically.
+    const hashColor = countryColor;
 
     // Deep-shift all coordinates in a GeoJSON geometry by a longitude offset
     const shiftCoords = (coords, offset) => {
@@ -1348,12 +1353,9 @@ export const WorldMap = ({
       };
     };
 
-    // Fetch world countries GeoJSON (Natural Earth 110m simplified, ~240KB)
-    fetch('https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json')
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
+    // Fetch world countries GeoJSON (Natural Earth 110m simplified, ~240KB;
+    // session-cached, shared with the globe texture builder)
+    fetchCountriesGeojson()
       .then((geojson) => {
         if (!mapInstanceRef.current) return;
 
@@ -1865,6 +1867,11 @@ export const WorldMap = ({
   useEffect(() => {
     placeSpots(WWBOTADefs, wwbotaSpots, showWWBOTA, showWWBOTALabels, wwbotaMarkersRef, mapInstanceRef);
   }, [wwbotaSpots, showWWBOTA, showWWBOTALabels, bandPassesMapFilter]);
+
+  // Update CANParks markers
+  useEffect(() => {
+    placeSpots(CANParksDefs, canparksSpots, showCANParks, showCANParksLabels, canparksMarkersRef, mapInstanceRef);
+  }, [canparksSpots, showCANParks, showCANParksLabels, bandPassesMapFilter]);
 
   // Plugin layer system - properly load saved states
   useEffect(() => {
@@ -2447,6 +2454,7 @@ export const WorldMap = ({
             wwffSpots={wwffSpots}
             sotaSpots={sotaSpots}
             wwbotaSpots={wwbotaSpots}
+            canparksSpots={canparksSpots}
             dxPaths={dxPaths}
             dxFilters={dxFilters}
             mapBandFilter={mapBandFilter}
@@ -2457,6 +2465,7 @@ export const WorldMap = ({
             showWWFF={showWWFF}
             showSOTA={showSOTA}
             showWWBOTA={showWWBOTA}
+            showCANParks={showCANParks}
             showPSKReporter={showPSKReporter}
             showPSKPaths={showPSKPaths}
             showMutualReception={showMutualReception}
@@ -2513,6 +2522,7 @@ export const WorldMap = ({
               wwffSpots={wwffSpots}
               sotaSpots={sotaSpots}
               wwbotaSpots={wwbotaSpots}
+              canparksSpots={canparksSpots}
               dxPaths={globeDxPaths}
               mapBandFilter={mapBandFilter}
               pskReporterSpots={pskReporterSpots}
@@ -2522,6 +2532,7 @@ export const WorldMap = ({
               showWWFF={showWWFF}
               showSOTA={showSOTA}
               showWWBOTA={showWWBOTA}
+              showCANParks={showCANParks}
               showPSKReporter={showPSKReporter}
               showWSJTX={showWSJTX}
               onSpotClick={onSpotClick}
@@ -2530,9 +2541,11 @@ export const WorldMap = ({
               satellites={satellites}
               satellitesEnabled={pluginLayerStates.satellites?.enabled ?? true}
               suppressedLayers={suppressed2DLayers.map((l) => t(l.name))}
+              overlayLayerStates={globeOverlayStates}
               allUnits={allUnits}
               config={config}
               hideUi={mapUiHidden}
+              onToggleHideUi={toggleMapUiHidden}
               tileStyle={mapStyle}
               lowMemoryMode={lowMemoryMode}
               nightDarkness={nightDarkness}
@@ -2559,7 +2572,9 @@ export const WorldMap = ({
           specific Leaflet map — without this, layers stay on the hidden old map. */}
       {/* Plugin layers attach to a Leaflet map instance, so they cannot render on
           the 3D globe — skip them entirely rather than binding to a hidden map.
-          The note below keeps that visible instead of silent. */}
+          The globe draws its own subset (satellites natively; Maidenhead, zones,
+          D-RAP and aurora via its overlay shell — see utils/globeOverlays.js);
+          everything else shows up in the suppressed-layers note instead. */}
       {!isGlobe3D &&
         getAllLayers().map((layerDef) => {
           // Merge location config into satellite layer to keep config access consistent
@@ -2615,7 +2630,7 @@ export const WorldMap = ({
           }}
         >
           <button
-            onClick={() => setMapUiHidden((prev) => !prev)}
+            onClick={toggleMapUiHidden}
             title={mapUiHidden ? t('app.mapUi.show') : t('app.mapUi.hide')}
             style={{
               width: '42px',
@@ -2628,9 +2643,16 @@ export const WorldMap = ({
               fontFamily: 'var(--font-mono)',
               cursor: 'pointer',
               lineHeight: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
-            {mapUiHidden ? '👁' : '🙈'}
+            {mapUiHidden ? (
+              <LiEye size={22} style={{ flexShrink: 0 }} />
+            ) : (
+              <LiEyeOff size={22} style={{ flexShrink: 0 }} />
+            )}
           </button>
 
           {!mapUiHidden && (
@@ -2659,10 +2681,16 @@ export const WorldMap = ({
                   fontFamily: 'var(--font-mono)',
                   cursor: 'pointer',
                   lineHeight: 1,
-                  textAlign: 'center',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
               >
-                {mapLocked ? '🔒' : '🔓'}
+                {mapLocked ? (
+                  <LiLock size={22} style={{ flexShrink: 0 }} />
+                ) : (
+                  <LiUnlock size={22} style={{ flexShrink: 0 }} />
+                )}
               </button>
 
               {onToggleDXLabels && showDXPaths && Array.isArray(dxPaths) && dxPaths.length > 0 && (
@@ -2700,11 +2728,13 @@ export const WorldMap = ({
                   fontFamily: 'var(--font-mono)',
                   cursor: mapLocked ? 'not-allowed' : 'pointer',
                   opacity: mapLocked ? 0.45 : 1,
-                  textAlign: 'center',
-                  padding: '0 8px',
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
               >
-                +
+                <LiPlus size={22} style={{ flexShrink: 0 }} />
               </button>
 
               <button
@@ -2721,11 +2751,13 @@ export const WorldMap = ({
                   fontFamily: 'var(--font-mono)',
                   cursor: mapLocked ? 'not-allowed' : 'pointer',
                   opacity: mapLocked ? 0.45 : 1,
-                  textAlign: 'center',
-                  padding: '0 8px',
+                  padding: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                 }}
               >
-                −
+                <LiMinus size={22} style={{ flexShrink: 0 }} />
               </button>
 
               <div
@@ -2930,24 +2962,7 @@ export const WorldMap = ({
               cursor: 'pointer',
             }}
           >
-            <svg
-              aria-hidden="true"
-              width="17"
-              height="17"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.25"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="4" y1="6" x2="20" y2="6" />
-              <circle cx="9" cy="6" r="2" />
-              <line x1="4" y1="12" x2="20" y2="12" />
-              <circle cx="15" cy="12" r="2" />
-              <line x1="4" y1="18" x2="20" y2="18" />
-              <circle cx="11" cy="18" r="2" />
-            </svg>
+            <LiRotate size={18} style={{ flexShrink: 0 }} />
           </button>
           {showMapRotationMenu && (
             <div
@@ -3101,6 +3116,9 @@ export const WorldMap = ({
                     <span>
                       {styleId === mapStyle ? '★ ' : ''}
                       {MAP_STYLES[styleId]?.name || styleId}
+                      {/* Same predicate the rotation timer uses to skip
+                          globe-incompatible styles (empty url ⇒ MODIS). */}
+                      {isGlobe3D && !MAP_STYLES[styleId]?.url ? ' (2D only)' : ''}
                     </span>
                   </label>
                 ))}

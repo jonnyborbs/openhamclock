@@ -14,6 +14,7 @@ import {
   WWFFPanel,
   SOTAPanel,
   WWBOTAPanel,
+  CANParksPanel,
   ContestPanel,
   SolarPanel,
   PropagationPanel,
@@ -24,6 +25,7 @@ import {
   PSKReporterPanel,
   PSKReporterBandActivityPanel,
   APRSPanel,
+  APRSTelemetryPanel,
   MapDataListView,
   MeshComPanel,
   WeatherPanel,
@@ -32,15 +34,50 @@ import {
   RigControlPanel,
   OnAirPanel,
   IDTimerPanel,
+  ImagePanel,
   KeybindingsPanel,
   DXLocalTime,
   DigitalModesPanel,
   WinlinkPanel,
+  WorldClockPanel,
+  StopwatchPanel,
+  SunMoonPanel,
+  SatellitePassesPanel,
+  RBNMySignalPanel,
+  SpaceWxTrendsPanel,
+  WSPRMySpotsPanel,
+  AMSATStatusPanel,
+  RepeatersPanel,
+  POTAActivatorPanel,
+  AircraftNearbyPanel,
   IBPPanel,
+  SWPCAlertsPanel,
+  MeteorShowerPanel,
+  FrequencyMemoriesPanel,
+  NetSchedulePanel,
+  CallsignSearchPanel,
+  DXNewsPanel,
+  SolarCyclePanel,
+  LogStatsPanel,
+  SkedPlannerPanel,
+  IonosondePanel,
+  PropVerifyPanel,
 } from './components';
 import MeshtasticPanel from './components/MeshtasticPanel.jsx';
+import LogbookPanel from './components/LogbookPanel.jsx';
+import AwardsPanel from './components/AwardsPanel.jsx';
 
-import { resetLayout, loadLayout, saveLayout } from './store/layoutStore.js';
+import {
+  getActiveLayout,
+  getActivePresetId,
+  resetActiveLayout,
+  saveLayoutForPreset,
+  createPreset,
+  PRESETS_CHANGED_EVENT,
+} from './store/layoutStore.js';
+import { getPanelPluginById } from './plugins/panelRegistry.js';
+import { buildPanelDefs } from './panelDefs.js';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { DockableLayoutProvider } from './contexts';
 import { useRig } from './contexts/RigContext.jsx';
 import { calculateBearing, calculateDistance, formatDistance } from './utils/geo.js';
@@ -49,6 +86,9 @@ import { DXGridInput } from './components/DXGridInput.jsx';
 import { DXCallsignInput } from './components/DXCallsignInput.jsx';
 import { DXFavorites } from './components/DXFavorites.jsx';
 import DXCCSelect from './components/DXCCSelect.jsx';
+import HelpLink from './components/HelpLink.jsx';
+import { PanelIcon } from './components/Icons.jsx';
+import { panelHelpTopic } from './utils/helpTopics.js';
 import './styles/flexlayout-openhamclock.css';
 import useMapLayers from './hooks/app/useMapLayers';
 import { useMapTextData } from './hooks/useMapTextData.js';
@@ -102,9 +142,12 @@ export const DockableApp = ({
   filteredSotaSpots,
   wwbotaSpots,
   filteredWwbotaSpots,
+  canparksSpots,
+  filteredCanparksSpots,
   mySpots,
   dxpeditions,
   contests,
+  swpcAlerts,
   satellites,
   filteredSatellites,
   pskReporter,
@@ -131,6 +174,8 @@ export const DockableApp = ({
   setShowWwffFilters,
   wwbotaFilters,
   setShowWwbotaFilters,
+  canparksFilters,
+  setShowCanparksFilters,
 
   // Map layers
   mapLayers,
@@ -144,6 +189,8 @@ export const DockableApp = ({
   toggleSOTALabels,
   toggleWWBOTA,
   toggleWWBOTALabels,
+  toggleCANParks,
+  toggleCANParksLabels,
   toggleSatellites,
   togglePSKReporter,
   togglePSKPaths,
@@ -178,10 +225,15 @@ export const DockableApp = ({
   onToggleLayoutLock,
 }) => {
   const layoutRef = useRef(null);
-  const [model, setModel] = useState(() => Model.fromJson(loadLayout()));
+  const [model, setModel] = useState(() => Model.fromJson(getActiveLayout()));
   const [showPanelPicker, setShowPanelPicker] = useState(false);
   const [targetTabSetId, setTargetTabSetId] = useState(null);
   const saveTimeoutRef = useRef(null);
+  // Which named layout preset the current model belongs to — pending debounced
+  // saves are flushed to THIS id before a switch loads another preset's model.
+  const activePresetIdRef = useRef(getActivePresetId());
+  const modelRef = useRef(model);
+  modelRef.current = model;
 
   // Layout lock — controlled by parent (sidebar), fall back to local state if no prop
   const [localLayoutLocked, setLocalLayoutLocked] = useState(() => {
@@ -205,7 +257,11 @@ export const DockableApp = ({
     });
   const handleResetLayout = useCallback(() => {
     if (confirm('Reset panel layout to default? This will undo any customizations.')) {
-      const defaultLayout = resetLayout();
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      const defaultLayout = resetActiveLayout();
       setModel(Model.fromJson(defaultLayout));
     }
   }, []);
@@ -297,6 +353,8 @@ export const DockableApp = ({
   const toggleSOTALabelsEff = useInternalMapLayers ? internalMap.toggleSOTALabels : toggleSOTALabels;
   const toggleWWBOTAEff = useInternalMapLayers ? internalMap.toggleWWBOTA : toggleWWBOTA;
   const toggleWWBOTALabelsEff = useInternalMapLayers ? internalMap.toggleWWBOTALabels : toggleWWBOTALabels;
+  const toggleCANParksEff = useInternalMapLayers ? internalMap.toggleCANParks : toggleCANParks;
+  const toggleCANParksLabelsEff = useInternalMapLayers ? internalMap.toggleCANParksLabels : toggleCANParksLabels;
   const toggleSatellitesEff = useInternalMapLayers ? internalMap.toggleSatellites : toggleSatellites;
   const togglePSKReporterEff = useInternalMapLayers ? internalMap.togglePSKReporter : togglePSKReporter;
   const togglePSKPathsEff = useInternalMapLayers ? internalMap.togglePSKPaths : togglePSKPaths;
@@ -401,12 +459,14 @@ export const DockableApp = ({
     [layoutLocked],
   );
 
-  // Handle model changes with debounced save
+  // Handle model changes with debounced save (into the active preset — the
+  // Default preset persists under the legacy openhamclock_dockLayout key)
   const handleModelChange = useCallback((newModel) => {
     setModel(newModel);
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    const presetId = activePresetIdRef.current;
     saveTimeoutRef.current = setTimeout(() => {
-      saveLayout(newModel.toJson());
+      saveLayoutForPreset(presetId, newModel.toJson());
     }, 500);
   }, []);
 
@@ -416,57 +476,48 @@ export const DockableApp = ({
     };
   }, []);
 
-  // Panel definitions
-  const panelDefs = useMemo(() => {
-    // Only show Ambient Weather when credentials are configured
-    const hasAmbient = (() => {
-      try {
-        return !!(import.meta.env?.VITE_AMBIENT_API_KEY && import.meta.env?.VITE_AMBIENT_APPLICATION_KEY);
-      } catch {
-        return false;
-      }
-    })();
+  // Flush any pending debounced save into the preset the model belongs to.
+  const flushPendingSave = useCallback(() => {
+    if (!saveTimeoutRef.current) return;
+    clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = null;
+    try {
+      saveLayoutForPreset(activePresetIdRef.current, modelRef.current.toJson());
+    } catch {}
+  }, []);
 
-    return {
-      'world-map': { name: 'World Map', icon: '🗺️' },
-      'map-list-view': { name: 'Map Data (text view)', icon: '👁️‍🗨️' },
-      'de-location': { name: 'DE Location', icon: '📍' },
-      'dx-location': { name: 'DX Target', icon: '🎯' },
-      'analog-clock': { name: 'Analog Clock', icon: '🕐' },
-      solar: { name: 'Solar (all views)', icon: '☀️' },
-      'solar-image': { name: 'Solar Image', icon: '☀️', group: 'Solar' },
-      'solar-indices': { name: 'Solar Indices', icon: '📊', group: 'Solar' },
-      'solar-xray': { name: 'X-Ray Flux', icon: '⚡', group: 'Solar' },
-      lunar: { name: 'Lunar Phase', icon: '🌙', group: 'Solar' },
-      propagation: { name: 'Propagation (all views)', icon: '📡' },
-      'propagation-chart': { name: 'VOACAP Chart', icon: '📈', group: 'Propagation' },
-      'propagation-bars': { name: 'VOACAP Bars', icon: '📊', group: 'Propagation' },
-      'band-conditions': { name: 'Band Conditions', icon: '📶', group: 'Propagation' },
-      'band-health': { name: 'Band Health', icon: '📶' },
-      'band-activity': { name: 'Band Activity (Continent)', icon: '🔥' },
-      'psk-bands': { name: 'Band Activity (PSKR)', icon: '📡' },
-      ibp: { name: 'IBP Beacons', icon: '📡', group: 'Propagation' },
-      'dx-cluster': { name: 'DX Cluster', icon: '📻' },
-      'psk-reporter': { name: 'PSK Reporter', icon: '📡' },
-      dxpeditions: { name: 'DXpeditions', icon: '🏝️' },
-      pota: { name: 'POTA', icon: '▲', iconColor: '#44cc44' },
-      wwff: { name: 'WWFF', icon: '▼', iconColor: '#a3f3a3' },
-      sota: { name: 'SOTA', icon: '◆', iconColor: '#ff9632' },
-      wwbota: { name: 'WWBOTA', icon: '■', iconColor: '#8b7fff' },
-      aprs: { name: 'APRS', icon: '📍' },
-      ...(isLocalInstall ? { rotator: { name: 'Rotator', icon: '🧭' } } : {}),
-      contests: { name: 'Contests', icon: '🏆' },
-      ...(hasAmbient ? { ambient: { name: 'Ambient Weather', icon: '🌦️' } } : {}),
-      'rig-control': { name: 'Rig Control', icon: '📻' },
-      'on-air': { name: 'On Air', icon: '🔴' },
-      'id-timer': { name: 'ID Timer', icon: '📢' },
-      keybindings: { name: 'Keyboard Shortcuts', icon: '⌨️' },
-      meshtastic: { name: 'Meshtastic', icon: '📡' },
-      meshcom: { name: 'MeshCom', icon: '🔗' },
-      'digital-modes': { name: 'Digital Modes', icon: '📻', group: 'Rig Bridge' },
-      winlink: { name: 'Winlink', icon: '📬', group: 'Rig Bridge' },
+  // Named layout presets — react to activation changes made anywhere (sidebar
+  // preset control, command palette, scene rotation): flush edits into the
+  // preset we're leaving, then load the newly active preset's model.
+  useEffect(() => {
+    const onPresetsChanged = () => {
+      const activeId = getActivePresetId();
+      if (activeId === activePresetIdRef.current) return;
+      flushPendingSave();
+      activePresetIdRef.current = activeId;
+      setModel(Model.fromJson(getActiveLayout()));
     };
-  }, [isLocalInstall]);
+    // "Duplicate current…" — needs the live (possibly unsaved) model, which
+    // only this component has, so the preset control dispatches an event.
+    const onDuplicate = (e) => {
+      const name = e.detail?.name;
+      if (!name) return;
+      flushPendingSave();
+      const preset = createPreset(name, modelRef.current.toJson());
+      // createPreset activates the copy; its model is identical to the live
+      // one, so just adopt the new id without reloading the model.
+      if (preset) activePresetIdRef.current = preset.id;
+    };
+    window.addEventListener(PRESETS_CHANGED_EVENT, onPresetsChanged);
+    window.addEventListener('openhamclock:dock-preset-duplicate', onDuplicate);
+    return () => {
+      window.removeEventListener(PRESETS_CHANGED_EVENT, onPresetsChanged);
+      window.removeEventListener('openhamclock:dock-preset-duplicate', onDuplicate);
+    };
+  }, [flushPendingSave]);
+
+  // Panel definitions (shared with the command palette — see src/panelDefs.js)
+  const panelDefs = useMemo(() => buildPanelDefs({ isLocalInstall }), [isLocalInstall]);
 
   // Add panel
   const handleAddPanel = useCallback(
@@ -485,6 +536,59 @@ export const DockableApp = ({
     },
     [model, targetTabSetId, panelDefs],
   );
+
+  // Command palette → open a panel. The palette lives at app level with no
+  // access to the flexlayout model, so it dispatches this event. If the panel
+  // is already docked we focus its tab; otherwise it is added to the active
+  // tabset (or the first one found). Adding respects the layout lock; focusing
+  // an existing tab is always allowed (it doesn't alter the layout).
+  useEffect(() => {
+    const onAddPanel = (e) => {
+      const panelId = e.detail?.panelId;
+      if (!panelId || !panelDefs[panelId]) return;
+
+      let existingTabId = null;
+      const findTab = (n) => {
+        if (existingTabId) return;
+        if (n.getType?.() === 'tab' && n.getComponent?.() === panelId) {
+          existingTabId = n.getId();
+          return;
+        }
+        (n.getChildren?.() || []).forEach(findTab);
+      };
+      findTab(model.getRoot());
+      if (existingTabId) {
+        model.doAction(Actions.selectTab(existingTabId));
+        return;
+      }
+
+      if (layoutLocked) return;
+      let tabset = model.getActiveTabset?.() || null;
+      if (!tabset) {
+        const findTabset = (n) => {
+          if (tabset) return;
+          if (n.getType?.() === 'tabset') {
+            tabset = n;
+            return;
+          }
+          (n.getChildren?.() || []).forEach(findTabset);
+        };
+        findTabset(model.getRoot());
+      }
+      if (!tabset) return;
+      model.doAction(
+        Actions.addNode(
+          { type: 'tab', name: panelDefs[panelId].name, component: panelId, id: `${panelId}-${Date.now()}` },
+          tabset.getId(),
+          DockLocation.CENTER,
+          -1,
+          true,
+        ),
+      );
+    };
+    window.addEventListener('openhamclock:add-panel', onAddPanel);
+    return () => window.removeEventListener('openhamclock:add-panel', onAddPanel);
+  }, [model, panelDefs, layoutLocked]);
 
   // Render DE Location panel content
   const renderDELocation = (nodeId) => (
@@ -720,6 +824,7 @@ export const DockableApp = ({
         wwffSpots={filteredWwffSpots ? filteredWwffSpots : wwffSpots.data}
         sotaSpots={filteredSotaSpots ? filteredSotaSpots : sotaSpots.data}
         wwbotaSpots={filteredWwbotaSpots ? filteredWwbotaSpots : wwbotaSpots.data}
+        canparksSpots={filteredCanparksSpots ? filteredCanparksSpots : canparksSpots.data}
         mySpots={mySpots.data}
         dxPaths={dxClusterData.paths}
         dxFilters={dxFilters}
@@ -740,6 +845,8 @@ export const DockableApp = ({
         showSOTALabels={mapLayersEff.showSOTALabels}
         showWWBOTA={mapLayersEff.showWWBOTA}
         showWWBOTALabels={mapLayersEff.showWWBOTALabels}
+        showCANParks={mapLayersEff.showCANParks}
+        showCANParksLabels={mapLayersEff.showCANParksLabels}
         showSatellites={mapLayersEff.showSatellites}
         onToggleSatellites={toggleSatellitesEff}
         showPSKReporter={mapLayersEff.showPSKReporter}
@@ -791,6 +898,7 @@ export const DockableApp = ({
               sotaSpots={filteredSotaSpots || sotaSpots?.data}
               wwffSpots={filteredWwffSpots || wwffSpots?.data}
               wwbotaSpots={filteredWwbotaSpots || wwbotaSpots?.data}
+              canparksSpots={filteredCanparksSpots || canparksSpots?.data}
               lightning={mapTextData.lightning}
               aircraft={mapTextData.aircraft}
               aurora={mapTextData.aurora}
@@ -949,8 +1057,18 @@ export const DockableApp = ({
               showOnMap={mapLayersEff.showDXPaths}
               onToggleMap={toggleDXPathsEff}
               userCallsign={config.callsign}
+              deLat={config.location?.lat}
+              deLon={config.location?.lon}
             />
           );
+          break;
+
+        case 'logbook':
+          content = <LogbookPanel userCallsign={config.callsign} myGrid={deGrid} />;
+          break;
+
+        case 'awards':
+          content = <AwardsPanel />;
           break;
 
         case 'psk-reporter':
@@ -1068,6 +1186,26 @@ export const DockableApp = ({
           );
           break;
 
+        case 'canparks':
+          content = (
+            <CANParksPanel
+              data={canparksSpots.data}
+              loading={canparksSpots.loading}
+              lastUpdated={canparksSpots.lastUpdated}
+              lastChecked={canparksSpots.lastChecked}
+              showOnMap={mapLayersEff.showCANParks}
+              onToggleMap={toggleCANParksEff}
+              onHoverSpot={setHoveredSpot}
+              showLabelsOnMap={mapLayersEff.showCANParksLabels}
+              onToggleLabelsOnMap={toggleCANParksLabelsEff}
+              onSpotClick={handleSpotClick}
+              filters={canparksFilters}
+              onOpenFilters={() => setShowCanparksFilters(true)}
+              filteredData={filteredCanparksSpots}
+            />
+          );
+          break;
+
         case 'aprs':
           content = (
             <APRSPanel
@@ -1081,8 +1219,64 @@ export const DockableApp = ({
           );
           break;
 
+        case 'aprs-telemetry':
+          content = <APRSTelemetryPanel />;
+          break;
+
         case 'contests':
           content = <ContestPanel data={contests.data} loading={contests.loading} />;
+          break;
+
+        case 'swpc-alerts':
+          content = <SWPCAlertsPanel data={swpcAlerts?.data} loading={swpcAlerts?.loading} error={swpcAlerts?.error} />;
+          break;
+
+        case 'meteor-showers':
+          content = <MeteorShowerPanel deLat={config.location?.lat ?? null} deLon={config.location?.lon ?? null} />;
+          break;
+
+        case 'world-clocks':
+          content = <WorldClockPanel />;
+          break;
+
+        case 'stopwatch':
+          content = <StopwatchPanel />;
+          break;
+
+        case 'sun-moon':
+          content = <SunMoonPanel deLocation={config.location} dxLocation={dxLocation} />;
+          break;
+
+        case 'sat-passes':
+          content = <SatellitePassesPanel satellites={satellites} config={config} />;
+          break;
+
+        case 'rbn-mine':
+          content = <RBNMySignalPanel config={config} />;
+          break;
+
+        case 'swpc-trends':
+          content = <SpaceWxTrendsPanel />;
+          break;
+
+        case 'wspr-mine':
+          content = <WSPRMySpotsPanel config={config} />;
+          break;
+
+        case 'amsat-status':
+          content = <AMSATStatusPanel />;
+          break;
+
+        case 'repeaters':
+          content = <RepeatersPanel config={config} />;
+          break;
+
+        case 'pota-activator':
+          content = <POTAActivatorPanel config={config} />;
+          break;
+
+        case 'aircraft-nearby':
+          content = <AircraftNearbyPanel config={config} />;
           break;
 
         case 'rotator':
@@ -1105,12 +1299,81 @@ export const DockableApp = ({
           content = <RigControlPanel />;
           break;
 
+        case 'freq-memories':
+          content = <FrequencyMemoriesPanel />;
+          break;
+
+        case 'net-schedule':
+          content = <NetSchedulePanel />;
+          break;
+
+        case 'callsign-search':
+          content = (
+            <CallsignSearchPanel
+              deLocation={config.location}
+              units={config.allUnits?.dist}
+              onSetDX={handleDXChange}
+              dxLocked={dxLocked}
+            />
+          );
+          break;
+
+        case 'dx-news':
+          content = <DXNewsPanel />;
+          break;
+
+        case 'solar-cycle':
+          content = <SolarCyclePanel solarIndices={solarIndices} />;
+          break;
+
+        case 'log-stats':
+          content = <LogStatsPanel deLocation={config.location} units={config.allUnits?.dist} />;
+          break;
+
+        case 'sked-planner':
+          content = (
+            <SkedPlannerPanel
+              propagation={propagation.data}
+              loading={propagation.loading}
+              deLocation={config.location}
+              dxLocation={dxLocation}
+              dxCallsign={dxCallsign}
+              propConfig={config.propagation}
+              timeZone={config.timezone}
+              dxTimezone={dxTimezone}
+              dxSolarFallback={dxSolarFallback}
+              allUnits={config.allUnits}
+            />
+          );
+          break;
+
+        case 'ionosonde':
+          content = <IonosondePanel deLocation={config.location} units={config.allUnits?.dist} />;
+          break;
+
+        case 'prop-verify':
+          content = (
+            <PropVerifyPanel
+              deLocation={config.location}
+              deCallsign={config.callsign}
+              dxSpots={dxClusterData.spots}
+              pskReporter={pskReporter}
+              solarIndices={solarIndices}
+              propConfig={config.propagation}
+            />
+          );
+          break;
+
         case 'on-air':
           content = <OnAirPanel />;
           break;
 
         case 'id-timer':
           content = <IDTimerPanel callsign={config.callsign} />;
+          break;
+
+        case 'image':
+          content = <ImagePanel />;
           break;
 
         case 'keybindings':
@@ -1150,13 +1413,28 @@ export const DockableApp = ({
           );
           break;
 
-        default:
-          content = (
-            <div style={{ padding: '20px', color: '#ff6b6b', textAlign: 'center' }}>
-              <div style={{ fontSize: '14px', marginBottom: '8px' }}>Outdated panel: {component}</div>
-              <div style={{ fontSize: '12px', color: '#888' }}>Click "Reset" button below to update layout</div>
-            </div>
-          );
+        default: {
+          // Auto-discovered panel plugins (src/plugins/local/panels/*.jsx).
+          // v1 props contract: { config, t } only — see docs/PLUGINS.md.
+          const plugin = getPanelPluginById(component);
+          if (plugin) {
+            const PluginPanel = plugin.Panel;
+            content = (
+              <div className="panel" style={{ height: '100%', overflow: 'auto' }}>
+                <ErrorBoundary>
+                  <PluginPanel config={config} t={t} />
+                </ErrorBoundary>
+              </div>
+            );
+          } else {
+            content = (
+              <div style={{ padding: '20px', color: '#ff6b6b', textAlign: 'center' }}>
+                <div style={{ fontSize: '14px', marginBottom: '8px' }}>Outdated panel: {component}</div>
+                <div style={{ fontSize: '12px', color: '#888' }}>Click "Reset" button below to update layout</div>
+              </div>
+            );
+          }
+        }
       }
 
       // Apply per-panel zoom
@@ -1196,6 +1474,7 @@ export const DockableApp = ({
       wsjtxMapSpots,
       dxpeditions,
       contests,
+      swpcAlerts,
       pskFilters,
       wsjtx,
       handleDXChange,
@@ -1217,6 +1496,7 @@ export const DockableApp = ({
       handleToggleDxLock,
       panelZoom,
       keybindingsList,
+      t,
     ],
   );
 
@@ -1226,6 +1506,19 @@ export const DockableApp = ({
       // Get the active tab's component name for zoom controls
       const selectedNode = node.getSelectedNode?.();
       const selectedComponent = selectedNode?.getComponent?.();
+
+      // Per-tab help — deep-links to the manual section for the selected panel
+      if (selectedComponent) {
+        renderValues.stickyButtons.push(
+          <HelpLink
+            key="help"
+            topic={panelHelpTopic(selectedComponent)}
+            label={selectedNode?.getName?.() || selectedComponent}
+            className="flexlayout__tab_toolbar_button"
+            style={{ fontSize: '11px', padding: '0 3px' }}
+          />,
+        );
+      }
 
       // Skip zoom controls for world-map
       if (selectedComponent && selectedComponent !== 'world-map') {
@@ -1459,13 +1752,22 @@ export const DockableApp = ({
               borderRadius: '12px',
               padding: '20px',
               minWidth: '350px',
+              width: 'min(960px, 94vw)',
+              maxHeight: '85vh',
+              overflowY: 'auto',
             }}
             onClick={(e) => e.stopPropagation()}
           >
             <h3 style={{ margin: '0 0 16px', color: '#00ffcc', fontFamily: 'var(--font-mono)', fontSize: '14px' }}>
               Add Panel
             </h3>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                gap: '8px',
+              }}
+            >
               {(() => {
                 const panels = getAvailablePanels();
                 const ungrouped = panels.filter((p) => !p.group);
@@ -1497,9 +1799,13 @@ export const DockableApp = ({
                           e.currentTarget.style.borderColor = '#2d3748';
                         }}
                       >
-                        <span style={{ fontSize: '16px', marginRight: '8px', color: p.iconColor || 'inherit' }}>
-                          {p.icon}
-                        </span>
+                        <PanelIcon
+                          panelId={p.id}
+                          icon={p.icon}
+                          iconColor={p.iconColor}
+                          size={20}
+                          style={{ marginRight: '8px' }}
+                        />
                         <span style={{ color: '#e2e8f0', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
                           {p.name}
                         </span>
@@ -1518,7 +1824,7 @@ export const DockableApp = ({
                             paddingTop: '8px',
                           }}
                         >
-                          {group} Sub-panels
+                          {group === 'Plugins' ? 'Plugins' : `${group} Sub-panels`}
                         </div>
                         {items.map((p) => (
                           <button
@@ -1539,9 +1845,13 @@ export const DockableApp = ({
                               e.currentTarget.style.borderColor = '#2d3748';
                             }}
                           >
-                            <span style={{ fontSize: '14px', marginRight: '6px', color: p.iconColor || 'inherit' }}>
-                              {p.icon}
-                            </span>
+                            <PanelIcon
+                              panelId={p.id}
+                              icon={p.icon}
+                              iconColor={p.iconColor}
+                              size={20}
+                              style={{ marginRight: '6px' }}
+                            />
                             <span style={{ color: '#cbd5e0', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
                               {p.name}
                             </span>

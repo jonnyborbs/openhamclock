@@ -18,13 +18,17 @@
 const Parser = require('rss-parser');
 const { extractCallsign, SOURCE_URLS } = require('../../utils/dxNewsMerge.js');
 
-const parser = new Parser({
-  timeout: 10_000,
-  headers: { 'User-Agent': 'OpenHamClock/3.13.1 (amateur radio dashboard)' },
-});
+const parser = new Parser();
 
-// The live feed URL redirects to https://www.dx-world.net/feed/ — follow redirect
-const DX_WORLD_FEED_URL = 'https://dx-world.net/feed/';
+// Fetch www directly (the apex 301s here). Cloudflare tarpits bare product
+// User-Agents on this host — rss-parser's parseURL would hang until timeout —
+// so we fetch ourselves with a Mozilla-compatible UA and hand the XML to
+// parseString.
+const DX_WORLD_FEED_URL = 'https://www.dx-world.net/feed/';
+const DX_WORLD_FETCH_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (compatible; OpenHamClock/26.6; +https://openhamclock.com)',
+  Accept: 'application/rss+xml, application/xml;q=0.9, */*;q=0.8',
+};
 
 /**
  * Parse an rss-parser feed object into normalized merged-feed items.
@@ -69,8 +73,34 @@ function parseDxWorldFeed(feed) {
  * @param {object} [ctx] — server context object (unused for DX-World, included for API symmetry)
  * @returns {Promise<{ items: Array<object> }>}
  */
+async function fetchFeedXml(url, headers) {
+  const res = await fetch(url, {
+    headers,
+    redirect: 'follow',
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) throw new Error(`DX-World feed HTTP ${res.status}`);
+  return res.text();
+}
+
 async function fetchDxWorld(ctx) {
-  const feed = await parser.parseURL(DX_WORLD_FEED_URL);
+  // DX-World's Cloudflare blocks datacenter egress IPs (Railway) outright, so
+  // hosted deployments set DXWORLD_PROXY_URL to the dx-relay Cloudflare Worker
+  // (see dx-relay/). Direct fetch remains the default and the fallback.
+  const proxyUrl = process.env.DXWORLD_PROXY_URL;
+  let xml;
+  if (proxyUrl) {
+    try {
+      const headers = {};
+      if (process.env.DXWORLD_PROXY_KEY) headers['x-relay-key'] = process.env.DXWORLD_PROXY_KEY;
+      xml = await fetchFeedXml(proxyUrl, headers);
+    } catch (err) {
+      xml = await fetchFeedXml(DX_WORLD_FEED_URL, DX_WORLD_FETCH_HEADERS);
+    }
+  } else {
+    xml = await fetchFeedXml(DX_WORLD_FEED_URL, DX_WORLD_FETCH_HEADERS);
+  }
+  const feed = await parser.parseString(xml);
   return { items: parseDxWorldFeed(feed) };
 }
 

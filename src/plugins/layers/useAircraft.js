@@ -8,6 +8,7 @@
  */
 import { useState, useEffect, useRef } from 'react';
 import { esc } from '../../utils/escapeHtml.js';
+import { deadReckonPosition, destinationPoint, getGreatCirclePoints } from '../../utils/geo.js';
 
 export const metadata = {
   id: 'aircraft',
@@ -17,7 +18,10 @@ export const metadata = {
   category: 'transport',
   defaultEnabled: false,
   defaultOpacity: 0.9,
-  version: '1.0.0',
+  version: '1.1.0',
+  config: {
+    leadTimeMins: 0, // predicted-track vector length; 0 disables (off by default)
+  },
 };
 
 // Max markers to render per refresh. Server returns the global aircraft list
@@ -28,6 +32,25 @@ const MAX_VIEWPORT_MARKERS_LOW = 80;
 const POLL_MS = 30_000; // server caches for 60 s; 30 s polls keep us cache-warm
 const POLL_MS_LOW = 60_000;
 
+// Track-prediction (lead time) vectors only draw at this zoom or closer.
+// The layer has no persistent hover/selection concept (markers are rebuilt on
+// every 30-60 s poll, interaction is click-to-popup only), so gating on zoom
+// is the model this layer supports: continent-level views stay clean, and at
+// regional zooms the viewport naturally bounds how many vectors are in play.
+const PREDICTION_MIN_ZOOM = 6;
+// Ignore taxiing / hovering targets — a dead-reckoned vector for them is noise.
+const PREDICTION_MIN_SPEED_KN = 30;
+
+/**
+ * Unwrap `lon` to the world copy nearest `refLon` (which may itself be an
+ * unwrapped longitude beyond ±180 from getGreatCirclePoints).
+ */
+function unwrapNear(lon, refLon) {
+  while (lon - refLon > 180) lon -= 360;
+  while (lon - refLon < -180) lon += 360;
+  return lon;
+}
+
 function planeSvg(heading, color) {
   // Heading 0 = north; SVG plane points up natively, so rotation is direct.
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16"
@@ -36,7 +59,7 @@ function planeSvg(heading, color) {
   </svg>`;
 }
 
-export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemoryMode = false }) {
+export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemoryMode = false, config = null }) {
   const [aircraft, setAircraft] = useState([]);
   const markersRef = useRef([]);
   const [viewportTick, setViewportTick] = useState(0);
@@ -104,6 +127,13 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemory
 
     if (!enabled || !aircraft.length) return;
 
+    const leadTimeMins = Number(config?.leadTimeMins ?? metadata.config.leadTimeMins) || 0;
+    let zoom = 0;
+    try {
+      zoom = map.getZoom();
+    } catch {}
+    const drawPredictions = leadTimeMins > 0 && zoom >= PREDICTION_MIN_ZOOM;
+
     // Viewport filter
     let bounds = null;
     try {
@@ -159,6 +189,53 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemory
       marker.bindPopup(popup);
       marker.addTo(map);
       newMarkers.push(marker);
+
+      // Track-prediction (lead time) vector: great-circle dead reckoning from
+      // the current position along the reported course at the reported ground
+      // speed. Thin dashed line in the marker's color, with a small
+      // perpendicular tick at the predicted endpoint.
+      if (
+        drawPredictions &&
+        !a.onGround &&
+        Number.isFinite(a.heading) &&
+        Number.isFinite(a.speed_kn) &&
+        a.speed_kn >= PREDICTION_MIN_SPEED_KN
+      ) {
+        const end = deadReckonPosition(a.lat, a.lon, a.heading, a.speed_kn, leadTimeMins);
+        // getGreatCirclePoints unwraps longitudes, so the path stays continuous
+        // across the antimeridian instead of streaking across the map.
+        const path = getGreatCirclePoints(a.lat, a.lon, end.lat, end.lon, 16);
+        const line = L.polyline(path, {
+          color,
+          weight: 1,
+          opacity: opacity * 0.65,
+          dashArray: '4, 6',
+          interactive: false,
+        }).addTo(map);
+        newMarkers.push(line);
+
+        // Endpoint tick: short segment perpendicular to the course, sized
+        // relative to the vector so it stays proportionate at any zoom.
+        const [endLat, endLonUnwrapped] = path[path.length - 1];
+        const distKm = a.speed_kn * 1.852 * (leadTimeMins / 60);
+        const tickKm = Math.max(1.5, distKm * 0.04);
+        const left = destinationPoint(end.lat, end.lon, a.heading - 90, tickKm);
+        const right = destinationPoint(end.lat, end.lon, a.heading + 90, tickKm);
+        const tick = L.polyline(
+          [
+            [left.lat, unwrapNear(left.lon, endLonUnwrapped)],
+            [endLat, endLonUnwrapped],
+            [right.lat, unwrapNear(right.lon, endLonUnwrapped)],
+          ],
+          {
+            color,
+            weight: 2,
+            opacity: opacity * 0.65,
+            interactive: false,
+          },
+        ).addTo(map);
+        newMarkers.push(tick);
+      }
     }
 
     markersRef.current = newMarkers;
@@ -169,7 +246,7 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null, lowMemory
         } catch {}
       });
     };
-  }, [enabled, aircraft, map, opacity, maxMarkers, viewportTick]);
+  }, [enabled, aircraft, map, opacity, maxMarkers, viewportTick, config?.leadTimeMins]);
 
   return {
     aircraftCount: aircraft.length,

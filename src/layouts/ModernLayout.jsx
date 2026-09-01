@@ -84,6 +84,8 @@ export default function ModernLayout(props) {
     filteredSotaSpots,
     wwbotaSpots,
     filteredWwbotaSpots,
+    canparksSpots,
+    filteredCanparksSpots,
     mySpots,
     dxpeditions,
     contests,
@@ -106,6 +108,8 @@ export default function ModernLayout(props) {
     setShowWwffFilters,
     wwbotaFilters,
     setShowWwbotaFilters,
+    canparksFilters,
+    setShowCanparksFilters,
     mapLayers,
     toggleDXPaths,
     toggleDXLabels,
@@ -117,6 +121,8 @@ export default function ModernLayout(props) {
     toggleSOTALabels,
     toggleWWBOTA,
     toggleWWBOTALabels,
+    toggleCANParks,
+    toggleCANParksLabels,
     toggleSatellites,
     togglePSKReporter,
     togglePSKPaths,
@@ -162,6 +168,7 @@ export default function ModernLayout(props) {
         wwffSpots={filteredWwffSpots ? filteredWwffSpots : wwffSpots.data}
         sotaSpots={filteredSotaSpots ? filteredSotaSpots : sotaSpots.data}
         wwbotaSpots={filteredWwbotaSpots ? filteredWwbotaSpots : wwbotaSpots.data}
+        canparksSpots={filteredCanparksSpots ? filteredCanparksSpots : canparksSpots.data}
         mySpots={mySpots.data}
         dxPaths={dxClusterData.paths}
         dxFilters={dxFilters}
@@ -180,6 +187,9 @@ export default function ModernLayout(props) {
         showSOTA={mapLayers.showSOTA}
         showSOTALabels={mapLayers.showSOTALabels}
         showWWBOTA={mapLayers.showWWBOTA}
+        showWWBOTALabels={mapLayers.showWWBOTALabels}
+        showCANParks={mapLayers.showCANParks}
+        showCANParksLabels={mapLayers.showCANParksLabels}
         showSatellites={mapLayers.showSatellites}
         showPSKReporter={mapLayers.showPSKReporter}
         showPSKPaths={mapLayers.showPSKPaths}
@@ -399,6 +409,8 @@ export default function ModernLayout(props) {
       showOnMap={mapLayers.showDXPaths}
       onToggleMap={toggleDXPaths}
       userCallsign={config.callsign}
+      deLat={config.location?.lat}
+      deLon={config.location?.lon}
     />
   );
 
@@ -487,6 +499,19 @@ export default function ModernLayout(props) {
       wwbotaFilters={wwbotaFilters}
       setShowWwbotaFilters={setShowWwbotaFilters}
       filteredWwbotaSpots={filteredWwbotaSpots}
+      canparksData={canparksSpots.data}
+      canparksLoading={canparksSpots.loading}
+      canparksLastUpdated={canparksSpots.lastUpdated}
+      canparksLastChecked={canparksSpots.lastChecked}
+      showCANParks={mapLayers.showCANParks}
+      onToggleCANParks={toggleCANParks}
+      showCANParksLabels={mapLayers.showCANParksLabels}
+      toggleCANParksLabels={toggleCANParksLabels}
+      onCANParksSpotClick={handleParkSpotClick}
+      onCANParksHoverSpot={setHoveredSpot}
+      canparksFilters={canparksFilters}
+      setShowCanparksFilters={setShowCanparksFilters}
+      filteredCanparksSpots={filteredCanparksSpots}
     />
   );
 

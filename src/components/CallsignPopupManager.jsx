@@ -16,16 +16,20 @@ import { POPUP_HEIGHT_ESTIMATE } from '../hooks/app/usePopupPosition.js';
 
 const CallsignPopupContext = createContext(null);
 
-export function CallsignPopupProvider({ children }) {
-  const [popupState, setPopupState] = useState({ open: false, call: null, anchorEl: null, location: null });
+// deLocation — optional { lat, lon } of the user's DE location, forwarded to
+// the popup so it can warm the nearby web-SDR receiver directory.
+export function CallsignPopupProvider({ children, deLocation }) {
+  const [popupState, setPopupState] = useState({ open: false, call: null, anchorEl: null, location: null, spot: null });
   const popupHeightRef = useRef(POPUP_HEIGHT_ESTIMATE); // initial estimate, updated by popup after render
 
-  const showPopup = useCallback((call, anchorEl, location) => {
-    setPopupState({ open: true, call, anchorEl, location });
+  // spot — optional { freq, mode } (freq in kHz) from surfaces that have spot
+  // context in hand; enables the popup's 🎧 listen action.
+  const showPopup = useCallback((call, anchorEl, location, spot) => {
+    setPopupState({ open: true, call, anchorEl, location, spot: spot ?? null });
   }, []);
 
   const hidePopup = useCallback(() => {
-    setPopupState({ open: false, call: null, anchorEl: null, location: null });
+    setPopupState({ open: false, call: null, anchorEl: null, location: null, spot: null });
   }, []);
 
   return (
@@ -37,6 +41,8 @@ export function CallsignPopupProvider({ children }) {
             anchorRef={popupState.anchorEl}
             call={popupState.call}
             location={popupState.location}
+            spot={popupState.spot}
+            deLocation={deLocation}
             onClose={hidePopup}
             popupHeightRef={popupHeightRef}
           />

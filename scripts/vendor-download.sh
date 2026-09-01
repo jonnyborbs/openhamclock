@@ -32,7 +32,10 @@ done
 # ── Google Fonts (woff2) ────────────────────────────────────
 # We fetch the CSS with a Chrome user-agent to get woff2 format
 UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0"
-FONT_URL="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Fira+Code:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@300;400;500;600;700&display=swap"
+# Press Start 2P: the 8-Bit theme's pixel font; Antonio: the Trek theme's
+# LCARS-style condensed face. Both OFL. Themes fall back to system fonts
+# when the vendor bundle hasn't been refreshed.
+FONT_URL="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Fira+Code:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@300;400;500;600;700&family=Press+Start+2P&family=Antonio:wght@400;500;600;700&display=swap"
 
 echo "  → Google Fonts CSS..."
 curl -sL -A "$UA" "$FONT_URL" -o /tmp/gfonts-raw.css

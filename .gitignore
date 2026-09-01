@@ -126,6 +126,8 @@ status.sh
 # Local/custom plugins (survive updates — see src/plugins/local/README.md)
 src/plugins/local/*.js
 src/plugins/local/*.jsx
+src/plugins/local/panels/*.js
+src/plugins/local/panels/*.jsx
 
 # Self-hosted vendor assets (downloaded by scripts/vendor-download.sh)
 public/vendor/

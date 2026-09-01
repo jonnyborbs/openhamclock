@@ -5,7 +5,7 @@
 
 const dgram = require('dgram');
 const net = require('net');
-const { maidenheadToLatLon, normalizeFrequencyToMHz } = require('../utils/grid.js');
+const { maidenheadToLatLon, normalizeFrequencyToMHz, getBandFromHz } = require('../utils/grid.js');
 const { areDXPathsDuplicate, collapseDuplicateDXPaths } = require('../utils/dxClusterPathIdentity');
 const { isPrivateIP, validateCustomHost } = require('../utils/ssrf');
 const clusterStatus = require('../utils/clusterStatus');
@@ -25,10 +25,9 @@ module.exports = function (app, ctx) {
     extractGridFromComment,
     extractGridsFromComment,
     getCountryFromPrefix,
-    cacheCallsignLookup,
     callsignLookupCache,
     callsignLocationCache,
-    hamqthLookup,
+    lookupCallsignLocation,
   } = ctx;
 
   // DX Cluster proxy - fetches from selectable sources
@@ -993,7 +992,7 @@ module.exports = function (app, ctx) {
         {
           id: 'ohc',
           name: 'OpenHamClock Cluster',
-          description: 'Our own cluster node — the only source on the hosted site',
+          description: 'Our own cluster node — RBN, HamQTH, POTA, SOTA, WWFF, Parks n Peaks, DX Summit + user spots',
         },
       ]);
     }
@@ -1011,7 +1010,8 @@ module.exports = function (app, ctx) {
             {
               id: 'ohc',
               name: 'OpenHamClock Cluster ⭐',
-              description: 'Our own cluster node — RBN skimmers, human spots, and OHC user spots',
+              description:
+                'Our own cluster node — RBN, HamQTH, POTA, SOTA, WWFF, Parks n Peaks, DX Summit + user spots',
             },
           ]
         : []),
@@ -1951,15 +1951,9 @@ module.exports = function (app, ctx) {
           const call = rawCall.replace(/[<>]/g, '').trim();
           if (!call || !/^[A-Z0-9\/\-]{1,20}$/.test(call)) continue;
 
-          // Fire-and-forget — results land in callsignLookupCache for next poll
-          // TODO: Refactor lookup chain into callsign.js. Currently we duplicate the full
-          // flow (cache check → HamQTH DXCC → prefix estimation) here instead of using
-          // the shared hamqthLookup() + extractBaseCallsign() chain from callsign.js.
-          hamqthLookup(call).then((result) => {
-            if (result) {
-              cacheCallsignLookup(call, { data: result, timestamp: Date.now() });
-            }
-          });
+          // Fire-and-forget — results land in callsignLookupCache for next poll.
+          // dxccOnly: bulk spot traffic must not burn QRZ/HamQTH XML quota.
+          lookupCallsignLocation(call, { dxccOnly: true });
         }
       }
 
@@ -2186,6 +2180,90 @@ module.exports = function (app, ctx) {
     }
   });
 
+  // Spot history for one callsign — how often it was heard, on which bands.
+  // A read-only view over the in-memory DX-paths accumulator (the same cache
+  // band-openings reads via ctx.dxSpotPathsCacheByKey): no new storage, no
+  // upstream fetch. The 24 h window is an upper bound — the accumulator's own
+  // retention (~1 h, 2 h for DXpeditions) decides how much history exists.
+  // Used by CallsignPopup's "Heard 14x today: 20m(8) ..." line.
+  app.get('/api/dxcluster/spot-history/:callsign', (req, res) => {
+    const raw = String(req.params.callsign || '')
+      .trim()
+      .toUpperCase();
+    if (!/^[A-Z0-9/-]{3,20}$/.test(raw)) {
+      return res.status(400).json({ error: 'Invalid callsign' });
+    }
+    res.set('Cache-Control', 'no-store');
+    res.json(summarizeSpotHistory(dxSpotPathsCacheByKey, raw));
+  });
+
   // Return shared state
   return { customDxSessions, dxSpotPathsCacheByKey, dxUdpSessions };
 };
+
+// ── Spot history summary (pure — hoisted into the factory above; exported
+//    on the module for tests, same pattern as routes/ionosonde.js) ──────────
+
+const SPOT_HISTORY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Summarize how often a callsign appears in the DX-paths accumulator.
+ *
+ * @param {Map} pathsCacheByKey Map<cacheKey, { allPaths: [...] }> — entries
+ *   carry { dxCall, spotter, freq (MHz-ish), timestamp, id? }.
+ * @param {string} callsign Uppercased callsign to look for. Matches the full
+ *   spotted call or any '/'-segment of it, so "OZ6ABL" hits "5Z4/OZ6ABL" and
+ *   "OZ6ABL/P" without a full base-call parser.
+ * @param {number} [now]
+ * @returns {{ call, windowHours, count, bands: Array<{band, count}>,
+ *            firstHeard: string|null, lastHeard: string|null }}
+ */
+function summarizeSpotHistory(pathsCacheByKey, callsign, now = Date.now()) {
+  const target = String(callsign || '')
+    .trim()
+    .toUpperCase();
+  const empty = { call: target, windowHours: 24, count: 0, bands: [], firstHeard: null, lastHeard: null };
+  if (!target || !(pathsCacheByKey instanceof Map)) return empty;
+
+  const cutoff = now - SPOT_HISTORY_WINDOW_MS;
+  const seen = new Set(); // the same spot can sit in several filter-keyed caches
+  const bandCounts = {};
+  let count = 0;
+  let first = Infinity;
+  let last = -Infinity;
+
+  for (const cache of pathsCacheByKey.values()) {
+    const paths = cache?.allPaths || cache?.paths;
+    if (!Array.isArray(paths)) continue;
+    for (const p of paths) {
+      const dxCall = String(p?.dxCall || '').toUpperCase();
+      if (!dxCall) continue;
+      if (dxCall !== target && !dxCall.split('/').includes(target)) continue;
+      const ts = Number(p.timestamp);
+      if (!Number.isFinite(ts) || ts < cutoff || ts > now + 60_000) continue;
+      const key = p.id || `${dxCall}|${p.spotter || ''}|${p.freq || ''}|${ts}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      count++;
+      if (ts < first) first = ts;
+      if (ts > last) last = ts;
+      const freqMHz = normalizeFrequencyToMHz(p.freq);
+      const band = freqMHz != null ? getBandFromHz(freqMHz * 1e6) : 'Unknown';
+      if (band && band !== 'Unknown') bandCounts[band] = (bandCounts[band] || 0) + 1;
+    }
+  }
+
+  if (count === 0) return empty;
+  return {
+    call: target,
+    windowHours: 24,
+    count,
+    bands: Object.entries(bandCounts)
+      .map(([band, n]) => ({ band, count: n }))
+      .sort((a, b) => b.count - a.count || a.band.localeCompare(b.band)),
+    firstHeard: new Date(first).toISOString(),
+    lastHeard: new Date(last).toISOString(),
+  };
+}
+
+module.exports.summarizeSpotHistory = summarizeSpotHistory;

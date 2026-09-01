@@ -1,6 +1,12 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { readFileSync } from 'fs';
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+// Stamped once per build — versions the service worker registration URL so
+// every deploy rolls out a fresh worker (and fresh ohc-* caches).
+const buildStamp = Date.now().toString(36);
 
 export default defineConfig({
   plugins: [react()],
@@ -29,6 +35,9 @@ export default defineConfig({
   define: {
     // mqtt.js needs these for browser
     global: 'globalThis',
+    // Service worker versioning (see src/pwa/registerServiceWorker.js)
+    __OHC_VERSION__: JSON.stringify(pkg.version),
+    __OHC_BUILD_TS__: JSON.stringify(buildStamp),
   },
   optimizeDeps: {
     include: ['mqtt'],

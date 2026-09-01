@@ -65,13 +65,7 @@ For vulnerability reports, please use one of the **private channels** below. The
 
 - **Address**: <chris@cjhlighting.com>
 - **PGP Key**: Available at <https://github.com/accius.gpg> (or keybase.io/accius)
-- **Fingerprint**: `[Will be added - use PGP key for sensitive communications]`
 - **Use when**: GitHub reporting is unavailable or for highly sensitive disclosures
-
-#### Tertiary: Direct Message
-
-- **Platform**: Twitter/X DM to @[handle] (if urgent and other channels fail)
-- **Note**: Less secure; use only for initial contact, then switch to encrypted channel
 
 ### 4.2 What to Include in Your Report (ISO/IEC 29147 §7.4.3)
 

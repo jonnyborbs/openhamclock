@@ -17,7 +17,8 @@ npm-debug.log*
 *.patch
 dxspider-proxy/node_modules
 iturhfprop-service/node_modules
-docs/
+# docs/ must stay in the build context: the in-app Help tab bundles
+# docs/MANUAL.md via a Vite ?raw import at build time.
 CONTRIBUTING.md
 CODE_OF_CONDUCT.md
 SECURITY.md

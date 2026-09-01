@@ -9,6 +9,7 @@
  */
 import { useEffect, useState, useRef } from 'react';
 import { esc } from '../../utils/escapeHtml.js';
+import { densifyGeoJson } from '../../utils/geo.js';
 
 export const metadata = {
   id: 'atc-sectors',
@@ -44,7 +45,9 @@ export function useLayer({ enabled = false, opacity = 0.45, map = null, deLat = 
       .then((r) => (r.ok ? r.json() : null))
       .then((body) => {
         if (!alive || !body || !Array.isArray(body.sectors)) return;
-        setSectors(body.sectors);
+        // Densify long FIR boundary segments so they curve correctly on the
+        // azimuthal projection (done once at fetch; upstream data is sparse).
+        setSectors(body.sectors.map((s) => ({ ...s, geometry: densifyGeoJson(s.geometry, 2) })));
       })
       .catch(() => {
         /* swallow — layer just renders empty if fetch fails */

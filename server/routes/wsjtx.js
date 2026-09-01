@@ -24,8 +24,7 @@ module.exports = function (app, ctx) {
     extractBaseCallsign,
     estimateLocationFromPrefix,
     extractGridFromComment,
-    hamqthLookup,
-    cacheCallsignLookup,
+    lookupCallsignLocation,
     callsignLookupCache,
   } = ctx;
 
@@ -661,20 +660,13 @@ module.exports = function (app, ctx) {
               decode.lon = cached.data.lon;
               decode.gridSource = 'hamqth';
             } else if (targetCall.length >= 3 && !wsjtxHamqthInflight.has(targetCall) && wsjtxHamqthInflight.size < 5) {
-              // Background lookup for next cycle (fire-and-forget, max 5 concurrent)
+              // Background lookup for next cycle (fire-and-forget, max 5 concurrent).
+              // dxccOnly: decode traffic must not burn QRZ/HamQTH XML quota.
+              // Result lands in callsignLookupCache for the next decode.
               wsjtxHamqthInflight.add(targetCall);
-              // TODO: Refactor lookup chain into callsign.js. Currently we duplicate the full
-              // flow (cache check → HamQTH DXCC → prefix estimation) here instead of using
-              // the shared hamqthLookup() + extractBaseCallsign() chain from callsign.js.
-              hamqthLookup(targetCall)
-                .then((result) => {
-                  if (result) {
-                    cacheCallsignLookup(targetCall, { data: result, timestamp: Date.now() });
-                  }
-                })
-                .finally(() => {
-                  wsjtxHamqthInflight.delete(targetCall);
-                });
+              lookupCallsignLocation(targetCall, { dxccOnly: true }).finally(() => {
+                wsjtxHamqthInflight.delete(targetCall);
+              });
             }
           }
         }

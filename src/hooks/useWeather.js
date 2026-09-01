@@ -9,6 +9,31 @@
  * based on the global `allUnits` setting ({dist, temp, press} being 'imperial' or 'metric' for each).
  */
 import { useState, useEffect, useRef } from 'react';
+import { mapOwmToOpenMeteo } from '../utils/owmWeather.js';
+
+// Weather source selection (discussion #474). 'openmeteo' (default, no key
+// needed) or 'openweathermap' (requires the user's own OWM key). Both are
+// stored browser-local only, like the callbook credentials.
+export const WEATHER_SOURCE_KEY = 'ohc_weather_source';
+export const OWM_APIKEY_KEY = 'ohc_owm_apikey';
+export const WEATHER_SOURCE_CHANGE_EVENT = 'ohc-weather-source-change';
+
+export const getWeatherSource = () => {
+  try {
+    const s = localStorage.getItem(WEATHER_SOURCE_KEY);
+    return s === 'openweathermap' ? 'openweathermap' : 'openmeteo';
+  } catch {
+    return 'openmeteo';
+  }
+};
+
+const getOwmApiKey = () => {
+  try {
+    return localStorage.getItem(OWM_APIKEY_KEY) || import.meta.env.VITE_OPENWEATHER_API_KEY || '';
+  } catch {
+    return import.meta.env.VITE_OPENWEATHER_API_KEY || '';
+  }
+};
 
 // Weather code to description and icon mapping
 const WEATHER_CODES = {
@@ -214,6 +239,27 @@ async function fetchOpenMeteoDirect(lat, lon) {
   return data;
 }
 
+// Fetch weather from OpenWeatherMap (free 2.5 tier: current + 3h forecast)
+// and map it into the Open-Meteo shape the panels consume. Same direct-from-
+// browser model as Open-Meteo: the user's key, the user's IP.
+async function fetchOpenWeatherMapDirect(lat, lon, apiKey) {
+  const qs = `lat=${parseFloat(lat).toFixed(2)}&lon=${parseFloat(lon).toFixed(2)}&units=metric&appid=${apiKey}`;
+  const [curRes, fcRes] = await Promise.all([
+    fetch(`https://api.openweathermap.org/data/2.5/weather?${qs}`),
+    fetch(`https://api.openweathermap.org/data/2.5/forecast?${qs}`),
+  ]);
+  if (curRes.status === 429 || fcRes.status === 429) throw new Error('Rate limited');
+  if (curRes.status === 401) throw new Error('OpenWeatherMap key rejected');
+  if (!curRes.ok) throw new Error(`HTTP ${curRes.status}`);
+
+  const current = await curRes.json();
+  const forecast = fcRes.ok ? await fcRes.json() : null; // current alone still renders
+  const data = mapOwmToOpenMeteo(current, forecast);
+  if (!data) throw new Error('Unexpected OpenWeatherMap response');
+  data._source = 'openweathermap';
+  return data;
+}
+
 export const useWeather = (location, allUnits = { dist: 'imperial', temp: 'imperial', press: 'imperial' }) => {
   const [rawData, setRawData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -224,6 +270,14 @@ export const useWeather = (location, allUnits = { dist: 'imperial', temp: 'imper
   const consecutive429sRef = useRef(0);
   const firstFireRef = useRef(true);
 
+  // Re-fetch when the user flips the weather source in Settings.
+  const [sourceTick, setSourceTick] = useState(0);
+  useEffect(() => {
+    const onChange = () => setSourceTick((n) => n + 1);
+    window.addEventListener(WEATHER_SOURCE_CHANGE_EVENT, onChange);
+    return () => window.removeEventListener(WEATHER_SOURCE_CHANGE_EVENT, onChange);
+  }, []);
+
   useEffect(() => {
     if (location?.lat == null || location?.lon == null) return;
 
@@ -233,7 +287,9 @@ export const useWeather = (location, allUnits = { dist: 'imperial', temp: 'imper
         const lon = normalizeLon(location.lon);
 
         console.info(`[Weather] Fetching for ${lat.toFixed(4)}, ${lon.toFixed(4)}`);
-        const data = await fetchOpenMeteoDirect(lat, lon);
+        const owmKey = getWeatherSource() === 'openweathermap' ? getOwmApiKey() : '';
+        // OWM without a key silently falls through to the keyless default.
+        const data = owmKey ? await fetchOpenWeatherMapDirect(lat, lon, owmKey) : await fetchOpenMeteoDirect(lat, lon);
         console.info(
           `[Weather] Result: ${data?.current?.temperature_2m}°C (${Math.round((data?.current?.temperature_2m * 9) / 5 + 32)}°F) from ${data?._source || 'unknown'}`,
         );
@@ -280,7 +336,8 @@ export const useWeather = (location, allUnits = { dist: 'imperial', temp: 'imper
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (retryRef.current) clearTimeout(retryRef.current);
     };
-  }, [location?.lat, location?.lon]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location?.lat, location?.lon, sourceTick]);
 
   // Convert raw API data to display data based on current units
   const data = convertWeatherData(rawData, allUnits);

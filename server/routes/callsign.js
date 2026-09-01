@@ -950,6 +950,71 @@ module.exports = function (app, ctx) {
 
   // ── Unified Callsign Lookup: QRZ → HamQTH XML → HamQTH DXCC → Prefix ──
 
+  // Shared lookup chain — the single implementation behind /api/callsign/:call
+  // and the background enrichment in dxcluster.js / wsjtx.js.
+  //
+  // Full chain: user QRZ → user HamQTH XML → instance QRZ → instance HamQTH XML
+  // → HamQTH DXCC → prefix estimate. A successful result (including prefix-tier
+  // in full mode) is written to callsignLookupCache under callsign + cacheSuffix.
+  //
+  // Options:
+  //   userQrzSession / userHamqthSession — per-user callbook sessions (hosted
+  //     multi-user lookups on the unified route)
+  //   cacheSuffix — per-credential cache key suffix so authenticated results
+  //     never leak into the shared anonymous pool (#1130)
+  //   dxccOnly — restrict the chain to the free HamQTH DXCC tier. Used by bulk
+  //     background enrichment (DX cluster paths, WSJT-X decodes) so spot
+  //     traffic never burns configured QRZ/HamQTH XML quota, and skip the
+  //     prefix fallback — those callers compute prefix locations themselves
+  //     and must not pin a prefix-tier answer in the cache.
+  //
+  // Never rejects in dxccOnly mode (hamqthLookup swallows its own errors), so
+  // fire-and-forget calls are safe without a .catch().
+  async function lookupCallsignLocation(callsign, opts = {}) {
+    const { userQrzSession = null, userHamqthSession = null, cacheSuffix = '', dxccOnly = false } = opts;
+    let result = null;
+
+    if (!dxccOnly) {
+      // 1. User-supplied QRZ credentials (their own subscription, sent from the browser)
+      if (userQrzSession) {
+        result = await qrzLookup(callsign, userQrzSession);
+      }
+
+      // 2. User-supplied HamQTH credentials
+      if (!result && userHamqthSession) {
+        result = await hamqthXmlSearch(callsign, userHamqthSession);
+      }
+
+      // 3. Instance QRZ XML API (most accurate — user-supplied coords, geocoded, or grid-derived)
+      if (!result && isQRZConfigured()) {
+        result = await qrzLookup(callsign);
+      }
+
+      // 4. Instance HamQTH XML Search (if configured) — rich data with accurate coords
+      if (!result && isHamQTHConfigured()) {
+        result = await hamqthXmlSearch(callsign);
+      }
+    }
+
+    // 5. Fall back to HamQTH DXCC (no auth, but only country-level accuracy)
+    if (!result) {
+      result = await hamqthLookup(callsign);
+    }
+
+    // 6. Last resort: estimate from callsign prefix
+    if (!result && !dxccOnly) {
+      const estimated = estimateLocationFromPrefix(callsign);
+      if (estimated) {
+        result = { ...estimated, source: 'prefix' };
+      }
+    }
+
+    if (result) {
+      cacheCallsignLookup(callsign + cacheSuffix, { data: result, timestamp: Date.now() });
+    }
+    return result;
+  }
+
   app.get('/api/callsign/:call', async (req, res) => {
     // Strip angle brackets and other junk that can arrive from DX cluster data
     const rawCallsign = req.params.call.replace(/[<>]/g, '').toUpperCase().trim();
@@ -1014,46 +1079,12 @@ module.exports = function (app, ctx) {
     logDebug('[Callsign Lookup] Looking up:', callsign);
 
     try {
-      let result = null;
-
-      // 1. User-supplied QRZ credentials (their own subscription, sent from the browser)
-      if (userQrzSession) {
-        result = await qrzLookup(callsign, userQrzSession);
-      }
-
-      // 2. User-supplied HamQTH credentials
-      if (!result && userHamqthSession) {
-        result = await hamqthXmlSearch(callsign, userHamqthSession);
-      }
-
-      // 3. Instance QRZ XML API (most accurate — user-supplied coords, geocoded, or grid-derived)
-      if (!result && isQRZConfigured()) {
-        result = await qrzLookup(callsign);
-      }
-
-      // 4. Instance HamQTH XML Search (if configured) — rich data with accurate coords
-      if (!result && isHamQTHConfigured()) {
-        result = await hamqthXmlSearch(callsign);
-      }
-
-      // 5. Fall back to HamQTH DXCC (no auth, but only country-level accuracy)
-      if (!result) {
-        result = await hamqthLookup(callsign);
-      }
-
-      // 6. Last resort: estimate from callsign prefix
-      if (!result) {
-        const estimated = estimateLocationFromPrefix(callsign);
-        if (estimated) {
-          result = { ...estimated, source: 'prefix' };
-        }
-      }
+      const result = await lookupCallsignLocation(callsign, { userQrzSession, userHamqthSession, cacheSuffix });
 
       if (result) {
         logDebug(
           `[Callsign Lookup] ${callsign}: ${result.source} -> ${result.lat?.toFixed(2)}, ${result.lon?.toFixed(2)}`,
         );
-        cacheCallsignLookup(callsign + cacheSuffix, { data: result, timestamp: now });
         return res.json(result);
       }
 
@@ -2366,17 +2397,6 @@ module.exports = function (app, ctx) {
     return 'Unknown';
   }
 
-  // QRZ Callsign lookup redirect
-  app.get('/api/qrz/lookup/:callsign', async (req, res) => {
-    const callsign = req.params.callsign.toUpperCase().trim();
-    const cached = callsignLookupCache.get(callsign);
-    if (cached && Date.now() - cached.timestamp < CALLSIGN_CACHE_TTL) {
-      return res.json(cached.data);
-    }
-    // Redirect to unified endpoint
-    res.redirect(301, `/api/callsign/${callsign}`);
-  });
-
   // Location cache for DX cluster paths
   const callsignLocationCache = new Map();
 
@@ -2391,6 +2411,7 @@ module.exports = function (app, ctx) {
     cacheCallsignLookup,
     callsignLookupCache,
     callsignLocationCache,
+    lookupCallsignLocation,
     qrzLookup,
     qrzSession,
     QRZ_CREDS_FILE: path.join(ROOT_DIR, '.qrz-credentials'),

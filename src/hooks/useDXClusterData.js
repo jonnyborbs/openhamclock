@@ -193,6 +193,7 @@ export const useDXClusterData = (filters = {}, config = {}) => {
   return {
     spots, // For DXClusterPanel list
     paths, // For WorldMap
+    rawSpots: allData, // Pre-filter accumulator — watchlist alerts match against this
     loading,
     error,
     totalSpots: allData.length,
