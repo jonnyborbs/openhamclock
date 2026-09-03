@@ -666,6 +666,34 @@ export const densifyGeoJson = (geometry, maxSegDeg = 2) => {
 };
 
 /**
+ * Shift every longitude in a GeoJSON geometry by dLon degrees ([lon, lat]
+ * order). Used to replicate vector layers across Mercator world copies
+ * (#1171): L.geoJSON draws features only at their canonical longitudes, so a
+ * map centred near the antimeridian shows an empty wrapped copy without
+ * shifted duplicates. Same type coverage as densifyGeoJson; dLon of 0
+ * returns the geometry untouched.
+ */
+export const shiftGeoJsonLon = (geometry, dLon) => {
+  if (!dLon || !geometry || !geometry.coordinates) return geometry;
+  const pt = ([lon, lat, ...rest]) => [lon + dLon, lat, ...rest];
+  const line = (coords) => coords.map(pt);
+  switch (geometry.type) {
+    case 'Point':
+      return { ...geometry, coordinates: pt(geometry.coordinates) };
+    case 'MultiPoint':
+    case 'LineString':
+      return { ...geometry, coordinates: line(geometry.coordinates) };
+    case 'MultiLineString':
+    case 'Polygon':
+      return { ...geometry, coordinates: geometry.coordinates.map(line) };
+    case 'MultiPolygon':
+      return { ...geometry, coordinates: geometry.coordinates.map((poly) => poly.map(line)) };
+    default:
+      return geometry;
+  }
+};
+
+/**
  * Replicate a single [lat, lon] point across 3 world copies.
  * Returns an array of 3 [lat, lon] pairs for use with L.circleMarker etc.
  */
@@ -777,6 +805,7 @@ export default {
   getGreatCirclePoints,
   densifyPath,
   densifyGeoJson,
+  shiftGeoJsonLon,
   replicatePath,
   replicatePoint,
   normalizeLon,

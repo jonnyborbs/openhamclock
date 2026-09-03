@@ -390,7 +390,8 @@ setup_repository() {
     bash scripts/vendor-download.sh || echo -e "${YELLOW}⚠ Vendor download failed — will fall back to CDN${NC}"
 
     # Build frontend for production
-    npm run build
+    # (memory-aware wrapper — small boxes OOM on Node's default heap, #1167)
+    bash scripts/build-frontend.sh
 
     # Remove dev dependencies (electron, electron-builder, etc.) after the build.
     # This frees ~500 MB of node_modules that are not needed at runtime on the Pi.

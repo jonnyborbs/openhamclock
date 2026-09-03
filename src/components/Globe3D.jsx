@@ -244,6 +244,26 @@ function footprintRingPoints(lat, lon, angularRadius, r, segments = 72) {
   return pts;
 }
 
+/**
+ * Cone from a satellite down to its footprint ring — the volume it can hear.
+ *
+ * A triangle fan from the satellite to consecutive points of the ring, so the
+ * cone's base is exactly the footprint the ring already draws rather than an
+ * approximation of it. Open at both ends: there is no cap at the satellite (it
+ * is a point) and none on the ground, where the ring itself reads as the edge.
+ */
+function footprintConeGeometry(apex, ringPts) {
+  const positions = new Float32Array(ringPts.length * 9);
+  for (let i = 0; i < ringPts.length; i++) {
+    const a = ringPts[i];
+    const b = ringPts[(i + 1) % ringPts.length];
+    positions.set([apex.x, apex.y, apex.z, a.x, a.y, a.z, b.x, b.y, b.z], i * 9);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  return geo;
+}
+
 // Stars and the atmospheric limb only read against a dark backdrop; on the
 // Light and Retro themes they turn into grey noise around the globe.
 function backdropIsDark() {
@@ -372,6 +392,7 @@ export default function Globe3D({
   showWWBOTA,
   showCANParks,
   showPSKReporter,
+  showPSKPaths = true,
   showWSJTX,
   onSpotClick,
   callsign,
@@ -587,7 +608,9 @@ export default function Globe3D({
         out.push({
           lat,
           lon,
-          color: isRx ? GLOBE_COLORS.pskRx : GLOBE_COLORS.pskTx,
+          // Band colour to match the flat map's markers (#1169); the RX/TX
+          // colours remain the fallback for spots with no parsable frequency.
+          color: getBandColor(parseFloat(freqMHz)) || (isRx ? GLOBE_COLORS.pskRx : GLOBE_COLORS.pskTx),
           size: 7,
           kind: isRx ? 'PSK RX' : 'PSK TX',
           label: (isRx ? s.sender : s.receiver || s.sender) || 'PSK',
@@ -664,6 +687,27 @@ export default function Globe3D({
       });
     }
 
+    // PSK Reporter DE→spot paths (#1169): band-coloured like the flat map's
+    // polylines, TX brighter than RX, RX dashed (handled at vertex build).
+    if (showPSKReporter && showPSKPaths && pskReporterSpots?.length && Number.isFinite(lat0) && Number.isFinite(lon0)) {
+      pskReporterSpots.forEach((s) => {
+        const lat = parseFloat(s.lat);
+        const lon = parseFloat(s.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+        const freqMHz = s.freqMHz || (s.freq ? s.freq / 1e6 : null);
+        const band = normalizeBandKey(s.band) || bandFromAnyFrequency(freqMHz || s.freq);
+        if (!bandPassesMapFilter(band)) return;
+        const isRx = s.direction === 'rx';
+        out.push({
+          from: [lat0, lon0],
+          to: [lat, lon],
+          color: getBandColor(parseFloat(freqMHz)) || GLOBE_COLORS.bandFallback,
+          opacity: isRx ? 0.4 : 0.6,
+          dashed: isRx,
+        });
+      });
+    }
+
     // The DE→DX arc exists to connect the two station markers, so it hides
     // with them — unlike the cluster paths, which have their own toggle.
     if (showDeDxMarkers && Number.isFinite(dxLocation?.lat) && Number.isFinite(dxLocation?.lon)) {
@@ -677,7 +721,19 @@ export default function Globe3D({
 
     return out;
     // themeTick: the DE→DX arc colour is read from a CSS variable.
-  }, [dxPaths, showDXPaths, bandPassesMapFilter, dxLocation, lat0, lon0, themeTick, showDeDxMarkers]);
+  }, [
+    dxPaths,
+    showDXPaths,
+    bandPassesMapFilter,
+    dxLocation,
+    lat0,
+    lon0,
+    themeTick,
+    showDeDxMarkers,
+    pskReporterSpots,
+    showPSKReporter,
+    showPSKPaths,
+  ]);
 
   // ── Scene setup (once) ───────────────────────────────────
   useEffect(() => {
@@ -2083,6 +2139,9 @@ export default function Globe3D({
         const pts = greatCircleArc(a.from[0], a.from[1], a.to[0], a.to[1], 48);
         c.set(a.color);
         for (let i = 0; i < pts.length - 1; i++) {
+          // Dashed arcs (PSK RX paths, #1169) come free with LineSegments:
+          // skipping every other segment leaves 24 separate dashes.
+          if (a.dashed && i % 2) continue;
           verts.push(pts[i].x, pts[i].y, pts[i].z, pts[i + 1].x, pts[i + 1].y, pts[i + 1].z);
           cols.push(c.r, c.g, c.b, c.r, c.g, c.b);
         }
@@ -2402,12 +2461,35 @@ export default function Globe3D({
       // Footprint ring for selected satellites — green when workable from DE.
       if (isSelected && Number.isFinite(sat.footprintRadius) && sat.footprintRadius > 0) {
         const ringPts = footprintRingPoints(sat.lat, sat.lon, sat.footprintRadius / 6371, EARTH_R * 1.003);
+        const footprintColor = sat.isVisible ? accentGreen : accentCyan;
+
+        // Cone from the satellite to that ring, so the footprint reads as a
+        // volume rather than a circle that happens to sit near a dot.
+        //
+        // DoubleSide is deliberate: seeing the far wall through the near one is
+        // what gives it depth. depthWrite stays off so it never occludes the
+        // globe, the ground track or the satellite itself — the cone is a hint,
+        // not an object, and at low opacity a depth-writing mesh would punch a
+        // hole in whatever it covers.
+        s.satGroup.add(
+          new THREE.Mesh(
+            footprintConeGeometry(satPos, ringPts),
+            new THREE.MeshBasicMaterial({
+              color: footprintColor,
+              transparent: true,
+              opacity: 0.1,
+              side: THREE.DoubleSide,
+              depthWrite: false,
+            }),
+          ),
+        );
+
         const ringGeo = new THREE.BufferGeometry().setFromPoints(ringPts);
         s.satGroup.add(
           new THREE.LineLoop(
             ringGeo,
             new THREE.LineBasicMaterial({
-              color: sat.isVisible ? accentGreen : accentCyan,
+              color: footprintColor,
               transparent: true,
               opacity: 0.8,
               depthWrite: false,

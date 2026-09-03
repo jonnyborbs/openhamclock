@@ -56,9 +56,13 @@ const stats = {
   // reads these so "fletcher alive but every relay failing" no longer
   // reports green. 403/429/5xx and network errors count as errors; 404 is a
   // routine missing-satellite answer and counts as ok.
+  // consecutiveUpstreamFails lets the probe tell one transient blip (which
+  // used to page watchtower for a guaranteed 10 minutes) from an upstream
+  // that is actually failing repeatedly.
   lastUpstreamOkAt: null,
   lastUpstreamErrorAt: null,
   lastUpstreamStatus: null,
+  consecutiveUpstreamFails: 0,
 };
 
 const log = (level, msg) => {
@@ -109,8 +113,10 @@ async function relay(upstreamName, targetUrl, req, res) {
     stats.lastUpstreamStatus = result.status;
     if (result.status === 403 || result.status === 429 || result.status >= 500) {
       stats.lastUpstreamErrorAt = now();
+      stats.consecutiveUpstreamFails++;
     } else {
       stats.lastUpstreamOkAt = now();
+      stats.consecutiveUpstreamFails = 0;
     }
 
     if (result.status >= 200 && result.status < 300) {
@@ -127,6 +133,7 @@ async function relay(upstreamName, targetUrl, req, res) {
     stats.upstreamFails++;
     stats.lastUpstreamErrorAt = now();
     stats.lastUpstreamStatus = 0;
+    stats.consecutiveUpstreamFails++;
     log('WARN', `${upstreamName} fetch failed (${targetUrl}): ${err.message}`);
 
     if (cached) {

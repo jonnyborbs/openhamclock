@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { esc } from '../../utils/escapeHtml.js';
 import { ZONE_SOURCES } from '../../utils/globeOverlays.js';
-import { densifyGeoJson } from '../../utils/geo.js';
+import { densifyGeoJson, shiftGeoJsonLon } from '../../utils/geo.js';
 
 /**
  * CQ / ITU Zones Overlay Plugin
@@ -114,49 +114,60 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
     const renderer = L.canvas({ padding: 0.5 });
     const newLayers = [];
 
+    // Mercator wraps the world — draw each zone one world-copy either side
+    // as well (#1171: a map centred near the antimeridian, e.g. on VK,
+    // otherwise shows an empty half where L.geoJSON never repeats its
+    // vectors). The azimuthal projection is periodic in longitude, so one
+    // copy covers the whole disc — same rule as useWorkedGrids.
+    const isAzimuthal = map.options?.crs?.code === 'AzimuthalEquidistant';
+    const lonOffsets = isAzimuthal ? [0] : [-360, 0, 360];
+
     geojson.features.forEach((feature) => {
       const props = feature.properties || {};
       const zoneNumber = props.cq_zone_number ?? props.itu_zone_number;
       const zoneName = cleanZoneName(props.cq_zone_name ?? props.itu_zone_name);
       const labelLoc = props.cq_zone_name_loc ?? props.itu_zone_name_loc; // [lat, lon]
 
-      try {
-        const layer = L.geoJSON(feature.geometry, {
-          renderer,
-          style: {
-            color,
-            weight: 1.2,
-            opacity: opacity * 0.9,
-            fill: true,
-            fillColor: color,
-            fillOpacity: 0.02, // near-invisible fill so polygons stay clickable
-            interactive: true,
-          },
-        });
+      for (const dLon of lonOffsets) {
+        try {
+          const layer = L.geoJSON(shiftGeoJsonLon(feature.geometry, dLon), {
+            renderer,
+            style: {
+              color,
+              weight: 1.2,
+              opacity: opacity * 0.9,
+              fill: true,
+              fillColor: color,
+              fillOpacity: 0.02, // near-invisible fill so polygons stay clickable
+              interactive: true,
+            },
+          });
 
-        layer.bindPopup(`
-          <div style="font-family: var(--font-mono); font-size: 12px; min-width: 160px;">
-            <div style="font-weight: bold; color: var(--accent-cyan); margin-bottom: 4px;">
-              🌐 ${zoneType === 'cq' ? 'CQ' : 'ITU'} Zone ${esc(String(zoneNumber ?? '?'))}
+          layer.bindPopup(`
+            <div style="font-family: var(--font-mono); font-size: 12px; min-width: 160px;">
+              <div style="font-weight: bold; color: var(--accent-cyan); margin-bottom: 4px;">
+                🌐 ${zoneType === 'cq' ? 'CQ' : 'ITU'} Zone ${esc(String(zoneNumber ?? '?'))}
+              </div>
+              ${zoneName ? `<div style="font-size: 11px;">${esc(zoneName)}</div>` : ''}
             </div>
-            ${zoneName ? `<div style="font-size: 11px;">${esc(zoneName)}</div>` : ''}
-          </div>
-        `);
-        layer.addTo(map);
-        newLayers.push(layer);
-      } catch {
-        // Bad geometry → skip
+          `);
+          layer.addTo(map);
+          newLayers.push(layer);
+        } catch {
+          // Bad geometry → skip
+        }
       }
 
-      // Zone number label at the zone's label point
+      // Zone number label at the zone's label point, one per world copy
       if (zoneNumber != null && Array.isArray(labelLoc) && labelLoc.length === 2) {
-        try {
-          const label = L.marker([labelLoc[0], labelLoc[1]], {
-            interactive: false,
-            keyboard: false,
-            icon: L.divIcon({
-              className: 'zones-layer-label',
-              html: `<div style="
+        for (const dLon of lonOffsets) {
+          try {
+            const label = L.marker([labelLoc[0], labelLoc[1] + dLon], {
+              interactive: false,
+              keyboard: false,
+              icon: L.divIcon({
+                className: 'zones-layer-label',
+                html: `<div style="
                 font-family: var(--font-mono, monospace);
                 font-size: 13px;
                 font-weight: 700;
@@ -167,12 +178,13 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
                 pointer-events: none;
                 transform: translate(-50%, -50%);
               ">${esc(String(zoneNumber))}</div>`,
-              iconSize: [0, 0],
-            }),
-          });
-          label.addTo(map);
-          newLayers.push(label);
-        } catch {}
+                iconSize: [0, 0],
+              }),
+            });
+            label.addTo(map);
+            newLayers.push(label);
+          } catch {}
+        }
       }
     });
 

@@ -155,7 +155,7 @@ Set at least `CALLSIGN`, `LOCATOR`, and `HOST=0.0.0.0` in the Railway dashboard,
 ## Updating
 
 - **Hosted site:** nothing to do — a toast appears when a new version deploys.
-- **Git installs (Linux/macOS/Pi):** `./scripts/update.sh` from the install directory, then restart. Or set `AUTO_UPDATE_ENABLED=true` in `.env`.
+- **Git installs (Linux/macOS/Pi):** `./scripts/update.sh` from the install directory, then restart. Or set `AUTO_UPDATE_ENABLED=true` in `.env`. The frontend build step needs about **1 GB of memory** — on a small Pi or container, add a swap file first (the script prints the exact commands if the build runs out), or build elsewhere and copy `dist/` over.
 - **Windows:** `.\scripts\update.ps1` from the install directory.
 - **Docker:** `docker compose pull && docker compose up -d`.
 

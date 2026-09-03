@@ -207,8 +207,9 @@ setup_repository() {
     bash scripts/vendor-download.sh || echo -e "${YELLOW}⚠ Vendor download failed — will fall back to CDN${NC}"
 
     # Build frontend for production
+    # (memory-aware wrapper — small boxes OOM on Node's default heap, #1167)
     echo -e "${BLUE}>>> Building frontend...${NC}"
-    npm run build
+    bash scripts/build-frontend.sh
 
     # Remove dev dependencies (electron, electron-builder, playwright, etc.) after
     # the build. These are only needed for the Vite build step and waste disk space.

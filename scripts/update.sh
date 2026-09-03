@@ -241,7 +241,8 @@ echo "🔨 Building frontend..."
 # Remove old dist/ to prevent stale hashed JS chunks from being served
 # (browsers may cache old chunks, causing blank screens after update)
 rm -rf dist/
-npm run build
+# Memory-aware build wrapper — small boxes OOM'd on Node's default heap (#1167)
+bash scripts/build-frontend.sh
 
 # Remove dev dependencies after build to free disk space
 npm prune --omit=dev

@@ -3,7 +3,7 @@ import { validateGridLocator, latLonToMaidenhead, maidenheadToLatLon, maidenhead
 import { getSunPosition, getMoonPosition, getMoonPhase } from './geo.js';
 import { normalizeLon } from './geo.js';
 import { destinationPoint, deadReckonPosition, calculateDistance, calculateBearing } from './geo.js';
-import { densifyPath, densifyGeoJson } from './geo.js';
+import { densifyPath, densifyGeoJson, shiftGeoJsonLon } from './geo.js';
 
 // normalize to [−π, +π)
 const normalizeRadians = (r) => {
@@ -668,3 +668,61 @@ describe('densifyPath / densifyGeoJson (projection curvature densification)', ()
 function ceilSegs(span) {
   return Math.ceil(span / 2);
 }
+
+describe('shiftGeoJsonLon (world-copy replication, #1171)', () => {
+  it('shifts every longitude, leaves latitude alone', () => {
+    const poly = {
+      type: 'Polygon',
+      coordinates: [
+        [
+          [170, -30],
+          [179, -30],
+          [179, -40],
+          [170, -30],
+        ],
+      ],
+    };
+    const out = shiftGeoJsonLon(poly, 360);
+    expect(out.coordinates[0][0]).toEqual([530, -30]);
+    expect(out.coordinates[0][2]).toEqual([539, -40]);
+  });
+
+  it('handles MultiPolygon and LineString', () => {
+    const multi = {
+      type: 'MultiPolygon',
+      coordinates: [
+        [
+          [
+            [0, 0],
+            [1, 0],
+            [1, 1],
+            [0, 0],
+          ],
+        ],
+      ],
+    };
+    expect(shiftGeoJsonLon(multi, -360).coordinates[0][0][1]).toEqual([-359, 0]);
+    const line = {
+      type: 'LineString',
+      coordinates: [
+        [10, 20],
+        [30, 40],
+      ],
+    };
+    expect(shiftGeoJsonLon(line, 360).coordinates[1]).toEqual([390, 40]);
+  });
+
+  it('dLon 0, null geometry, and unknown types pass through untouched', () => {
+    const poly = { type: 'Polygon', coordinates: [[[0, 0]]] };
+    expect(shiftGeoJsonLon(poly, 0)).toBe(poly);
+    expect(shiftGeoJsonLon(null, 360)).toBe(null);
+    const weird = { type: 'GeometryCollection', geometries: [] };
+    expect(shiftGeoJsonLon(weird, 360)).toBe(weird);
+  });
+
+  it('does not mutate the source geometry', () => {
+    const line = { type: 'LineString', coordinates: [[10, 20]] };
+    shiftGeoJsonLon(line, 360);
+    expect(line.coordinates[0]).toEqual([10, 20]);
+  });
+});

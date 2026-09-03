@@ -29,6 +29,39 @@ const ANNOUNCEMENT = {
 
 const CHANGELOG = [
   {
+    version: '26.7.1',
+    date: '2026-09-02',
+    heading:
+      'Hotfix drop, two days after 26.7.0 — thank you to everyone who kicked the tires on release day and filed sharp reports. Four fixes straight from the issue tracker, plus one small treat for the 3D globe that was too good to sit on.',
+    features: [
+      {
+        icon: '🌐',
+        title: 'FIX: Zones No Longer Vanish Near the Antimeridian',
+        desc: 'CQ/ITU zone polygons only drew at their canonical longitudes, so a map centred on VK, ZL, or JA showed zones on half the screen and nothing on the other half — the empty half is a wrapped world copy where vector layers never repeat. Zones and their number labels now draw across three world copies, same as the worked-grids layer always has. Reported by VK3GA.',
+      },
+      {
+        icon: '📡',
+        title: 'FIX: PSK Reporter Paths on the 3D Globe',
+        desc: 'Live Spots drew its dashed band-coloured paths on the flat and azimuthal maps but not the globe, which showed bare RX/TX dots and nothing else — the paths setting never actually reached the globe renderer, and it had no PSK path drawing at all. The globe now draws DE-to-spot great-circle arcs in band colour, TX solid and RX dashed, and the spot dots take band colour to match the flat map (direction still shows in the hover tooltip).',
+      },
+      {
+        icon: '💾',
+        title: 'FIX: Self-Host Updates No Longer Run Out of Memory',
+        desc: 'The frontend build needs about 1 GB of heap, but Node sizes its default heap from system memory — on a small Pi or container the cap landed near 256 MB and update.sh died mid-build with a raw V8 crash. The setup and update scripts now request the heap they need, and if the machine genuinely has too little memory you get plain instructions (add a swap file, or build elsewhere and copy dist/ over) instead of a stack trace.',
+      },
+      {
+        icon: '🔔',
+        title: 'FIX: Hosted Health Stops Crying Wolf',
+        desc: 'The satellite relay health probe marked the hosted service degraded on a single transient upstream timeout and then flipped back ten minutes later, paging the uptime monitor twice for every routine blip. It now requires consecutive failures before declaring trouble — a real outage still trips immediately, a lone hiccup gets noted quietly in the health detail instead.',
+      },
+      {
+        icon: '🛰️',
+        title: 'NEW: Satellite Footprint Cones on the Globe',
+        desc: "Select a satellite on the 3D globe and its footprint is no longer just a ring on the ground — a translucent cone now connects the bird to the edge of what it can hear, green when it's workable from your QTH. The cone's base shares the exact points of the footprint ring, so the two can never drift apart. Another one from Koen ON9PK (@KoenVdH).",
+      },
+    ],
+  },
+  {
     version: '26.7.0',
     date: '2026-09-01',
     heading:

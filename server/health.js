@@ -12,9 +12,10 @@
  * the subsystem is intentionally disabled (e.g. FLETCHER_URL unset).
  */
 
+const { classifyFletcherRelays } = require('./utils/fletcherRelayHealth');
+
 const REFRESH_MS = 30 * 1000;
 const PROBE_TIMEOUT_MS = 5 * 1000;
-const FLETCHER_RELAY_ERROR_WINDOW_MS = 10 * 60 * 1000; // relay error newer than this (and newer than the last success) => degraded
 const RBN_STALE_AFTER_MS = 10 * 60 * 1000; // no spot in 10 min => degraded
 const SATELLITES_GRACE_MS = 60 * 60 * 1000; // 1h past OMM_CACHE_DURATION before degraded
 const SATELLITES_CACHE_DURATION_MS = 24 * 60 * 60 * 1000; // mirrors OMM_CACHE_DURATION
@@ -74,15 +75,12 @@ async function checkFletcher(ctx) {
   // lastUpstreamOkAt/lastUpstreamErrorAt so we can report relay trouble.
   const result = await probeJson(`${base}/stats`, 'fletcher');
   if (result.ok) {
-    const s = result.json || {};
-    const errAt = typeof s.lastUpstreamErrorAt === 'number' ? s.lastUpstreamErrorAt : 0;
-    const okAt = typeof s.lastUpstreamOkAt === 'number' ? s.lastUpstreamOkAt : 0;
-    if (errAt > okAt && Date.now() - errAt < FLETCHER_RELAY_ERROR_WINDOW_MS) {
-      const secs = Math.round((Date.now() - errAt) / 1000);
-      const status = s.lastUpstreamStatus === 0 ? 'no response' : `HTTP ${s.lastUpstreamStatus}`;
-      return { status: 'degraded', detail: `alive but relays failing (${status}, last error ${secs}s ago)` };
-    }
-    return { status: 'ok', detail: `${result.status} from ${base}/stats` };
+    // Verdict logic lives in utils/fletcherRelayHealth so it's testable:
+    // degraded needs ≥2 consecutive relay failures — a single transient
+    // blip used to page watchtower for a guaranteed 10 minutes.
+    const verdict = classifyFletcherRelays(result.json || {}, Date.now());
+    if (verdict.status === 'degraded') return verdict;
+    return { status: 'ok', detail: `${result.status} from ${base}/stats — ${verdict.detail}` };
   }
 
   // Older fletcher builds without the outcome fields still answer /health.
