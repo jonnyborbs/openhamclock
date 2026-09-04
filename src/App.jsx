@@ -65,6 +65,7 @@ import useAudioAlerts from './hooks/app/useAudioAlerts';
 import { useSatelliteAnnouncements } from './hooks/app/useSatelliteAnnouncements';
 import useSceneRotation from './hooks/app/useSceneRotation';
 import WhatsNew from './components/WhatsNew.jsx';
+import StarTrekDayModal from './components/StarTrekDayModal.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import { LogQsoPopupController } from './components/LogQsoPopup.jsx';
 import { initCtyLookup } from './utils/ctyLookup.js';
@@ -1031,6 +1032,8 @@ const App = () => {
         isLocalInstall={isLocalInstall}
       />
       <WhatsNew showWhatsNew={config.showWhatsNew} />
+      {/* Star Trek Day 2026 (Sept 7-9) — one-shot event notice, ?stday previews */}
+      <StarTrekDayModal />
       {/* Scene rotation indicator — unobtrusive dot while rotating, with the
           new layout's name flashed briefly on each switch. */}
       {sceneRotation.active && (

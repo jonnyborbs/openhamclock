@@ -29,6 +29,29 @@ const ANNOUNCEMENT = {
 
 const CHANGELOG = [
   {
+    version: '26.7.2',
+    date: '2026-09-03',
+    heading:
+      'Another quick hotfix — two EmComm mode bugs from the same sharp pair of eyes (thanks @mbrun-plm), both cases of the EmComm layout ignoring settings the Dockable layout respects.',
+    features: [
+      {
+        icon: '📻',
+        title: 'FIX: EmComm APRS Source Filter Now Filters the Map',
+        desc: 'The RF Only / Internet Only / All Sources select in the EmComm Stations panel filtered the station list but not the map — the map quietly received the unfiltered feed, so "RF Only" still plotted every internet station. The select now drives both, on top of any watchlist or group filter you have active.',
+      },
+      {
+        icon: '📍',
+        title: 'FIX: EmComm Respects the DE/DX Marker Toggle',
+        desc: 'The DE/DX map layer toggle worked everywhere except EmComm mode, where the layout hardcoded the markers on. It now tracks the same setting as every other layout.',
+      },
+      {
+        icon: '🖖',
+        title: 'FIX: Trek Theme Header Buttons Readable Again',
+        desc: 'Buttons and badges in panel headers kept the light colours they wear on dark panels, which vanished against the bright LCARS pill bars. Plain header text now goes black like a proper LCARS bar, and buttons, selects, and inputs sit in black wells — the cutouts real LCARS consoles have — so their own state colours stay visible.',
+      },
+    ],
+  },
+  {
     version: '26.7.1',
     date: '2026-09-02',
     heading:

@@ -1699,6 +1699,26 @@ pre,
   background: #cc99cc !important;
 }
 
+/* Header pill contents. Spans and badges pin light colours inline
+   (var(--text-muted), accent greens) that were designed for dark panels
+   and vanish against the bright pill — LCARS bars carry black text, so
+   force it on everything that isn't a form control. Controls instead get
+   a dark well behind them (the black cutouts real LCARS bars have), which
+   keeps their own light text and active-state colours readable and
+   working. .no-theme-header (contest quick-log strip) opts out of all of
+   this along with the pill itself. */
+[data-theme='trek']
+  .panel:not(.no-theme-header)
+  > div:first-child
+  *:not(button):not(select):not(input):not(button *):not(select *) {
+  color: #000 !important;
+}
+[data-theme='trek'] .panel:not(.no-theme-header) > div:first-child button,
+[data-theme='trek'] .panel:not(.no-theme-header) > div:first-child select,
+[data-theme='trek'] .panel:not(.no-theme-header) > div:first-child input {
+  background: rgba(0, 0, 0, 0.75) !important;
+}
+
 /* Pill buttons, LCARS-style */
 [data-theme='trek'] button {
   border-radius: 999px !important;

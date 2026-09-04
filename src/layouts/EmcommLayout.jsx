@@ -309,6 +309,18 @@ export default function EmcommLayout(props) {
   const { alerts = [], shelters = [], disasters = [], loading } = emcommData || {};
   const allAprsStations = aprsData?.stations || [];
 
+  // Stations for the MAP: the hook's filteredStations (watchlist/group rules
+  // applied) with this layout's own source select applied on top. The select
+  // previously filtered only the EmComm Stations panel list — the map got the
+  // unfiltered hook output, so "RF Only" still plotted internet stations
+  // (#1175).
+  const mapAprsStations = useMemo(() => {
+    const base = aprsData?.filteredStations || [];
+    if (aprsSource === 'rf') return base.filter((s) => s.source === 'local-tnc');
+    if (aprsSource === 'internet') return base.filter((s) => s.source !== 'local-tnc');
+    return base;
+  }, [aprsData?.filteredStations, aprsSource]);
+
   // Apply APRS source filter
   const aprsStations = useMemo(() => {
     if (aprsSource === 'rf') return allAprsStations.filter((s) => s.source === 'local-tnc');
@@ -863,7 +875,7 @@ export default function EmcommLayout(props) {
             onMapBandFilterChange={setMapBandFilter}
             satellites={[]}
             pskReporterSpots={[]}
-            showDeDxMarkers={true}
+            showDeDxMarkers={mapLayers?.showDeDxMarkers ?? true}
             showDXPaths={false}
             showDXLabels={false}
             onToggleDXLabels={toggleDXLabels}
@@ -878,7 +890,7 @@ export default function EmcommLayout(props) {
             showWSJTX={false}
             showDXNews={false}
             showAPRS={true}
-            aprsStations={aprsData?.filteredStations}
+            aprsStations={mapAprsStations}
             aprsWatchlistCalls={aprsData?.allWatchlistCalls}
             hoveredSpot={hoveredSpot}
             hideOverlays={true}
