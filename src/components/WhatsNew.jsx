@@ -8,11 +8,11 @@ import { useState, useEffect } from 'react';
 // ─── Announcement Banner ────────────────────────────────────
 // Set to null to hide. Shown at the top of the What's New modal.
 const ANNOUNCEMENT = {
-  emoji: '🎁',
-  text: "Surprise! Two major releases within a week. We shipped the 3D globe, looked at the calendar, and apparently decided sleep is a suggestion — because here's 26.7.0 with a native logbook, group logging for Field Day, a full Contest Mode, offline support, and a time machine for the map. Nobody planned this. It just... happened. Consider it the September drop and its encore playing on the same night. Tips of the hat this cycle: Anthony (@AntDiClementi), chris_debian for the WCAG contrast audit this release implements, Alan Hargreaves (@alanhargreaves), Michael R Wheeley (@MichaelWheeley), and Jörg (DO1HOZ) for the countries-globe report. 73 from K0CJH — see you at the next first Tuesday, probably.",
-  color: '#ffd700',
-  bg: 'rgba(255, 215, 0, 0.10)',
-  border: 'rgba(255, 215, 0, 0.30)',
+  emoji: '🌙',
+  text: "26.8.0 is the September drop proper, three weeks after the encore. The globe learned to bounce signals off the Moon, and band-opening alerts finally know which coast you're on. Tips of the hat this cycle: mbrun-plm for three sharp EmComm reports that all shipped within the week, and Mike Bass (N7WLC), whose PR review turned into the zone-scoped band openings below. 73 de K0CJH.",
+  color: '#c9d1e6',
+  bg: 'rgba(201, 209, 230, 0.10)',
+  border: 'rgba(201, 209, 230, 0.30)',
 };
 
 // ─── Changelog ──────────────────────────────────────────────
@@ -28,6 +28,64 @@ const ANNOUNCEMENT = {
 // The jump to v26 resets the scheme to something meaningful going forward.
 
 const CHANGELOG = [
+  {
+    version: '26.8.0',
+    date: '2026-09-24',
+    heading:
+      "The September drop proper, three weeks after the encore. The 3D globe learned to bounce signals off the Moon: a new EME layout plans mutual windows, draws the DE→Moon→DX path, and shows live moonbounce activity from PSK Reporter — with a satellite-relay mode on the same chassis. Band-opening alerts finally know which coast you're on, APRS symbols survive a refresh, the EmComm sidebar remembers itself, and the manual got pictures.",
+    features: [
+      {
+        icon: '🌙',
+        title: 'NEW: EME (Moonbounce) Layout — Beta',
+        desc: "A layout built around the Moon. The 3D globe pins itself to frame Earth and Moon together and draws the DE→Moon→DX legs — solid in each station's colour while that end can see the Moon, dashed red below the horizon. The rail shows Moon Now (azimuth/elevation, rise/set, distance, path-loss delta, declination, phase at both ends), Sky Tracks for the next pass, a 48-hour Mutual Windows table with a minimum-elevation filter, a DX target with grid lock, and EME Spots pulled from the cluster on EME bands. Live activity comes from a band-wide PSK Reporter feed of Q65 and JT65 reports at 50 MHz and up — they plot on the globe as station dots with faint sender→Moon→receiver legs. The Moon is drawn at a compressed 12 Earth radii so both bodies fit on screen; the maths behind it is at true distance.",
+      },
+      {
+        icon: '🛰️',
+        title: 'NEW: Satellite Relay Mode — Experimental',
+        desc: 'Flip the MOON/SAT switch in the EME header and the same chassis works a bird instead: only the chosen satellite and its footprint are drawn, legs run DE→satellite→DX, and the rail ranks candidate relay satellites by their next mutual pass, shows live az/el/range for both ends with Doppler at DE, and lists 24 hours of mutual passes with per-station AOS and LOS. Cluster satellite spots and the AMSAT status line show for each candidate. Verified against an ISS-like orbit; we have not yet caught a live pass with real SatNOGS transmitter data, hence the label.',
+      },
+      {
+        icon: '📻',
+        title: 'Band Openings Now Know Your CQ Zone',
+        desc: '"EU → NA open" is true on the East Coast and useless on the West Coast. The server now keys the same RBN and cluster surge detection by the CQ zone of the stations doing the hearing, alongside the continent view, and Settings → Alerts → Band Openings grew a Scope: My CQ zone (the new default — read from your callsign, override it if your prefix lies about where you live), My continent, or Worldwide as before. Alerts read "20m opening EU→zone 3 (12 spots, 4x baseline)". Per-zone thresholds match the continent ones for now; we\'ll tune them on real data. Suggested by Mike Bass, N7WLC.',
+      },
+      {
+        icon: '📡',
+        title: 'APRS: Dwell Time, Survives a Refresh, and a Clear Button',
+        desc: "Stations heard over RF through your TNC used to live only in the browser's memory — one refresh and every symbol was gone, which is the wrong moment to lose situational awareness during a net. RF and internet stations are now retained in browser storage and come straight back on reload. A Dwell setting (30 minutes to 12 hours, default 60) decides how long a station lingers after it was last heard, and it applies even past the server's own one-hour cache. A Clear button flushes the map and list on demand; cleared stations stay gone until they beacon again. Both controls sit on the APRS panel and in the EmComm Stations header. Requested by mbrun-plm.",
+      },
+      {
+        icon: '🚨',
+        title: 'EmComm: Panels Remember Themselves',
+        desc: 'Switch from Emcomm to Dockable and back and every sidebar section snapped open again. A small Panels row at the top of the sidebar now offers Remember (the default — each section comes back the way you left it, across layout switches and reloads), Expanded, or Collapsed as the starting state, plus Expand all and Collapse all buttons. Requested by mbrun-plm.',
+      },
+      {
+        icon: '🎯',
+        title: 'A Locate Ring You Can Actually See',
+        desc: "Click a station in a panel and the map pulses a ring around it — in the theme's cyan, which vanished on light and satellite basemaps. The rings are now a white core with a dark halo and a magenta glow, independent of the theme, and they start outside the marker and hold their brightness longer instead of hiding behind it for the first third of the animation. Requested by mbrun-plm.",
+      },
+      {
+        icon: '📖',
+        title: 'The Manual Got Pictures',
+        desc: "The built-in manual (Settings → Help) is now illustrated throughout with current screenshots of every layout, the major panels, and this cycle's new features, and the in-app renderer learned to show images and galleries. The screenshots ship inside the app, so they work offline too.",
+      },
+      {
+        icon: '🎅',
+        title: 'Santa Tracker',
+        desc: 'On 24–25 December UTC the 3D globe and the flat map track Santa along a NORAD-style westward route with about 120 stops, complete with a procedurally built sleigh and a status chip in the corner of the globe. Parents who need a preview before the big night can add ?santa=1 to the URL any day of the year (?santa=off puts it away).',
+      },
+      {
+        icon: '🍁',
+        title: 'CANParks Retired',
+        desc: 'The CANParks program has shut down and its API is gone, so the activations program, its map layer, panel tab, filters, alerts and the POTA cross-reference chip have been removed. Your other four programs are untouched.',
+      },
+      {
+        icon: '🔒',
+        title: 'Security Updates & Fixes',
+        desc: "All 64 open Dependabot alerts across the five packages were cleared (in-range audit fixes, Vitest 4, Electron 41 for the desktop wrapper, and a qs override wherever Express 4 pins the old one). The server's startup banner is no longer cut short by the log rate limiter. The OpenHamClock cluster node's DX Summit poller is now off unless explicitly enabled.",
+      },
+    ],
+  },
   {
     version: '26.7.4',
     date: '2026-09-12',

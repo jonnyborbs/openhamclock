@@ -36,7 +36,6 @@ const SNAPSHOT_KEYS = [
   'openhamclock_sotaFilters',
   'openhamclock_wwffFilters',
   'openhamclock_wwbotaFilters',
-  'openhamclock_canparksFilters',
   'openhamclock_callsignSearchHistory',
   'openhamclock_contestSession',
   'openhamclock_freqMemories',

@@ -5,6 +5,7 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { MAP_STYLES } from '../utils/config.js';
+import { getSantaState, resolveSantaClock, formatPresents } from '../utils/santa.js';
 import {
   latLonToMaidenhead,
   getSunPosition,
@@ -106,7 +107,6 @@ import { mapDefs as POTADefs } from './POTAPanel.jsx';
 import { mapDefs as SOTADefs } from './SOTAPanel.jsx';
 import { mapDefs as WWBOTADefs } from './WWBOTAPanel.jsx';
 import { mapDefs as WWFFDefs } from './WWFFPanel.jsx';
-import { mapDefs as CANParksDefs } from './CANParksPanel.jsx';
 
 const POPUP_AUTO_CLOSE_MS = 20_000;
 
@@ -121,7 +121,6 @@ export const WorldMap = ({
   wwffSpots,
   sotaSpots,
   wwbotaSpots,
-  canparksSpots,
   dxPaths,
   dxFilters,
   mapBandFilter,
@@ -141,8 +140,6 @@ export const WorldMap = ({
   showSOTALabels = true,
   showWWBOTA,
   showWWBOTALabels = true,
-  showCANParks,
-  showCANParksLabels = true,
   showPSKReporter,
   showPSKPaths = true,
   showMutualReception = true,
@@ -167,6 +164,16 @@ export const WorldMap = ({
   rotatorControlEnabled,
   onRotatorTurnRequest,
   onMapReady,
+  // Purpose-built layouts (EME) can pin a projection without touching the
+  // user's saved choice; the projection toggle hides while pinned.
+  projectionOverride = null,
+  emeMode = false,
+  emeFrameKey = 0,
+  // Satellite relay mode (EME layout): globe shows only this satellite, legs
+  // go through it, and the satellites plugin layer is forced on.
+  relaySatName = null,
+  relayTarget = null,
+  emeActivityPaths = null,
 }) => {
   const { t, i18n } = useTranslation();
   const mapLang = i18n.language?.split('-')[0] || 'en'; // e.g. 'de', 'ja', 'en'
@@ -180,11 +187,11 @@ export const WorldMap = ({
   const dxMarkerRef = useRef([]);
   const sunMarkerRef = useRef([]);
   const moonMarkerRef = useRef([]);
+  const santaMarkerRef = useRef([]);
   const potaMarkersRef = useRef([]);
   const wwffMarkersRef = useRef([]);
   const sotaMarkersRef = useRef([]);
   const wwbotaMarkersRef = useRef([]);
-  const canparksMarkersRef = useRef([]);
   const dxPathsLinesRef = useRef([]);
   const dxPathsMarkersRef = useRef([]);
   const pskMarkersRef = useRef([]);
@@ -629,7 +636,8 @@ export const WorldMap = ({
   });
   const [showMapRotationMenu, setShowMapRotationMenu] = useState(false);
   const [mapRotationMenuActivity, setMapRotationMenuActivity] = useState(0);
-  const [mapProjection, setMapProjection] = useState(initialProjection);
+  const [mapProjectionState, setMapProjection] = useState(initialProjection);
+  const mapProjection = projectionOverride || mapProjectionState;
   // The Leaflet path applies mode/continent/watchlist filters at render time;
   // the globe consumes paths as data, so hand it the already-filtered list or
   // those filters silently stop working in 3D.
@@ -938,8 +946,8 @@ export const WorldMap = ({
           ...existing,
           mapStyle,
           mapProjection: projectionPersistBlockedRef.current
-            ? (existing.mapProjection ?? mapProjection)
-            : mapProjection,
+            ? (existing.mapProjection ?? mapProjectionState)
+            : mapProjectionState,
           center: mapView.center,
           zoom: mapView.zoom,
           wheelPxPerZoomLevel: getScaledZoomLevel(mouseZoom),
@@ -948,7 +956,7 @@ export const WorldMap = ({
     } catch (e) {
       console.error('Failed to save map settings:', e);
     }
-  }, [mapStyle, mapProjection, mapView, mouseZoom]);
+  }, [mapStyle, mapProjectionState, mapView, mouseZoom]);
 
   // Initialize map
   useEffect(() => {
@@ -1524,6 +1532,51 @@ export const WorldMap = ({
     });
   }, [deLocation, dxLocation, allUnits, dxWeatherAllowed, showDeDxMarkers]);
 
+  // ── Christmas easter egg: Santa on the flat map ──
+  // Companion to the 3D globe's sleigh (see Globe3D + src/utils/santa.js):
+  // an emoji marker at Santa's current position on 24–25 December, refreshed
+  // every 30 s. getSantaState is not visible on any other day, so the effect
+  // costs one cheap call per tick the rest of the year.
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+    const clear = () => {
+      santaMarkerRef.current.forEach((m) => {
+        try {
+          map.removeLayer(m);
+        } catch (e) {}
+      });
+      santaMarkerRef.current = [];
+    };
+    const update = () => {
+      clear();
+      const clock = resolveSantaClock();
+      const st = getSantaState(clock.nowMs);
+      if (!st.visible) return;
+      const where =
+        st.phase === 'flight'
+          ? `over <b>${st.lastStop}</b> · next stop ${st.nextStop}`
+          : st.phase === 'home'
+            ? 'heading home to the North Pole'
+            : 'at the North Pole';
+      const popup = `<b>🎅 Santa</b> ${where}<br>${formatPresents(st.delivered)} presents delivered${clock.simulated ? '<br><i>simulated</i>' : ''}`;
+      const html = '<div style="font-size:22px;line-height:1;filter:drop-shadow(0 0 3px rgba(0,0,0,.7))">🦌🛷</div>';
+      for (const offset of [-360, 0, 360]) {
+        const icon = L.divIcon({ className: 'santa-marker-icon', html, iconSize: [48, 24], iconAnchor: [24, 12] });
+        const m = L.marker([st.lat, st.lon + offset], { icon, zIndexOffset: 18000 })
+          .bindPopup(popup)
+          .addTo(map);
+        santaMarkerRef.current.push(m);
+      }
+    };
+    update();
+    const interval = setInterval(update, 30_000);
+    return () => {
+      clearInterval(interval);
+      clear();
+    };
+  }, []);
+
   // Update sun/moon markers every 60 seconds (matches terminator refresh)
   useEffect(() => {
     if (!mapInstanceRef.current) return;
@@ -1931,11 +1984,6 @@ export const WorldMap = ({
   useEffect(() => {
     placeSpots(WWBOTADefs, wwbotaSpots, showWWBOTA, showWWBOTALabels, wwbotaMarkersRef, mapInstanceRef);
   }, [wwbotaSpots, showWWBOTA, showWWBOTALabels, bandPassesMapFilter]);
-
-  // Update CANParks markers
-  useEffect(() => {
-    placeSpots(CANParksDefs, canparksSpots, showCANParks, showCANParksLabels, canparksMarkersRef, mapInstanceRef);
-  }, [canparksSpots, showCANParks, showCANParksLabels, bandPassesMapFilter]);
 
   // Plugin layer system - properly load saved states
   useEffect(() => {
@@ -2518,7 +2566,6 @@ export const WorldMap = ({
             wwffSpots={wwffSpots}
             sotaSpots={sotaSpots}
             wwbotaSpots={wwbotaSpots}
-            canparksSpots={canparksSpots}
             dxPaths={dxPaths}
             dxFilters={dxFilters}
             mapBandFilter={mapBandFilter}
@@ -2529,7 +2576,6 @@ export const WorldMap = ({
             showWWFF={showWWFF}
             showSOTA={showSOTA}
             showWWBOTA={showWWBOTA}
-            showCANParks={showCANParks}
             showPSKReporter={showPSKReporter}
             showPSKPaths={showPSKPaths}
             showMutualReception={showMutualReception}
@@ -2586,7 +2632,6 @@ export const WorldMap = ({
               wwffSpots={wwffSpots}
               sotaSpots={sotaSpots}
               wwbotaSpots={wwbotaSpots}
-              canparksSpots={canparksSpots}
               dxPaths={globeDxPaths}
               mapBandFilter={mapBandFilter}
               pskReporterSpots={pskReporterSpots}
@@ -2596,14 +2641,13 @@ export const WorldMap = ({
               showWWFF={showWWFF}
               showSOTA={showSOTA}
               showWWBOTA={showWWBOTA}
-              showCANParks={showCANParks}
               showPSKReporter={showPSKReporter}
               showWSJTX={showWSJTX}
               onSpotClick={onSpotClick}
               callsign={callsign}
               showDeDxMarkers={showDeDxMarkers}
               satellites={satellites}
-              satellitesEnabled={pluginLayerStates.satellites?.enabled ?? true}
+              satellitesEnabled={!!relaySatName || (pluginLayerStates.satellites?.enabled ?? true)}
               suppressedLayers={suppressed2DLayers.map((l) => t(l.name))}
               overlayLayerStates={globeOverlayStates}
               allUnits={allUnits}
@@ -2614,6 +2658,11 @@ export const WorldMap = ({
               lowMemoryMode={lowMemoryMode}
               nightDarkness={nightDarkness}
               onNightDarknessChange={setNightDarkness}
+              emeMode={emeMode}
+              emeFrameKey={emeFrameKey}
+              relaySatName={relaySatName}
+              relayTarget={relayTarget}
+              emeActivityPaths={emeActivityPaths}
             />
           </React.Suspense>
         </AzimuthalErrorBoundary>
@@ -2913,7 +2962,7 @@ export const WorldMap = ({
           {/* Projection toggle */}
           <div
             style={{
-              display: 'flex',
+              display: projectionOverride ? 'none' : 'flex',
               background: 'rgba(0, 0, 0, 0.8)',
               border: '1px solid #444',
               borderRadius: '4px',

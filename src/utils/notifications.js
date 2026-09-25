@@ -64,8 +64,7 @@ export function formatAlertBody(feedId, item) {
     case 'pota':
     case 'sota':
     case 'wwff':
-    case 'wwbota':
-    case 'canparks': {
+    case 'wwbota': {
       // Hook-normalized spots: { call, ref, freq (MHz string), mode }
       const freq = item.freq || item.frequency || '';
       const call = item.call || item.activator || item.callsign || '';
@@ -127,9 +126,10 @@ export function formatAlertBody(feedId, item) {
       break;
     }
     case 'band-openings': {
-      // Opening entry: { band, from_continent, to_continent, shortCount, factor }
+      // Opening entry: { band, from_continent, to_continent | to_zone, shortCount, factor }
       const band = item.band || '';
-      const path = item.from_continent && item.to_continent ? `${item.from_continent}→${item.to_continent}` : '';
+      const to = item.to_zone != null ? `zone ${item.to_zone}` : item.to_continent || '';
+      const path = item.from_continent && to ? `${item.from_continent}→${to}` : '';
       if (band || path) {
         const main = [band, 'opening', path].filter(Boolean).join(' ');
         const stats = [];

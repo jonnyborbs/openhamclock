@@ -10,6 +10,60 @@ import { calculateDistance, formatDistance, maidenheadToLatLon, latLonToMaidenhe
 import { esc } from '../utils/escapeHtml.js';
 import { apiFetch } from '../utils/apiFetch.js';
 import { mergeShelters } from '../utils/emcommShelters.js';
+
+// Sidebar panel collapse state (#1188). Mode decides what a fresh visit to
+// the layout starts with: 'remember' restores each section's last state,
+// 'expanded' / 'collapsed' start every section that way. Toggling a section
+// always works; it is only persisted in 'remember' mode.
+const PANEL_MODE_KEY = 'openhamclock_emcommPanelMode';
+const PANEL_STATE_KEY = 'openhamclock_emcommPanels';
+const PANEL_MODES = [
+  { value: 'remember', label: 'Remember' },
+  { value: 'expanded', label: 'Expanded' },
+  { value: 'collapsed', label: 'Collapsed' },
+];
+const readPanelMode = () => {
+  try {
+    const v = localStorage.getItem(PANEL_MODE_KEY);
+    return PANEL_MODES.some((m) => m.value === v) ? v : 'remember';
+  } catch {
+    return 'remember';
+  }
+};
+const readPanelStates = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PANEL_STATE_KEY) || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+const writeStored = (key, value) => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* storage unavailable — state stays in memory for this session */
+  }
+};
+/** Resolve a section's collapsed flag: explicit > "all" override > mode default */
+const isPanelCollapsed = (states, mode, title) => states[title] ?? states.__all ?? mode === 'collapsed';
+const EMCOMM_APRS_SELECT = {
+  background: '#1a1f2e',
+  border: '1px solid #2a3040',
+  borderRadius: '3px',
+  color: '#888',
+  fontSize: '9px',
+  padding: '1px 4px',
+};
+const PANEL_TOOL_BTN = {
+  background: 'transparent',
+  color: '#888',
+  border: '1px solid #333',
+  borderRadius: '3px',
+  fontSize: '10px',
+  padding: '1px 6px',
+  cursor: 'pointer',
+};
 import { winlinkModeLabel, winlinkModeColor } from '../utils/winlinkModes.js';
 import { stationAgeMinutes, formatStationAge } from '../utils/aprsStationAge.js';
 import { requestMapFocus } from '../utils/mapFocus.js';
@@ -172,6 +226,31 @@ export default function EmcommLayout(props) {
   const { t } = useTranslation();
   const [seconds, setSeconds] = useState(() => String(new Date().getUTCSeconds()).padStart(2, '0'));
   const [expandedAlert, setExpandedAlert] = useState(null);
+  // Sidebar section collapse state (#1188)
+  const [panelMode, setPanelMode] = useState(readPanelMode);
+  const [panelStates, setPanelStates] = useState(() => (readPanelMode() === 'remember' ? readPanelStates() : {}));
+  const updatePanelStates = useCallback(
+    (next) => {
+      setPanelStates(next);
+      if (panelMode === 'remember') writeStored(PANEL_STATE_KEY, JSON.stringify(next));
+    },
+    [panelMode],
+  );
+  const changePanelMode = useCallback((mode) => {
+    setPanelMode(mode);
+    writeStored(PANEL_MODE_KEY, mode);
+    // Apply the new default immediately; 'remember' picks up the saved states
+    setPanelStates(mode === 'remember' ? readPanelStates() : {});
+  }, []);
+  const panels = useMemo(
+    () => ({
+      collapsedFor: (title) => isPanelCollapsed(panelStates, panelMode, title),
+      toggle: (title) =>
+        updatePanelStates({ ...panelStates, [title]: !isPanelCollapsed(panelStates, panelMode, title) }),
+      setAll: (collapsed) => updatePanelStates({ __all: collapsed }),
+    }),
+    [panelStates, panelMode, updatePanelStates],
+  );
   // APRS source filter: 'all' | 'internet' | 'rf'
   const [aprsSource, setAprsSource] = useState('all');
   // Net operations
@@ -888,7 +967,6 @@ export default function EmcommLayout(props) {
             potaSpots={[]}
             sotaSpots={[]}
             wwbotaSpots={[]}
-            canparksSpots={[]}
             mySpots={[]}
             dxPaths={[]}
             dxFilters={dxFilters}
@@ -903,7 +981,6 @@ export default function EmcommLayout(props) {
             showPOTA={false}
             showSOTA={false}
             showWWBOTA={false}
-            showCANParks={false}
             showSatellites={false}
             showPSKReporter={false}
             showPSKPaths={false}
@@ -935,11 +1012,51 @@ export default function EmcommLayout(props) {
             gap: '8px',
           }}
         >
+          {/* Panel state toolbar (#1188) */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '2px 4px',
+              fontSize: '10px',
+              color: '#888',
+            }}
+          >
+            <span style={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>Panels</span>
+            <select
+              value={panelMode}
+              onChange={(e) => changePanelMode(e.target.value)}
+              title="What the sidebar panels look like when you open Emcomm mode"
+              style={{
+                background: '#1a1a1a',
+                color: '#ccc',
+                border: '1px solid #333',
+                borderRadius: '3px',
+                fontSize: '10px',
+                padding: '1px 4px',
+              }}
+            >
+              {PANEL_MODES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+            <span style={{ flex: 1 }} />
+            <button type="button" onClick={() => panels.setAll(false)} style={PANEL_TOOL_BTN}>
+              Expand all
+            </button>
+            <button type="button" onClick={() => panels.setAll(true)} style={PANEL_TOOL_BTN}>
+              Collapse all
+            </button>
+          </div>
+
           {/* Resource Summary Dashboard */}
-          <ResourceSummary stations={emcommStationsWithDistance} />
+          <ResourceSummary stations={emcommStationsWithDistance} panels={panels} />
 
           {/* NWS Alerts Panel */}
-          <PanelSection title="NWS Alerts" count={sortedAlerts.length} color="#dc2626">
+          <PanelSection title="NWS Alerts" count={sortedAlerts.length} color="#dc2626" panels={panels}>
             {sortedAlerts.length === 0 ? (
               <EmptyState text="No active alerts for your area" />
             ) : (
@@ -984,7 +1101,7 @@ export default function EmcommLayout(props) {
           </PanelSection>
 
           {/* Disaster Declarations Panel */}
-          <PanelSection title="Disaster Declarations" count={disasters.length} color="#f59e0b">
+          <PanelSection title="Disaster Declarations" count={disasters.length} color="#f59e0b" panels={panels}>
             {disasters.length === 0 ? (
               <EmptyState text="No recent disaster declarations" />
             ) : (
@@ -1018,7 +1135,7 @@ export default function EmcommLayout(props) {
           </PanelSection>
 
           {/* Shelters Panel */}
-          <PanelSection title="Nearby Shelters" count={sheltersWithDistance.length} color="#22c55e">
+          <PanelSection title="Nearby Shelters" count={sheltersWithDistance.length} color="#22c55e" panels={panels}>
             {sheltersWithDistance.length === 0 ? (
               <EmptyState text="No open shelters nearby" />
             ) : (
@@ -1103,26 +1220,38 @@ export default function EmcommLayout(props) {
           {/* EmComm Stations Panel (APRS) */}
           <PanelSection
             title="EmComm Stations"
+            panels={panels}
             count={emcommStationsWithDistance.length}
             color="#22d3ee"
             extra={
-              <select
-                value={aprsSource}
-                onChange={(e) => setAprsSource(e.target.value)}
-                style={{
-                  background: '#1a1f2e',
-                  border: '1px solid #2a3040',
-                  borderRadius: '3px',
-                  color: '#888',
-                  fontSize: '9px',
-                  padding: '1px 4px',
-                  marginLeft: '6px',
-                }}
-              >
-                <option value="all">All Sources</option>
-                <option value="rf">RF Only</option>
-                <option value="internet">Internet Only</option>
-              </select>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginLeft: '6px' }}>
+                <select value={aprsSource} onChange={(e) => setAprsSource(e.target.value)} style={EMCOMM_APRS_SELECT}>
+                  <option value="all">All Sources</option>
+                  <option value="rf">RF Only</option>
+                  <option value="internet">Internet Only</option>
+                </select>
+                {/* Dwell + clear (#1190) — how long heard stations linger, and a flush */}
+                <select
+                  value={aprsData?.dwellMinutes ?? 60}
+                  onChange={(e) => aprsData?.setDwellMinutes?.(Number(e.target.value))}
+                  title="How long a station stays on the map after it was last heard"
+                  style={EMCOMM_APRS_SELECT}
+                >
+                  {(aprsData?.dwellOptions ?? [60]).map((m) => (
+                    <option key={m} value={m}>
+                      {m < 60 ? `${m}m` : `${m / 60}h`}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => aprsData?.clearStations?.()}
+                  title="Remove every APRS station from the map and list until new beacons arrive"
+                  style={{ ...EMCOMM_APRS_SELECT, cursor: 'pointer' }}
+                >
+                  Clear
+                </button>
+              </span>
             }
           >
             {emcommStationsWithDistance.length === 0 ? (
@@ -1187,12 +1316,12 @@ export default function EmcommLayout(props) {
           </PanelSection>
 
           {/* APRS Telemetry Panel — sensor dashboards from telemetry-beaconing stations */}
-          <PanelSection title="APRS Telemetry" count={telemetry.length} color="#10b981">
+          <PanelSection title="APRS Telemetry" count={telemetry.length} color="#10b981" panels={panels}>
             <APRSTelemetryPanel telemetry={telemetry} variant="emcomm" />
           </PanelSection>
 
           {/* Winlink Gateways Panel */}
-          <PanelSection title="Nearby Winlink Gateways" count={winlinkGateways.length} color="#3b82f6">
+          <PanelSection title="Nearby Winlink Gateways" count={winlinkGateways.length} color="#3b82f6" panels={panels}>
             {!winlinkServerHasKey ? (
               <EmptyState text="Winlink API not configured on server" />
             ) : winlinkGateways.length === 0 ? (
@@ -1265,7 +1394,7 @@ export default function EmcommLayout(props) {
           </PanelSection>
 
           {/* Field Reports Panel — Winlink Express forms via rig-bridge CSV ingest */}
-          <PanelSection title="Field Reports" count={fieldReports.length} color="#f472b6">
+          <PanelSection title="Field Reports" count={fieldReports.length} color="#f472b6" panels={panels}>
             {fieldReports.length === 0 ? (
               <div style={{ padding: '12px 8px', color: '#555', fontSize: '11px', lineHeight: 1.5 }}>
                 No field reports received. Run the <span style={{ color: '#888' }}>winlink-express-csv</span> rig-bridge
@@ -1315,7 +1444,7 @@ export default function EmcommLayout(props) {
           </PanelSection>
 
           {/* Net Operations Panel */}
-          <PanelSection title="Net Roster" count={netRoster.length} color="#a855f7">
+          <PanelSection title="Net Roster" count={netRoster.length} color="#a855f7" panels={panels}>
             {netRoster.length === 0 ? (
               <EmptyState text="No operators checked in. Send 'CQ NETNAME status' to EMCOMM via APRS to check in." />
             ) : (
@@ -1382,7 +1511,7 @@ export default function EmcommLayout(props) {
           </PanelSection>
 
           {/* Event Log Panel — session record for After Action Review */}
-          <PanelSection title="Event Log" count={eventLog.length} color="#eab308">
+          <PanelSection title="Event Log" count={eventLog.length} color="#eab308" panels={panels}>
             <div style={{ display: 'flex', gap: '6px', padding: '4px 8px 6px', alignItems: 'center' }}>
               <button
                 onClick={exportEventLogCsv}
@@ -1586,7 +1715,7 @@ function TokenPill({ token }) {
 }
 
 /** Resource summary dashboard — aggregates tokens from all emcomm stations */
-function ResourceSummary({ stations }) {
+function ResourceSummary({ stations, panels }) {
   const aggregated = useMemo(() => {
     const byKey = {};
     stations.forEach((s) => {
@@ -1615,7 +1744,7 @@ function ResourceSummary({ stations }) {
   if (aggregated.length === 0) return null;
 
   return (
-    <PanelSection title="Resource Summary" count={aggregated.length} color="#f59e0b">
+    <PanelSection title="Resource Summary" count={aggregated.length} color="#f59e0b" panels={panels}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '4px 6px' }}>
         {aggregated.map((agg) => {
           const meta = TOKEN_META[agg.key] || { icon: '📦', color: '#888', label: agg.key };
@@ -1690,8 +1819,10 @@ function ResourceSummary({ stations }) {
 }
 
 /** Collapsible panel section wrapper */
-function PanelSection({ title, count, color, extra, children }) {
-  const [collapsed, setCollapsed] = useState(false);
+function PanelSection({ title, count, color, extra, panels, children }) {
+  const [localCollapsed, setLocalCollapsed] = useState(false);
+  const collapsed = panels ? panels.collapsedFor(title) : localCollapsed;
+  const setCollapsed = panels ? () => panels.toggle(title) : setLocalCollapsed;
   return (
     <div style={{ background: '#0d0d0d', borderRadius: '6px', overflow: 'hidden' }}>
       <div

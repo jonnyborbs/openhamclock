@@ -7,6 +7,19 @@
  */
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { apiFetch } from '../utils/apiFetch';
+import {
+  DWELL_OPTIONS_MINUTES,
+  RF_STORE_KEY,
+  NET_STORE_KEY,
+  readDwellMinutes,
+  writeDwellMinutes,
+  readClearedAt,
+  writeClearedAt,
+  pruneStations,
+  mergeStations,
+  loadStations,
+  saveStations,
+} from '../utils/aprsRetention';
 
 const STORAGE_KEY = 'openhamclock_aprsWatchlist';
 const POLL_INTERVAL = 15000; // 15 seconds
@@ -15,15 +28,28 @@ const POLL_INTERVAL = 15000; // 15 seconds
 const IDLE_POLL_INTERVAL = 90000; // 90 seconds
 const TNC_POLL_INTERVAL = 10000; // 10 seconds while a TNC is connected
 const TNC_IDLE_POLL_INTERVAL = 60000; // 60 seconds while no TNC is detected
-const RF_MAX_AGE_MS = 60 * 60 * 1000; // 60 minutes — match server APRS_MAX_AGE_MINUTES
+const PERSIST_DEBOUNCE_MS = 1500;
 
 export const useAPRS = (options = {}) => {
   const { enabled = true } = options;
 
-  // Internet APRS-IS stations from server polling
-  const [stations, setStations] = useState([]);
-  // Local RF stations from rig-bridge SSE — Map keyed by ssid (full callsign)
-  const [rfStations, setRfStations] = useState(new Map());
+  // Dwell: how long a station stays after it was last heard (#1190). The
+  // server ages its own cache at APRS_MAX_AGE_MINUTES; this is the client's
+  // view and may be longer — stations the server has dropped stay retained
+  // here until they age past the dwell.
+  const [dwellMinutes, setDwellMinutesState] = useState(readDwellMinutes);
+  // Epoch ms of the operator's last "clear" — anything heard at/before it
+  // stays gone until a fresh beacon arrives.
+  const clearedAtRef = useRef(readClearedAt());
+  const retentionOpts = () => ({ dwellMs: dwellMinutes * 60000, clearedAt: clearedAtRef.current });
+
+  // Internet APRS-IS stations — server snapshots folded into a retained Map
+  // keyed by ssid so a refresh or a server-side age-out does not lose them.
+  const [netStations, setNetStations] = useState(() => loadStations(NET_STORE_KEY, retentionOpts()));
+  // Local RF stations from rig-bridge SSE — Map keyed by ssid (full callsign).
+  // Persisted: these never reach the server, so without this a page refresh
+  // wiped every RF symbol off the map (#1190).
+  const [rfStations, setRfStations] = useState(() => loadStations(RF_STORE_KEY, retentionOpts()));
 
   const [connected, setConnected] = useState(false);
   const [aprsEnabled, setAprsEnabled] = useState(false);
@@ -64,7 +90,7 @@ export const useAPRS = (options = {}) => {
       const res = await apiFetch('/api/aprs/stations', { cache: 'no-store' });
       if (res?.ok) {
         const data = await res.json();
-        setStations(data.stations || []);
+        setNetStations((prev) => mergeStations(prev, data.stations || [], { clearedAt: clearedAtRef.current }));
         setConnected(data.connected || false);
         // Don't let the server poll override aprsEnabled when the TNC was
         // detected locally via SSE — the OHC server may have APRS_ENABLED=false
@@ -137,25 +163,46 @@ export const useAPRS = (options = {}) => {
     };
   }, [enabled, fetchTncStatus]);
 
-  // Age out stale RF stations (mirrors server-side APRS_MAX_AGE_MINUTES)
+  // Age out stations past the dwell — both stores, immediately when the
+  // dwell changes and then once a minute.
   useEffect(() => {
     if (!enabled) return;
-    const interval = setInterval(() => {
-      const cutoff = Date.now() - RF_MAX_AGE_MS;
-      setRfStations((prev) => {
-        let changed = false;
-        const next = new Map(prev);
-        for (const [key, st] of next) {
-          if ((st.timestamp ?? 0) < cutoff) {
-            next.delete(key);
-            changed = true;
-          }
-        }
-        return changed ? next : prev;
-      });
-    }, 60000); // check every minute
+    const prune = () => {
+      const opts = { dwellMs: dwellMinutes * 60000, clearedAt: clearedAtRef.current };
+      setRfStations((prev) => pruneStations(prev, opts));
+      setNetStations((prev) => pruneStations(prev, opts));
+    };
+    prune();
+    const interval = setInterval(prune, 60000);
     return () => clearInterval(interval);
-  }, [enabled]);
+  }, [enabled, dwellMinutes]);
+
+  // Persist both stores (debounced — RF packets can arrive in bursts)
+  useEffect(() => {
+    const timer = setTimeout(() => saveStations(RF_STORE_KEY, rfStations), PERSIST_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [rfStations]);
+  useEffect(() => {
+    const timer = setTimeout(() => saveStations(NET_STORE_KEY, netStations), PERSIST_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [netStations]);
+
+  const setDwellMinutes = useCallback((minutes) => {
+    const m = Number(minutes);
+    if (!DWELL_OPTIONS_MINUTES.includes(m)) return;
+    setDwellMinutesState(m);
+    writeDwellMinutes(m);
+  }, []);
+
+  // Flush every station (map and list). Stations heard at/before this
+  // moment stay gone even if the server still lists them; new beacons show.
+  const clearStations = useCallback(() => {
+    const now = Date.now();
+    clearedAtRef.current = now;
+    writeClearedAt(now);
+    setRfStations(new Map());
+    setNetStations(new Map());
+  }, []);
 
   // Receive APRS packets from rig-bridge SSE /stream (local/direct mode only).
   // Packets now carry parsed position fields (lat, lon, symbol, …) added by
@@ -212,9 +259,9 @@ export const useAPRS = (options = {}) => {
   const allStations = useMemo(() => {
     const rf = Array.from(rfStations.values());
     const rfKeys = new Set(rf.map((s) => s.ssid ?? s.source));
-    const internet = stations.filter((s) => !rfKeys.has(s.ssid) && !rfKeys.has(s.call));
+    const internet = Array.from(netStations.values()).filter((s) => !rfKeys.has(s.ssid) && !rfKeys.has(s.call));
     return [...rf, ...internet];
-  }, [stations, rfStations]);
+  }, [netStations, rfStations]);
 
   // Watchlist helpers
   const addGroup = useCallback((name) => {
@@ -311,6 +358,10 @@ export const useAPRS = (options = {}) => {
     setSourceFilter,
     tncConnected,
     hasRFStations,
+    dwellMinutes,
+    setDwellMinutes,
+    dwellOptions: DWELL_OPTIONS_MINUTES,
+    clearStations,
     refresh: fetchStations,
   };
 };

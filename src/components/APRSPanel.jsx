@@ -28,6 +28,10 @@ const APRSPanel = ({ aprsData, showOnMap, onToggleMap, onHoverSpot, onSpotClick,
     setSourceFilter,
     tncConnected = false,
     hasRFStations = false,
+    dwellMinutes = 60,
+    setDwellMinutes,
+    dwellOptions = [60],
+    clearStations,
   } = aprsData || {};
 
   const { t } = useTranslation();
@@ -66,6 +70,7 @@ const APRSPanel = ({ aprsData, showOnMap, onToggleMap, onHoverSpot, onSpotClick,
   }, [addCallInput, addCallTarget, addCallToGroup]);
 
   const formatAge = formatStationAge;
+  const formatDwell = (m) => (m < 60 ? `${m}m` : m % 60 === 0 ? `${m / 60}h` : `${Math.floor(m / 60)}h${m % 60}`);
 
   if (!aprsEnabled) {
     return (
@@ -239,6 +244,52 @@ const APRSPanel = ({ aprsData, showOnMap, onToggleMap, onHoverSpot, onSpotClick,
             </button>
           );
         })}
+        <span style={{ flex: 1 }} />
+        {/* Dwell + clear (#1190) */}
+        <label
+          title={t('aprsPanel.dwell.title')}
+          style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '10px', color: 'var(--text-muted)' }}
+        >
+          {t('aprsPanel.dwell.label')}
+          <select
+            value={dwellMinutes}
+            onChange={(e) => setDwellMinutes?.(Number(e.target.value))}
+            aria-label={t('aprsPanel.dwell.title')}
+            style={{
+              background: 'var(--bg-secondary)',
+              color: 'var(--text-secondary)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '3px',
+              fontSize: '10px',
+              padding: '1px 3px',
+              fontFamily: 'inherit',
+            }}
+          >
+            {dwellOptions.map((m) => (
+              <option key={m} value={m}>
+                {formatDwell(m)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          onClick={() => clearStations?.()}
+          title={t('aprsPanel.clearTitle')}
+          disabled={stations.length === 0}
+          style={{
+            padding: '2px 7px',
+            fontSize: '10px',
+            borderRadius: '3px',
+            border: '1px solid var(--border-color)',
+            background: 'transparent',
+            color: stations.length === 0 ? 'var(--text-muted)' : 'var(--text-secondary)',
+            cursor: stations.length === 0 ? 'default' : 'pointer',
+            fontFamily: 'inherit',
+            opacity: stations.length === 0 ? 0.5 : 1,
+          }}
+        >
+          {t('aprsPanel.clear')}
+        </button>
       </div>
 
       {/* Group filter tabs */}

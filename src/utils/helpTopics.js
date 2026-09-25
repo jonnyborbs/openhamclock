@@ -76,7 +76,6 @@ export const PANEL_HELP = {
   wwff: 'spots-activity',
   sota: 'spots-activity',
   wwbota: 'spots-activity',
-  canparks: 'spots-activity',
   aprs: 'emcomm-mesh',
   'aprs-telemetry': 'emcomm-mesh',
   rotator: 'station-rig-panels',

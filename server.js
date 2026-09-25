@@ -28,6 +28,8 @@ const {
   CONFIG,
   APP_VERSION,
   ROOT_DIR,
+  ASSET_DIR,
+  IS_PACKAGED,
   PORT,
   HOST,
   API_WRITE_KEY,
@@ -110,6 +112,8 @@ const ctx = {
   CONFIG,
   APP_VERSION,
   ROOT_DIR,
+  ASSET_DIR,
+  IS_PACKAGED,
   PORT,
   HOST,
   ITURHFPROP_URL,
@@ -177,8 +181,10 @@ Object.assign(ctx, {
 });
 
 // ── Serve static files ──
-const distDir = path.join(ROOT_DIR, 'dist');
-const publicDir = path.join(ROOT_DIR, 'public');
+// Bundled frontend + static files come from ASSET_DIR (the repo root, or the
+// read-only snapshot inside a packaged executable). Writes go to ROOT_DIR.
+const distDir = path.join(ASSET_DIR, 'dist');
+const publicDir = path.join(ASSET_DIR, 'public');
 const distExists = fs.existsSync(path.join(distDir, 'index.html'));
 
 const staticOptions = {
@@ -252,7 +258,6 @@ Object.assign(ctx, spaceWeatherExports);
 // 3. Remaining routes (can use callsign + space-weather exports)
 require('./server/routes/rotator')(app, ctx);
 require('./server/routes/spots')(app, ctx);
-require('./server/routes/canparks')(app, ctx);
 require('./server/routes/emcomm')(app, ctx);
 const swpcAlertsExports = require('./server/routes/swpc-alerts')(app, ctx);
 Object.assign(ctx, swpcAlertsExports); // refreshSwpcAlerts + onSwpcAlertsRefreshed (used by push.js)
@@ -332,8 +337,8 @@ app.get('/metrics', async (req, res) => {
 
 // ── Catch-all for SPA ──
 app.get('*', (req, res) => {
-  const distIndex = path.join(ROOT_DIR, 'dist', 'index.html');
-  const publicIndex = path.join(ROOT_DIR, 'public', 'index.html');
+  const distIndex = path.join(distDir, 'index.html');
+  const publicIndex = path.join(publicDir, 'index.html');
   const indexPath = fs.existsSync(distIndex) ? distIndex : publicIndex;
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('CDN-Cache-Control', 'no-store'); // Cloudflare: never cache at edge
@@ -362,63 +367,72 @@ app.use((err, req, res, next) => {
 
 // ── Start server ──
 app.listen(PORT, '0.0.0.0', () => {
-  console.log('');
-  console.log('╔═══════════════════════════════════════════════════════╗');
-  console.log('║                                                       ║');
-  console.log('║   ██████╗ ██████╗ ███████╗███╗   ██╗                  ║');
-  console.log('║  ██╔═══██╗██╔══██╗██╔════╝████╗  ██║                  ║');
-  console.log('║  ██║   ██║██████╔╝█████╗  ██╔██╗ ██║                  ║');
-  console.log('║  ██║   ██║██╔═══╝ ██╔══╝  ██║╚██╗██║                  ║');
-  console.log('║  ╚██████╔╝██║     ███████╗██║ ╚████║                  ║');
-  console.log('║   ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═══╝                  ║');
-  console.log('║                                                       ║');
-  console.log('║  ██╗  ██╗ █████╗ ███╗   ███╗ ██████╗██╗     ██╗  ██╗  ║');
-  console.log('║  ██║  ██║██╔══██╗████╗ ████║██╔════╝██║     ██║ ██╔╝  ║');
-  console.log('║  ███████║███████║██╔████╔██║██║     ██║     █████╔╝   ║');
-  console.log('║  ██╔══██║██╔══██║██║╚██╔╝██║██║     ██║     ██╔═██╗   ║');
-  console.log('║  ██║  ██║██║  ██║██║ ╚═╝ ██║╚██████╗███████╗██║  ██╗  ║');
-  console.log('║  ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝ ╚═════╝╚══════╝╚═╝  ╚═╝  ║');
-  console.log('║                                                       ║');
-  console.log('╚═══════════════════════════════════════════════════════╝');
-  console.log('');
+  // The startup banner is ~40 lines; write it straight to stdout so the
+  // console rate limiter (20-line burst) cannot drop the "Server running at"
+  // line that tells the user where to point their browser.
+  const say = (line = '') => process.stdout.write(`${line}\n`);
+  say('');
+  say('╔═══════════════════════════════════════════════════════╗');
+  say('║                                                       ║');
+  say('║   ██████╗ ██████╗ ███████╗███╗   ██╗                  ║');
+  say('║  ██╔═══██╗██╔══██╗██╔════╝████╗  ██║                  ║');
+  say('║  ██║   ██║██████╔╝█████╗  ██╔██╗ ██║                  ║');
+  say('║  ██║   ██║██╔═══╝ ██╔══╝  ██║╚██╗██║                  ║');
+  say('║  ╚██████╔╝██║     ███████╗██║ ╚████║                  ║');
+  say('║   ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═══╝                  ║');
+  say('║                                                       ║');
+  say('║  ██╗  ██╗ █████╗ ███╗   ███╗ ██████╗██╗     ██╗  ██╗  ║');
+  say('║  ██║  ██║██╔══██╗████╗ ████║██╔════╝██║     ██║ ██╔╝  ║');
+  say('║  ███████║███████║██╔████╔██║██║     ██║     █████╔╝   ║');
+  say('║  ██╔══██║██╔══██║██║╚██╔╝██║██║     ██║     ██╔═██╗   ║');
+  say('║  ██║  ██║██║  ██║██║ ╚═╝ ██║╚██████╗███████╗██║  ██╗  ║');
+  say('║  ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝ ╚═════╝╚══════╝╚═╝  ╚═╝  ║');
+  say('║                                                       ║');
+  say('╚═══════════════════════════════════════════════════════╝');
+  say('');
   const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
-  console.log(`  \uD83C\uDF10 OpenHamClock v${APP_VERSION}`);
-  console.log(`  \uD83C\uDF10 Server running at http://${displayHost}:${PORT}`);
+  say(`  \uD83C\uDF10 OpenHamClock v${APP_VERSION}`);
+  say(`  \uD83C\uDF10 Server running at http://${displayHost}:${PORT}`);
   if (HOST === '0.0.0.0') {
-    console.log(`  \uD83D\uDD17 Network access: http://<your-ip>:${PORT}`);
+    say(`  \uD83D\uDD17 Network access: http://<your-ip>:${PORT}`);
   }
-  console.log('  \uD83D\uDCE1 API proxy enabled for NOAA, POTA, SOTA, DX Cluster');
-  console.log(`  \uD83D\uDCCB Log level: ${LOG_LEVEL} (set LOG_LEVEL=debug for verbose)`);
+  say('  \uD83D\uDCE1 API proxy enabled for NOAA, POTA, SOTA, DX Cluster');
+  say(`  \uD83D\uDCCB Log level: ${LOG_LEVEL} (set LOG_LEVEL=debug for verbose)`);
   if (WSJTX_ENABLED) {
-    console.log(`  \uD83D\uDD0A WSJT-X UDP listener on port ${WSJTX_UDP_PORT}`);
+    say(`  \uD83D\uDD0A WSJT-X UDP listener on port ${WSJTX_UDP_PORT}`);
   }
   if (config.WSJTX_RELAY_KEY) {
-    console.log(`  \uD83D\uDD01 WSJT-X relay endpoint enabled (POST /api/wsjtx/relay)`);
+    say(`  \uD83D\uDD01 WSJT-X relay endpoint enabled (POST /api/wsjtx/relay)`);
   }
   if (N1MM_ENABLED) {
-    console.log(`  \uD83D\uDCE5 N1MM UDP listener on port ${N1MM_UDP_PORT}`);
+    say(`  \uD83D\uDCE5 N1MM UDP listener on port ${N1MM_UDP_PORT}`);
   }
   if (AUTO_UPDATE_ENABLED) {
-    console.log(`  \uD83D\uDD04 Auto-update enabled every ${AUTO_UPDATE_INTERVAL_MINUTES || 60} minutes`);
+    say(`  \uD83D\uDD04 Auto-update enabled every ${AUTO_UPDATE_INTERVAL_MINUTES || 60} minutes`);
   }
   if (!API_WRITE_KEY) {
-    console.log('');
-    console.log(
+    say('');
+    say(
       '  \u26A0\uFE0F  API_WRITE_KEY is not set \u2014 write endpoints (settings, update, rotator, QRZ) are unprotected.',
     );
-    console.log('     Set API_WRITE_KEY in .env to secure POST endpoints.');
+    say('     Set API_WRITE_KEY in .env to secure POST endpoints.');
   }
-  console.log('  \uD83D\uDDA5\uFE0F  Open your browser to start using OpenHamClock');
-  console.log('');
+  say('  \uD83D\uDDA5\uFE0F  Open your browser to start using OpenHamClock');
+  say('');
+  if (IS_PACKAGED) {
+    say(`  \uD83D\uDCC1 Settings and data folder: ${ROOT_DIR}`);
+    say('     (.env, config.json and data/ live here; set OPENHAMCLOCK_HOME to move them)');
+    say('');
+  }
   if (CONFIG.callsign !== 'N0CALL') {
-    console.log(`  \uD83D\uDCFB Station: ${CONFIG.callsign} @ ${CONFIG.gridSquare}`);
+    say(`  \uD83D\uDCFB Station: ${CONFIG.callsign} @ ${CONFIG.gridSquare}`);
   } else {
-    console.log('  \u26A0\uFE0F  Configure your station in .env file');
+    say('  \u26A0\uFE0F  Configure your station in .env file');
   }
-  console.log('');
-  console.log('  In memory of Elwood Downey, WB0OEW');
-  console.log('  73 de OpenHamClock contributors');
-  console.log('');
+  say('');
+  say('  In memory of Elwood Downey, WB0OEW');
+  say('  73 de OpenHamClock contributors');
+  say('');
 
   ctx.startAutoUpdateScheduler();
 
@@ -456,7 +470,31 @@ app.listen(PORT, '0.0.0.0', () => {
   setTimeout(() => {
     if (ctx.prewarmN0NBH) ctx.prewarmN0NBH();
   }, 3000);
+
+  // Packaged executable launched interactively (double-click / terminal):
+  // open the app in the default browser so "download and run" is all it takes.
+  // Headless (systemd, no TTY) and OPEN_BROWSER=false skip this.
+  if (IS_PACKAGED && process.stdout.isTTY && process.env.OPEN_BROWSER !== 'false') {
+    openInBrowser(`http://localhost:${PORT}`);
+  }
 });
+
+function openInBrowser(url) {
+  const { spawn } = require('child_process');
+  const [cmd, args] =
+    process.platform === 'win32'
+      ? ['cmd', ['/c', 'start', '', url]]
+      : process.platform === 'darwin'
+        ? ['open', [url]]
+        : ['xdg-open', [url]];
+  try {
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+    child.on('error', () => {});
+    child.unref();
+  } catch {
+    /* no desktop session — the banner already shows the URL */
+  }
+}
 
 // Graceful shutdown
 process.on('SIGTERM', () => {

@@ -35,6 +35,7 @@ const LAYOUT_IDS = [
   'dockable',
   'emcomm',
   'contest',
+  'eme',
   'activator',
   'hunter',
   'weather',

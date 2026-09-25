@@ -500,35 +500,11 @@ export const ActivatePanel = ({
                     })()}
                   </span>
                 </div>
-                {(spot.comments?.length > 0 || spot.potaRef) && (
+                {spot.comments?.length > 0 && (
                   <div
                     style={{ textAlign: 'center', fontStyle: 'italic', color: 'var(--text-muted)', fontSize: '11px' }}
                   >
                     {spot.comments}
-                    {/* Cross-program reference chip (e.g. CANParks parks that are
-                        also POTA parks) — informational only, no dedup logic. */}
-                    {spot.potaRef && (
-                      <span
-                        title={t('activations.potaCrossRefTooltip', {
-                          defaultValue: 'This park is also POTA reference {{ref}}',
-                          ref: spot.potaRef,
-                        })}
-                        style={{
-                          marginLeft: spot.comments?.length > 0 ? '6px' : 0,
-                          padding: '0 4px',
-                          fontStyle: 'normal',
-                          fontSize: '9px',
-                          color: 'var(--text-muted)',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '3px',
-                          opacity: 0.8,
-                          whiteSpace: 'nowrap',
-                          verticalAlign: 'middle',
-                        }}
-                      >
-                        POTA {spot.potaRef}
-                      </span>
-                    )}
                   </div>
                 )}
               </div>

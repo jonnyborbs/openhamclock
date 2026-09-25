@@ -19,7 +19,6 @@ function itemKey(feedId, item) {
     case 'sota':
     case 'wwff':
     case 'wwbota':
-    case 'canparks':
       return `${item.activator || item.callsign || item.call || ''}-${item.reference || item.ref || item.summitCode || ''}-${item.frequency || item.freq || ''}`;
     case 'dxcluster':
       return `${item.dx || item.call || ''}-${item.frequency || item.freq || ''}-${item.spotter || ''}`;
@@ -39,7 +38,7 @@ function itemKey(feedId, item) {
       return `${item.name || ''}-${item.aos || ''}`;
     case 'band-openings':
       // One alert per opening episode: band + path + hour it was first seen.
-      return `${item.band || ''}-${item.from_continent || ''}-${item.to_continent || ''}-${item.firstSeenHour ?? ''}`;
+      return `${item.band || ''}-${item.from_continent || ''}-${item.to_zone != null ? `Z${item.to_zone}` : item.to_continent || ''}-${item.firstSeenHour ?? ''}`;
     case 'swpc':
       return `${item.productId || ''}-${item.serial || ''}`;
     default:
@@ -129,7 +128,6 @@ export default function useAudioAlerts(feeds) {
     feeds.sota,
     feeds.wwff,
     feeds.wwbota,
-    feeds.canparks,
     feeds.dxcluster,
     feeds.watchlist,
     feeds.dxpeditions,

@@ -15,6 +15,7 @@ import ClassicLayout from './layouts/ClassicLayout.jsx';
 import ModernLayout from './layouts/ModernLayout.jsx';
 import EmcommLayout from './layouts/EmcommLayout.jsx';
 import ContestLayout from './layouts/ContestLayout.jsx';
+import EmeLayout from './layouts/EmeLayout.jsx';
 import FocusLayout, { FOCUS_LAYOUT_IDS } from './layouts/FocusLayout.jsx';
 
 import { resetActiveLayout } from './store/layoutStore.js';
@@ -29,7 +30,6 @@ import {
   useWWFFSpots,
   useSOTASpots,
   useWWBOTASpots,
-  useCANParksSpots,
   useContests,
   useWeather,
   useWeatherAlerts,
@@ -76,7 +76,7 @@ import { HELP_EVENT } from './utils/helpTopics.js';
 import { useDXSpotAnnouncements } from './hooks/app/useDXSpotAnnouncements';
 import { useWeatherAlertAnnouncements } from './hooks/app/useWeatherAlertAnnouncements';
 import { extractBaseCall } from './components/CallsignLink.jsx';
-import { getBandFromFreq, detectMode, normalizeFrequencyToMHz } from './utils/callsign';
+import { getBandFromFreq, detectMode, normalizeFrequencyToMHz, getCallsignInfo } from './utils/callsign';
 import { getContestReminders, contestReminderId, CONTEST_REMINDERS_EVENT } from './utils/contestReminders.js';
 
 // Load DXCC entity database on app startup (non-blocking)
@@ -98,7 +98,6 @@ const App = () => {
   const [showSotaFilters, setShowSotaFilters] = useState(false);
   const [showWwffFilters, setShowWwffFilters] = useState(false);
   const [showWwbotaFilters, setShowWwbotaFilters] = useState(false);
-  const [showCanparksFilters, setShowCanparksFilters] = useState(false);
   const [layoutResetKey, setLayoutResetKey] = useState(0);
   const [, setBandColorChangeVersion] = useState(0);
   const [updateInProgress, setUpdateInProgress] = useState(false);
@@ -287,8 +286,6 @@ const App = () => {
     toggleSOTALabels,
     toggleWWBOTA,
     toggleWWBOTALabels,
-    toggleCANParks,
-    toggleCANParksLabels,
     toggleSatellites,
     togglePSKReporter,
     togglePSKPaths,
@@ -314,8 +311,6 @@ const App = () => {
     setWwffFilters,
     wwbotaFilters,
     setWwbotaFilters,
-    canparksFilters,
-    setCanparksFilters,
   } = useFilters();
 
   const { isFullscreen, handleFullscreenToggle } = useFullscreen();
@@ -337,8 +332,7 @@ const App = () => {
     showPotaFilters ||
     showSotaFilters ||
     showWwffFilters ||
-    showWwbotaFilters ||
-    showCanparksFilters;
+    showWwbotaFilters;
   const sceneRotation = useSceneRotation(config, handleSaveConfig, { paused: anyModalOpen });
 
   // Responsive breakpoint for sidebar/header behavior
@@ -364,12 +358,16 @@ const App = () => {
   const wwffSpots = useWWFFSpots();
   const sotaSpots = useSOTASpots();
   const wwbotaSpots = useWWBOTASpots();
-  const canparksSpots = useCANParksSpots();
   const dxClusterData = useDXClusterData(dxFilters, config);
   const dxpeditions = useDXpeditions();
   const contests = useContests();
   const swpcAlerts = useSWPCAlerts();
-  const bandOpenings = useBandOpenings();
+  // Band Openings are scoped to this station's CQ zone by default (#1191)
+  const myRegion = useMemo(() => {
+    const info = getCallsignInfo(config.callsign);
+    return { myZone: info?.cqZone ?? null, myContinent: info?.continent ?? null };
+  }, [config.callsign]);
+  const bandOpenings = useBandOpenings(myRegion);
   // Audio alert only for significant space weather (R2/S2/G2 or higher)
   const severeSwpcAlerts = useMemo(
     () => (swpcAlerts.data || []).filter((a) => (a.scale?.level ?? 0) >= 2),
@@ -478,7 +476,6 @@ const App = () => {
     sota: sotaSpots.data,
     wwff: wwffSpots.data,
     wwbota: wwbotaSpots.data,
-    canparks: canparksSpots.data,
     dxcluster: dxClusterData.spots,
     watchlist: watchlistHits,
     dxpeditions: dxpeditions.data?.dxpeditions,
@@ -644,10 +641,6 @@ const App = () => {
     return ActivateFilter(wwbotaSpots, wwbotaFilters);
   }, [wwbotaSpots.data, wwbotaFilters]);
 
-  const filteredCanparksSpots = useMemo(() => {
-    return ActivateFilter(canparksSpots, canparksFilters);
-  }, [canparksSpots.data, canparksFilters]);
-
   const wsjtxMapSpots = useMemo(() => {
     // Apply same age filter as panel (stored in localStorage)
     let ageMinutes = 30;
@@ -708,7 +701,6 @@ const App = () => {
     setShowSotaFilters,
     setShowWwffFilters,
     setShowWwbotaFilters,
-    setShowCanparksFilters,
     handleUpdateClick,
     updateInProgress,
     isLocalInstall,
@@ -740,8 +732,6 @@ const App = () => {
     filteredSotaSpots,
     wwbotaSpots,
     filteredWwbotaSpots,
-    canparksSpots,
-    filteredCanparksSpots,
     mySpots,
     dxpeditions,
     contests,
@@ -769,8 +759,6 @@ const App = () => {
     setWwffFilters,
     wwbotaFilters,
     setWwbotaFilters,
-    canparksFilters,
-    setCanparksFilters,
     mapLayers,
     toggleDeDxMarkers,
     toggleDXPaths,
@@ -783,8 +771,6 @@ const App = () => {
     toggleSOTALabels,
     toggleWWBOTA,
     toggleWWBOTALabels,
-    toggleCANParks,
-    toggleCANParksLabels,
     toggleSatellites,
     togglePSKReporter,
     togglePSKPaths,
@@ -922,6 +908,8 @@ const App = () => {
             <EmcommLayout {...layoutProps} />
           ) : config.layout === 'contest' ? (
             <ContestLayout {...layoutProps} />
+          ) : config.layout === 'eme' ? (
+            <EmeLayout {...layoutProps} />
           ) : FOCUS_LAYOUT_IDS.includes(config.layout) ? (
             <FocusLayout {...layoutProps} focus={config.layout} />
           ) : config.layout === 'dockable' ? (
@@ -1011,13 +999,6 @@ const App = () => {
         onFilterChange={setWwbotaFilters}
         isOpen={showWwbotaFilters}
         onClose={() => setShowWwbotaFilters(false)}
-      />
-      <ActivateFilterManager
-        name="CANParks"
-        filters={canparksFilters}
-        onFilterChange={setCanparksFilters}
-        isOpen={showCanparksFilters}
-        onClose={() => setShowCanparksFilters(false)}
       />
       <CommandPalette
         isOpen={showCommandPalette}

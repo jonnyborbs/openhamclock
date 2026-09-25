@@ -122,7 +122,6 @@ export default function ClassicLayout(props) {
     potaSpots,
     sotaSpots,
     wwbotaSpots,
-    canparksSpots,
     mySpots,
     satellites,
     filteredSatellites,
@@ -138,7 +137,6 @@ export default function ClassicLayout(props) {
     togglePOTA,
     toggleSOTA,
     toggleWWBOTA,
-    toggleCANParks,
     togglePSKReporter,
     toggleWSJTX,
     toggleDXNews,
@@ -933,7 +931,6 @@ export default function ClassicLayout(props) {
             potaSpots={potaSpots.data}
             sotaSpots={sotaSpots.data}
             wwbotaSpots={wwbotaSpots.data}
-            canparksSpots={canparksSpots.data}
             mySpots={mySpots.data}
             dxPaths={dxClusterData.paths}
             dxFilters={dxFilters}
@@ -949,8 +946,6 @@ export default function ClassicLayout(props) {
             showSOTA={mapLayers.showSOTA}
             showWWBOTA={mapLayers.showWWBOTA}
             showWWBOTALabels={mapLayers.showWWBOTALabels}
-            showCANParks={mapLayers.showCANParks}
-            showCANParksLabels={mapLayers.showCANParksLabels}
             showSatellites={mapLayers.showSatellites}
             showPSKReporter={mapLayers.showPSKReporter}
             showPSKPaths={mapLayers.showPSKPaths}
@@ -1042,11 +1037,6 @@ export default function ClassicLayout(props) {
             {toggleWWBOTA && (
               <button onClick={toggleWWBOTA} style={layerBtnStyle(mapLayers.showWWBOTA)}>
                 BOTA
-              </button>
-            )}
-            {toggleCANParks && (
-              <button onClick={toggleCANParks} style={layerBtnStyle(mapLayers.showCANParks)}>
-                CANP
               </button>
             )}
             {toggleSatellites && (
@@ -1460,7 +1450,6 @@ export default function ClassicLayout(props) {
             potaSpots={potaSpots.data}
             sotaSpots={sotaSpots.data}
             wwbotaSpots={wwbotaSpots.data}
-            canparksSpots={canparksSpots.data}
             mySpots={mySpots.data}
             dxPaths={dxClusterData.paths}
             dxFilters={dxFilters}
@@ -1476,8 +1465,6 @@ export default function ClassicLayout(props) {
             showSOTA={mapLayers.showSOTA}
             showWWBOTA={mapLayers.showWWBOTA}
             showWWBOTALabels={mapLayers.showWWBOTALabels}
-            showCANParks={mapLayers.showCANParks}
-            showCANParksLabels={mapLayers.showCANParksLabels}
             showSatellites={mapLayers.showSatellites}
             showPSKReporter={mapLayers.showPSKReporter}
             showPSKPaths={mapLayers.showPSKPaths}
@@ -2139,7 +2126,6 @@ export default function ClassicLayout(props) {
             potaSpots={potaSpots.data}
             sotaSpots={sotaSpots.data}
             wwbotaSpots={wwbotaSpots.data}
-            canparksSpots={canparksSpots.data}
             mySpots={mySpots.data}
             dxPaths={dxClusterData.paths}
             dxFilters={dxFilters}
@@ -2155,8 +2141,6 @@ export default function ClassicLayout(props) {
             showSOTA={mapLayers.showSOTA}
             showWWBOTA={mapLayers.showWWBOTA}
             showWWBOTALabels={mapLayers.showWWBOTALabels}
-            showCANParks={mapLayers.showCANParks}
-            showCANParksLabels={mapLayers.showCANParksLabels}
             showSatellites={mapLayers.showSatellites}
             showPSKReporter={mapLayers.showPSKReporter}
             showPSKPaths={mapLayers.showPSKPaths}

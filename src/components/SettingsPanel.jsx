@@ -2,7 +2,7 @@
  * SettingsPanel Component
  * Full settings modal with map layer controls
  */
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { ariaTabKeyDown } from '../utils/ariaTabKeyDown.js';
 import { latLonToMaidenhead, maidenheadToLatLon } from '../utils/geo.js';
 import { useTranslation, Trans } from 'react-i18next';
@@ -26,7 +26,16 @@ import { useTheme } from '../theme/useTheme';
 import ThemeSelector from './ThemeSelector';
 import CustomThemeEditor from './CustomThemeEditor';
 import { emojiToIso2 } from '../utils/countryFlags';
-import { getAlertSettings, saveAlertSettings, playTone, TONE_PRESETS, ALERT_FEEDS } from '../utils/audioAlerts';
+import {
+  getAlertSettings,
+  saveAlertSettings,
+  playTone,
+  TONE_PRESETS,
+  ALERT_FEEDS,
+  BAND_OPENING_SCOPES,
+  DEFAULT_BAND_OPENING_SCOPE,
+} from '../utils/audioAlerts';
+import { getCallsignInfo } from '../utils/callsign';
 import { getNotificationPermission, requestNotificationPermission } from '../utils/notifications';
 import {
   isPushSupported,
@@ -801,6 +810,10 @@ export const SettingsPanel = ({
     dockable: t('station.settings.layout.dockable.describe'),
     emcomm: t('station.settings.layout.emcomm.describe'),
     contest: t('station.settings.layout.contest.describe'),
+    eme: t('station.settings.layout.eme.describe', {
+      defaultValue:
+        'Moonbounce: 3D globe framed on Earth and Moon with the DE→Moon→DX legs, moon az/el at both ends, mutual windows, sky tracks, and EME cluster spots.',
+    }),
     activator: t('station.settings.layout.activator.describe', {
       defaultValue:
         'In the field: self-spotting, activations, RBN checks, and nearby repeaters — park/summit overlays on.',
@@ -4244,6 +4257,7 @@ export const SettingsPanel = ({
                     'dockable',
                     'emcomm',
                     'contest',
+                    'eme',
                     'activator',
                     'hunter',
                     'weather',
@@ -4270,6 +4284,7 @@ export const SettingsPanel = ({
                         compact: '📊',
                         emcomm: '📍',
                         contest: '🏆',
+                        eme: '🌙',
                         activator: '▲',
                         hunter: '🎯',
                         weather: '🌩️',
@@ -4389,6 +4404,7 @@ export const SettingsPanel = ({
                         ...presetIds,
                         'emcomm',
                         'contest',
+                        'eme',
                         'activator',
                         'hunter',
                         'weather',
@@ -6368,7 +6384,7 @@ export const SettingsPanel = ({
           aria-labelledby="tab-settings-alerts"
           hidden={activeTab !== 'alerts'}
         >
-          {activeTab === 'alerts' && <AudioAlertsTab />}
+          {activeTab === 'alerts' && <AudioAlertsTab callsign={config?.callsign} />}
         </div>
 
         {/* Rig Bridge Tab */}
@@ -7118,9 +7134,11 @@ function WebPushCard({ notifPermission }) {
 }
 
 /** Audio Alerts settings tab */
-function AudioAlertsTab() {
+function AudioAlertsTab({ callsign }) {
   const { t } = useTranslation();
   const [alertSettings, setAlertSettingsState] = useState(() => getAlertSettings());
+  // CQ zone derived from the callsign — the Band Openings scope default (#1191)
+  const derivedZone = useMemo(() => getCallsignInfo(callsign)?.cqZone ?? null, [callsign]);
   const [notifPermission, setNotifPermission] = useState(() => getNotificationPermission());
   const updateSettings = (newSettings) => {
     setAlertSettingsState(newSettings);
@@ -7333,6 +7351,80 @@ function AudioAlertsTab() {
                 >
                   🔔
                 </button>
+              </div>
+            )}
+            {feedConf.enabled && feedId === 'band-openings' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+                <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Scope</span>
+                <select
+                  value={feedConf.scope || DEFAULT_BAND_OPENING_SCOPE}
+                  onChange={(e) =>
+                    updateSettings({
+                      ...alertSettings,
+                      [feedId]: { ...feedConf, scope: e.target.value },
+                    })
+                  }
+                  aria-label="Band opening alert scope"
+                  style={{
+                    flex: 1,
+                    minWidth: '140px',
+                    background: 'var(--bg-secondary)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '4px',
+                    padding: '6px 8px',
+                    fontSize: '12px',
+                    fontFamily: 'var(--font-mono)',
+                  }}
+                >
+                  {Object.entries(BAND_OPENING_SCOPES).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                {(feedConf.scope || DEFAULT_BAND_OPENING_SCOPE) === 'my-zone' && (
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      color: 'var(--text-muted)',
+                      fontSize: '12px',
+                    }}
+                  >
+                    Zone
+                    <input
+                      type="number"
+                      min="1"
+                      max="40"
+                      placeholder={derivedZone != null ? String(derivedZone) : '?'}
+                      value={feedConf.zoneOverride ?? ''}
+                      onChange={(e) => {
+                        const v = e.target.value === '' ? null : parseInt(e.target.value, 10);
+                        updateSettings({
+                          ...alertSettings,
+                          [feedId]: { ...feedConf, zoneOverride: Number.isInteger(v) ? v : null },
+                        });
+                      }}
+                      title={
+                        derivedZone != null
+                          ? `Zone ${derivedZone} from your callsign — type a zone to override it`
+                          : 'Your CQ zone (1–40); could not derive it from your callsign'
+                      }
+                      style={{
+                        width: '52px',
+                        background: 'var(--bg-secondary)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '4px',
+                        padding: '5px 6px',
+                        fontSize: '12px',
+                        fontFamily: 'var(--font-mono)',
+                      }}
+                    />
+                  </label>
+                )}
               </div>
             )}
           </div>

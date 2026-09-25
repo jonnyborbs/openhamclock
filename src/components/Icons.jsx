@@ -904,7 +904,6 @@ export const PANEL_ICONS = {
   wwff: LiTriangleDown,
   sota: LiDiamond,
   wwbota: LiSquare,
-  canparks: LiLeaf,
   aprs: LiPin,
   'aprs-telemetry': LiActivity,
   rotator: LiCompass,

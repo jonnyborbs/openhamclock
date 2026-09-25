@@ -149,7 +149,6 @@ export default function MapDataListView({
   sotaSpots = [],
   wwffSpots = [],
   wwbotaSpots = [],
-  canparksSpots = [],
   lightning = null,
   aircraft = null,
   aurora = null,
@@ -253,7 +252,6 @@ export default function MapDataListView({
     ...(sotaSpots || []).slice(0, 25).map((s, i) => buildActivationRow('SOTA', s, i)),
     ...(wwffSpots || []).slice(0, 25).map((s, i) => buildActivationRow('WWFF', s, i)),
     ...(wwbotaSpots || []).slice(0, 25).map((s, i) => buildActivationRow('WWBOTA', s, i)),
-    ...(canparksSpots || []).slice(0, 25).map((s, i) => buildActivationRow('CANParks', s, i)),
   ];
 
   const lightningRows = sortByDistance(lightning?.strikes || [], deLat, deLon)

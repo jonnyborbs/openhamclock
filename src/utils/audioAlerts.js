@@ -37,7 +37,6 @@ export const ALERT_FEEDS = {
   sota: { label: 'SOTA Spots', defaultTone: 'high-ping' },
   wwff: { label: 'WWFF Spots', defaultTone: 'low-tone' },
   wwbota: { label: 'WWBOTA Spots', defaultTone: 'sharp' },
-  canparks: { label: 'CANParks Spots', defaultTone: 'chirp' },
   dxcluster: { label: 'DX Cluster', defaultTone: 'beep' },
   watchlist: { label: 'Watchlist Hits', defaultTone: 'two-tone', eventful: true },
   dxpeditions: { label: 'DXpeditions', defaultTone: 'two-tone' },
@@ -68,9 +67,23 @@ export function getAlertSettings() {
   return defaults;
 }
 
+/** Fired on window whenever alert settings are saved, so live consumers can re-read them. */
+export const ALERT_SETTINGS_EVENT = 'ohc-alert-settings';
+
+/** Band Openings alert scope (#1191) — which openings this station is told about. */
+export const BAND_OPENING_SCOPES = {
+  'my-zone': 'My CQ zone',
+  'my-continent': 'My continent',
+  worldwide: 'Worldwide',
+};
+export const DEFAULT_BAND_OPENING_SCOPE = 'my-zone';
+
 export function saveAlertSettings(settings) {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(settings));
+  } catch {}
+  try {
+    window.dispatchEvent(new Event(ALERT_SETTINGS_EVENT));
   } catch {}
 }
 

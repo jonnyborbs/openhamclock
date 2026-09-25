@@ -155,7 +155,11 @@ export const useSatellites = (observerLocation, satelliteConfig, filteredNames =
 
             positions.push({
               name: satData.name || name,
+              norad: satData.norad ?? null,
               omm: satData.omm,
+              // Repeaters/transponders (uplink + downlink) from SatNOGS — the
+              // EME layout's relay mode picks satellites by these.
+              relayTransmitters: Array.isArray(satData.relayTransmitters) ? satData.relayTransmitters : [],
               lat,
               lon,
               alt: round(alt, 1),

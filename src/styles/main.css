@@ -495,7 +495,10 @@ body::before {
 }
 
 /* Click-to-locate pulse (#1182): three rings expand from the target a panel
-   row asked the map to show, then the marker removes itself. */
+   row asked the map to show, then the marker removes itself.
+   Two-tone on purpose (#1189): a bright core ring with a dark halo on both
+   sides reads on dark, light and satellite tiles alike, and does not depend
+   on the theme accent — cyan vanished on light basemaps. */
 .map-focus-pulse {
   pointer-events: none;
 }
@@ -503,14 +506,17 @@ body::before {
   position: absolute;
   left: 0;
   top: 0;
-  width: 44px;
-  height: 44px;
-  margin: -22px 0 0 -22px;
+  width: 48px;
+  height: 48px;
+  margin: -24px 0 0 -24px;
   border-radius: 50%;
-  border: 2px solid var(--accent-cyan);
-  box-shadow: 0 0 8px var(--accent-cyan);
+  border: 3px solid #fff;
+  box-shadow:
+    0 0 0 2px rgba(0, 0, 0, 0.85),
+    inset 0 0 0 2px rgba(0, 0, 0, 0.85),
+    0 0 12px 2px #ff3b8d;
   opacity: 0;
-  transform: scale(0.2);
+  transform: scale(0.5);
   animation: map-focus-ring 1.3s ease-out 2;
 }
 .map-focus-pulse span:nth-child(2) {
@@ -522,11 +528,14 @@ body::before {
 @keyframes map-focus-ring {
   0% {
     opacity: 0.95;
-    transform: scale(0.2);
+    transform: scale(0.5);
+  }
+  65% {
+    opacity: 0.7;
   }
   100% {
     opacity: 0;
-    transform: scale(1.6);
+    transform: scale(1.8);
   }
 }
 

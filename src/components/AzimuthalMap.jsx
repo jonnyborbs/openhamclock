@@ -114,7 +114,6 @@ export default function AzimuthalMap({
   wwffSpots,
   sotaSpots,
   wwbotaSpots,
-  canparksSpots,
   dxPaths,
   dxFilters,
   mapBandFilter,
@@ -125,7 +124,6 @@ export default function AzimuthalMap({
   showWWFF,
   showSOTA,
   showWWBOTA,
-  showCANParks,
   showPSKReporter,
   showPSKPaths = true,
   showMutualReception = true,
@@ -779,26 +777,6 @@ export default function AzimuthalMap({
       });
     }
 
-    // ── CANParks spots ───────────────────────────────────
-    if (showCANParks && canparksSpots?.length > 0) {
-      canparksSpots.forEach((spot) => {
-        if (!Number.isFinite(spot.lat) || !Number.isFinite(spot.lon)) return;
-        const band = normalizeBandKey(spot.band) || bandFromAnyFrequency(spot.freq);
-        if (!bandPassesMapFilter(band)) return;
-
-        const p = toCanvas(spot.lat, spot.lon);
-        // CANParks circle — shared palette (maple red); distinguished from
-        // the WWBOTA circle by colour, matching the flat map's round marker.
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
-        ctx.fillStyle = ACTIVITY_COLORS.canparks;
-        ctx.fill();
-        ctx.strokeStyle = '#000';
-        ctx.lineWidth = 0.5;
-        ctx.stroke();
-      });
-    }
-
     // ── DX marker ────────────────────────────────────────
     if (Number.isFinite(dxLocation?.lat) && Number.isFinite(dxLocation?.lon)) {
       const dp = toCanvas(dxLocation.lat, dxLocation.lon);
@@ -872,8 +850,6 @@ export default function AzimuthalMap({
     showSOTA,
     wwbotaSpots,
     showWWBOTA,
-    canparksSpots,
-    showCANParks,
     pskReporterSpots,
     showPSKReporter,
     showPSKPaths,

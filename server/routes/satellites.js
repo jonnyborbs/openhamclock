@@ -28,7 +28,7 @@ module.exports = function (app, ctx) {
   // Note: later will fall back to hardcoded list if JSON file not found
   const loadSatellitesJson = () => {
     const jsonPaths = [
-      path.join(ROOT_DIR, 'public', 'data', 'satellites.json'),
+      path.join(ctx.ASSET_DIR || ROOT_DIR, 'public', 'data', 'satellites.json'),
       path.join(ROOT_DIR, 'data', 'satellites.json'),
     ];
     for (const p of jsonPaths) {
@@ -305,6 +305,31 @@ module.exports = function (app, ctx) {
     if (downlink) metadata.downlink = downlink;
     if (uplink) metadata.uplink = uplink;
     if (tone) metadata.tone = tone;
+
+    // Every active transmitter with BOTH an uplink and a downlink — i.e. a
+    // repeater or transponder a two-station relay contact can run through.
+    // The EME layout's satellite-relay mode lists these; the single "best"
+    // entry above stays for the compact info popup. Always set (possibly
+    // empty) so a stale list never survives a refresh.
+    const hzOrNull = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
+    metadata.relayTransmitters = selected
+      .filter((tx) => hzOrNull(tx.uplink_low) && hzOrNull(tx.downlink_low))
+      .map((tx) => ({
+        mode: describeSatnogsMode(tx) || String(tx.mode || '').trim() || 'Unknown',
+        type: String(tx.type || '').trim(),
+        description: String(tx.description || '').trim(),
+        uplink: formatHzRangeAsMHz(tx.uplink_low, tx.uplink_high),
+        downlink: formatHzRangeAsMHz(tx.downlink_low, tx.downlink_high),
+        uplinkLowHz: hzOrNull(tx.uplink_low),
+        uplinkHighHz: hzOrNull(tx.uplink_high) || hzOrNull(tx.uplink_low),
+        downlinkLowHz: hzOrNull(tx.downlink_low),
+        downlinkHighHz: hzOrNull(tx.downlink_high) || hzOrNull(tx.downlink_low),
+        invert: tx.invert === true || tx.invert === 'true',
+        tone: String(tx.tone || tx.uplink_tone || '').trim(),
+      }));
 
     return metadata;
   };

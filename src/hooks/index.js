@@ -12,7 +12,6 @@ export { usePOTASpots } from './usePOTASpots.js';
 export { useWWFFSpots } from './useWWFFSpots.js';
 export { useSOTASpots } from './useSOTASpots.js';
 export { useWWBOTASpots } from './useWWBOTASpots.js';
-export { useCANParksSpots } from './useCANParksSpots.js';
 export { useContests } from './useContests.js';
 export { useWeather, convertWeatherData } from './useWeather.js';
 export { useWeatherAlerts } from './useWeatherAlerts.js';

@@ -130,7 +130,6 @@ called out in release notes.
 | `/api/pota/spots`      | Current POTA activation spots                                                                                     | ~1 min       |
 | `/api/sota/spots`      | Current SOTA activation spots                                                                                     | ~1 min       |
 | `/api/wwff/spots`      | Current WWFF activation spots                                                                                     | ~1 min       |
-| `/api/canparks/spots`  | Current CanParks (Canadian parks) activations                                                                     | ~1 min       |
 | `/api/solar-indices`   | SFI, sunspot number, A/K indices, X-ray flux                                                                      | ~5 min       |
 | `/api/solar-cycle`     | Solar cycle history/prediction series                                                                             | hours        |
 | `/api/propagation`     | Point-to-point HF path prediction. Query: `deLat`, `deLon`, `dxLat`, `dxLon`, optional `mode`, `power`, `antenna` | ~10 min      |

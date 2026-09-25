@@ -52,7 +52,6 @@ export function buildPanelDefs({ isLocalInstall = false } = {}) {
     wwff: { name: 'WWFF', icon: '▼', iconColor: '#a3f3a3' },
     sota: { name: 'SOTA', icon: '◆', iconColor: '#ff9632' },
     wwbota: { name: 'WWBOTA', icon: '■', iconColor: '#8b7fff' },
-    canparks: { name: 'CANParks', icon: '🍁' },
     aprs: { name: 'APRS', icon: '📍' },
     'aprs-telemetry': { name: 'APRS Telemetry', icon: '📊' },
     ...(isLocalInstall ? { rotator: { name: 'Rotator', icon: '🧭' } } : {}),

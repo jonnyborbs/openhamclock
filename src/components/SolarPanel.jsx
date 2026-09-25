@@ -3,6 +3,7 @@
  * Cycles between: Solar Image → Solar Indices → X-Ray Flux Chart → Lunar Phase
  */
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { MoonSkyChart } from './MoonSkyChart.jsx';
 import { getMoonPhase, getMoonAzEl, getMoonTimes, latLonToMaidenhead } from '../utils/geo.js';
 import { loadConfig } from '../utils/config.js';
 import useAutoRotate from '../hooks/app/useAutoRotate.js';
@@ -648,111 +649,10 @@ export const SolarPanel = ({ solarIndices, bandConditions, forcedMode, config })
                 marginBottom: '6px',
               }}
             >
-              {(() => {
-                const DIAL = 96;
-                const C = DIAL / 2;
-                const R = 40;
-                const toXY = (az, el) => {
-                  const r = (R * (90 - Math.max(0, Math.min(90, el)))) / 90;
-                  const a = (az * Math.PI) / 180;
-                  return [C + r * Math.sin(a), C - r * Math.cos(a)];
-                };
-                const trackPts = (emeData.track || []).map(({ az, el }) => toXY(az, el).join(',')).join(' ');
-                const up = emeData.elevation >= 0;
-                const [mx, my] = up ? toXY(emeData.azimuth, emeData.elevation) : toXY(emeData.azimuth, 0);
-                return (
-                  <svg
-                    width={DIAL}
-                    height={DIAL}
-                    viewBox={`0 0 ${DIAL} ${DIAL}`}
-                    role="img"
-                    aria-label="Moon sky position"
-                  >
-                    {/* Horizon + elevation rings (0/30/60°), zenith at center */}
-                    <circle
-                      cx={C}
-                      cy={C}
-                      r={R}
-                      fill="var(--bg-tertiary)"
-                      stroke="var(--border-color)"
-                      strokeWidth="1"
-                    />
-                    <circle
-                      cx={C}
-                      cy={C}
-                      r={(R * 2) / 3}
-                      fill="none"
-                      stroke="var(--border-color)"
-                      strokeWidth="0.5"
-                      opacity="0.7"
-                    />
-                    <circle
-                      cx={C}
-                      cy={C}
-                      r={R / 3}
-                      fill="none"
-                      stroke="var(--border-color)"
-                      strokeWidth="0.5"
-                      opacity="0.7"
-                    />
-                    <line
-                      x1={C}
-                      y1={C - R}
-                      x2={C}
-                      y2={C + R}
-                      stroke="var(--border-color)"
-                      strokeWidth="0.5"
-                      opacity="0.5"
-                    />
-                    <line
-                      x1={C - R}
-                      y1={C}
-                      x2={C + R}
-                      y2={C}
-                      stroke="var(--border-color)"
-                      strokeWidth="0.5"
-                      opacity="0.5"
-                    />
-                    <text x={C} y={7} textAnchor="middle" fontSize="7" fill="var(--text-muted)">
-                      N
-                    </text>
-                    <text x={DIAL - 3} y={C + 2.5} textAnchor="end" fontSize="7" fill="var(--text-muted)">
-                      E
-                    </text>
-                    <text x={C} y={DIAL - 1} textAnchor="middle" fontSize="7" fill="var(--text-muted)">
-                      S
-                    </text>
-                    <text x={3} y={C + 2.5} textAnchor="start" fontSize="7" fill="var(--text-muted)">
-                      W
-                    </text>
-                    {/* Sky track for the coming pass */}
-                    {trackPts && (
-                      <polyline
-                        points={trackPts}
-                        fill="none"
-                        stroke="var(--accent-amber)"
-                        strokeWidth="1.2"
-                        strokeDasharray="2,2"
-                        opacity="0.8"
-                      />
-                    )}
-                    {/* The moon: filled when up, hollow on the horizon ring at its
-                        azimuth when below (shows where it is coming up) */}
-                    {up ? (
-                      <circle
-                        cx={mx}
-                        cy={my}
-                        r="4.5"
-                        fill="var(--accent-green)"
-                        stroke="var(--bg-primary)"
-                        strokeWidth="1"
-                      />
-                    ) : (
-                      <circle cx={mx} cy={my} r="3.5" fill="none" stroke="var(--text-muted)" strokeWidth="1.5" />
-                    )}
-                  </svg>
-                );
-              })()}
+              <MoonSkyChart
+                tracks={[{ points: emeData.track || [] }]}
+                markers={[{ az: emeData.azimuth, el: emeData.elevation }]}
+              />
               <div
                 style={{
                   display: 'flex',

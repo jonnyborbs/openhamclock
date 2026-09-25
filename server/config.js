@@ -6,13 +6,23 @@
 const fs = require('fs');
 const path = require('path');
 const { maidenheadToLatLon } = require('../server/utils/grid');
+const { resolveAppDirs } = require('./utils/appPaths');
 
-const ROOT_DIR = path.join(__dirname, '..');
+// ROOT_DIR is where the server writes (.env, config.json, data/). ASSET_DIR is
+// where bundled files live (dist/, public/, package.json). They are the same
+// directory in a checkout and differ only inside a packaged single-file
+// executable — see server/utils/appPaths.js.
+const { ASSET_DIR, ROOT_DIR, IS_PACKAGED } = resolveAppDirs({
+  moduleDir: __dirname,
+  packaged: Boolean(process.pkg),
+  execPath: process.execPath,
+  env: process.env,
+});
 
 // Read version from package.json as single source of truth
 const APP_VERSION = (() => {
   try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'package.json'), 'utf8'));
+    const pkg = JSON.parse(fs.readFileSync(path.join(ASSET_DIR, 'package.json'), 'utf8'));
     return pkg.version || '0.0.0';
   } catch {
     return '0.0.0';
@@ -21,10 +31,12 @@ const APP_VERSION = (() => {
 
 // Auto-create .env from .env.example on first run
 const envPath = path.join(ROOT_DIR, '.env');
-const envExamplePath = path.join(ROOT_DIR, '.env.example');
+const envExamplePath = path.join(ASSET_DIR, '.env.example');
 
 if (!fs.existsSync(envPath) && fs.existsSync(envExamplePath)) {
-  fs.copyFileSync(envExamplePath, envPath);
+  // read+write rather than copyFileSync so the template can come from a
+  // packaged executable's read-only snapshot
+  fs.writeFileSync(envPath, fs.readFileSync(envExamplePath));
   console.log('[Config] Created .env from .env.example');
   console.log('[Config] ⚠️  Please edit .env with your callsign and locator, then restart');
 }
@@ -278,6 +290,8 @@ module.exports = {
   CONFIG,
   APP_VERSION,
   ROOT_DIR,
+  ASSET_DIR,
+  IS_PACKAGED,
   PORT,
   HOST,
   TRUST_PROXY,

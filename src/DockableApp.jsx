@@ -14,7 +14,6 @@ import {
   WWFFPanel,
   SOTAPanel,
   WWBOTAPanel,
-  CANParksPanel,
   ContestPanel,
   SolarPanel,
   PropagationPanel,
@@ -143,8 +142,6 @@ export const DockableApp = ({
   filteredSotaSpots,
   wwbotaSpots,
   filteredWwbotaSpots,
-  canparksSpots,
-  filteredCanparksSpots,
   mySpots,
   dxpeditions,
   contests,
@@ -175,8 +172,6 @@ export const DockableApp = ({
   setShowWwffFilters,
   wwbotaFilters,
   setShowWwbotaFilters,
-  canparksFilters,
-  setShowCanparksFilters,
 
   // Map layers
   mapLayers,
@@ -190,8 +185,6 @@ export const DockableApp = ({
   toggleSOTALabels,
   toggleWWBOTA,
   toggleWWBOTALabels,
-  toggleCANParks,
-  toggleCANParksLabels,
   toggleSatellites,
   togglePSKReporter,
   togglePSKPaths,
@@ -354,8 +347,6 @@ export const DockableApp = ({
   const toggleSOTALabelsEff = useInternalMapLayers ? internalMap.toggleSOTALabels : toggleSOTALabels;
   const toggleWWBOTAEff = useInternalMapLayers ? internalMap.toggleWWBOTA : toggleWWBOTA;
   const toggleWWBOTALabelsEff = useInternalMapLayers ? internalMap.toggleWWBOTALabels : toggleWWBOTALabels;
-  const toggleCANParksEff = useInternalMapLayers ? internalMap.toggleCANParks : toggleCANParks;
-  const toggleCANParksLabelsEff = useInternalMapLayers ? internalMap.toggleCANParksLabels : toggleCANParksLabels;
   const toggleSatellitesEff = useInternalMapLayers ? internalMap.toggleSatellites : toggleSatellites;
   const togglePSKReporterEff = useInternalMapLayers ? internalMap.togglePSKReporter : togglePSKReporter;
   const togglePSKPathsEff = useInternalMapLayers ? internalMap.togglePSKPaths : togglePSKPaths;
@@ -830,7 +821,6 @@ export const DockableApp = ({
         wwffSpots={filteredWwffSpots ? filteredWwffSpots : wwffSpots.data}
         sotaSpots={filteredSotaSpots ? filteredSotaSpots : sotaSpots.data}
         wwbotaSpots={filteredWwbotaSpots ? filteredWwbotaSpots : wwbotaSpots.data}
-        canparksSpots={filteredCanparksSpots ? filteredCanparksSpots : canparksSpots.data}
         mySpots={mySpots.data}
         dxPaths={dxClusterData.paths}
         dxFilters={dxFilters}
@@ -851,8 +841,6 @@ export const DockableApp = ({
         showSOTALabels={mapLayersEff.showSOTALabels}
         showWWBOTA={mapLayersEff.showWWBOTA}
         showWWBOTALabels={mapLayersEff.showWWBOTALabels}
-        showCANParks={mapLayersEff.showCANParks}
-        showCANParksLabels={mapLayersEff.showCANParksLabels}
         showSatellites={mapLayersEff.showSatellites}
         onToggleSatellites={toggleSatellitesEff}
         showPSKReporter={mapLayersEff.showPSKReporter}
@@ -904,7 +892,6 @@ export const DockableApp = ({
               sotaSpots={filteredSotaSpots || sotaSpots?.data}
               wwffSpots={filteredWwffSpots || wwffSpots?.data}
               wwbotaSpots={filteredWwbotaSpots || wwbotaSpots?.data}
-              canparksSpots={filteredCanparksSpots || canparksSpots?.data}
               lightning={mapTextData.lightning}
               aircraft={mapTextData.aircraft}
               aurora={mapTextData.aurora}
@@ -1188,26 +1175,6 @@ export const DockableApp = ({
               filters={wwbotaFilters}
               onOpenFilters={() => setShowWwbotaFilters(true)}
               filteredData={filteredWwbotaSpots}
-            />
-          );
-          break;
-
-        case 'canparks':
-          content = (
-            <CANParksPanel
-              data={canparksSpots.data}
-              loading={canparksSpots.loading}
-              lastUpdated={canparksSpots.lastUpdated}
-              lastChecked={canparksSpots.lastChecked}
-              showOnMap={mapLayersEff.showCANParks}
-              onToggleMap={toggleCANParksEff}
-              onHoverSpot={setHoveredSpot}
-              showLabelsOnMap={mapLayersEff.showCANParksLabels}
-              onToggleLabelsOnMap={toggleCANParksLabelsEff}
-              onSpotClick={handleSpotClick}
-              filters={canparksFilters}
-              onOpenFilters={() => setShowCanparksFilters(true)}
-              filteredData={filteredCanparksSpots}
             />
           );
           break;

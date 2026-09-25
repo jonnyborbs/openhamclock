@@ -14,8 +14,6 @@ export default function useMapLayers() {
     showSOTALabels: false,
     showWWBOTA: false,
     showWWBOTALabels: false,
-    showCANParks: false,
-    showCANParksLabels: false,
     showSatellites: false,
     showPSKReporter: true,
     showPSKPaths: true,
@@ -87,11 +85,6 @@ export default function useMapLayers() {
     () => setMapLayers((prev) => ({ ...prev, showWWBOTALabels: !prev.showWWBOTALabels })),
     [],
   );
-  const toggleCANParks = useCallback(() => setMapLayers((prev) => ({ ...prev, showCANParks: !prev.showCANParks })), []);
-  const toggleCANParksLabels = useCallback(
-    () => setMapLayers((prev) => ({ ...prev, showCANParksLabels: !prev.showCANParksLabels })),
-    [],
-  );
   const toggleSatellites = useCallback(
     () => setMapLayers((prev) => ({ ...prev, showSatellites: !prev.showSatellites })),
     [],
@@ -124,8 +117,6 @@ export default function useMapLayers() {
     toggleSOTALabels,
     toggleWWBOTA,
     toggleWWBOTALabels,
-    toggleCANParks,
-    toggleCANParksLabels,
     toggleSatellites,
     togglePSKReporter,
     togglePSKPaths,

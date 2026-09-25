@@ -65,10 +65,6 @@ describe('formatAlertBody', () => {
     // Raw-API field names still work
     expect(formatAlertBody('sota', { activator: 'W1AW', frequency: '7.032' })).toBe('7.032 W1AW');
     expect(formatAlertBody('wwbota', {})).toBe('');
-    // CANParks shares the activation formatting
-    expect(formatAlertBody('canparks', { call: 'VE2OCH', freq: '7.074', ref: 'QC-0071' })).toBe(
-      '7.074 VE2OCH · QC-0071',
-    );
   });
 
   it('formats dx cluster spots', () => {
@@ -130,6 +126,16 @@ describe('formatAlertBody', () => {
         factor: null,
       }),
     ).toBe('10m opening EU→NA (6 spots)');
+    // Zone-scoped opening (#1191): the hearing side is a CQ zone
+    expect(
+      formatAlertBody('band-openings', {
+        band: '20m',
+        from_continent: 'EU',
+        to_zone: 3,
+        shortCount: 12,
+        factor: 4,
+      }),
+    ).toBe('20m opening EU→zone 3 (12 spots, 4x baseline)');
     expect(formatAlertBody('band-openings', {})).toBe('');
   });
 
